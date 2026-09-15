@@ -48,7 +48,7 @@
 .topo-canvas.pan { cursor: grab; }
 .topo-canvas.dragging { cursor: grabbing; }
 .topo-layer { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-.topo-layer svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.topo-layer > svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
 
 .topo-pipe { fill: none; stroke-linecap: round; stroke-linejoin: round; transition: opacity .15s; }
 .topo-pipe.base { stroke: #e0dfdb; }
@@ -145,6 +145,7 @@
 .topo-tb .caret { font-size: 9px; color: var(--ink-faint); }
 @keyframes topo-pulse { 50% { opacity: .35; } }
 .topo-panel-open { left: 16px; top: 16px; }
+.topo-fewer { left: 50%; top: 16px; transform: translateX(-50%); }
 
 .topo-zoom {
   right: 20px; bottom: 64px; background: #fff; border: 1px solid rgba(0, 0, 0, .1); border-radius: 10px; display: flex;

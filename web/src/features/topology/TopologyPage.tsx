@@ -8,7 +8,7 @@ import { NodeTip } from './NodeTip'
 import { SankeyView } from './SankeyView'
 import { TopologyCanvas } from './TopologyCanvas'
 import { LIVE_MS, useTopology, type FlowRange } from './api'
-import { DEFAULT_FILTERS, buildGraph, type Metric, type TopoFilters, type TopoInput } from './graph'
+import { DEFAULT_FILTERS, MAX_HOSTS, buildGraph, type Metric, type TopoFilters, type TopoInput } from './graph'
 import './topology.css'
 
 interface Prefs {
@@ -153,6 +153,7 @@ export default function TopologyPage() {
           onSelect={setSelectedId}
           renderTip={(n, close) => <NodeTip node={n} input={input} range={prefs.range} onClose={close} />}
           leftControls={openPanel}
+          fitKey={showAllHosts ? 'all-hosts' : 'top-hosts'}
           overlay={
             loading ? (
               <div className="topo-empty"><span className="spinner lg" /></div>
@@ -172,6 +173,8 @@ export default function TopologyPage() {
               </div>
             ) : topo.isError && !topo.data ? (
               <div className="topo-ctl topo-stale">Traffic data unavailable — showing structure only</div>
+            ) : showAllHosts && graph.nodes.filter((n) => n.kind === 'host').length > MAX_HOSTS ? (
+              <button type="button" className="topo-ctl topo-tb topo-fewer" onClick={() => setShowAllHosts(false)}>Show fewer hosts</button>
             ) : null
           }
         />

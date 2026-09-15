@@ -79,7 +79,7 @@ function Lock() {
 
 export function TopologyCanvas({
   graph, metric, onMetric, range, onRange, live, onLive, animate, spotlight, nav, onToggleCollapse, onExpandMore,
-  selectedId, onSelect, renderTip, leftControls, overlay,
+  selectedId, onSelect, renderTip, leftControls, overlay, fitKey,
 }: {
   graph: TopoGraph
   metric: Metric
@@ -98,6 +98,8 @@ export function TopologyCanvas({
   renderTip: (n: TopoNode, close: () => void) => ReactNode
   leftControls?: ReactNode
   overlay?: ReactNode
+  /** Changing it fits the tree to the screen again (e.g. after expanding hosts). */
+  fitKey?: string
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const tipRef = useRef<HTMLDivElement>(null)
@@ -138,6 +140,13 @@ export function TopologyCanvas({
       fit()
     }
   }, [fit, size.w, graph.nodes.length])
+
+  const lastFitKey = useRef(fitKey)
+  useEffect(() => {
+    if (lastFitKey.current === fitKey) return
+    lastFitKey.current = fitKey
+    fit()
+  }, [fitKey, fit])
 
   const zoomAt = useCallback((factor: number, cx: number, cy: number) => {
     setView((v) => {
@@ -183,6 +192,9 @@ export function TopologyCanvas({
 
   const onPointerDown = (e: React.PointerEvent) => {
     const t = e.target as HTMLElement
+    // Events from portals (toolbar menus) bubble here through React; capturing
+    // the pointer for them would swallow the menu item's click.
+    if (!ref.current?.contains(t)) return
     if (t.closest('.topo-ctl, .topo-tip, .topo-empty > *')) return
     const onNode = !!t.closest('.topo-node, .topo-collapse')
     const panGesture = nav === 'pan' || space.current || e.button === 1
