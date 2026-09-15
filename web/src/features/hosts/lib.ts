@@ -72,9 +72,10 @@ export function newHost(d?: Partial<HostDefaults>): HostDraft {
     upstreamTlsVerify: false,
     cipherProfile: '',
     locations: [],
-    forwardAuth: { enabled: false, provider: 'authelia', verifyUrl: '', signInUrl: '', passRemoteUser: true, passRemoteGroups: true, skipWellKnown: true },
+    forwardAuth: { enabled: false, provider: 'relay', verifyUrl: '', signInUrl: '', allowedUsers: [], passRemoteUser: true, passRemoteGroups: true, skipWellKnown: true },
     rateLimit: { enabled: false, requestsPerSecond: 30, burst: 60 },
     geoBlock: { enabled: false, allowCountries: [] },
+    maintenance: { enabled: false, title: '', message: '' },
     noIndex: false,
     maxBodySize: '',
     proxyReadTimeout: 0,
@@ -93,7 +94,13 @@ export function hostToDraft(h: ProxyHost): HostDraft {
     domains: h.domains ?? [],
     upstream: { ...base.upstream, ...h.upstream },
     locations: (h.locations ?? []).map((l) => ({ ...newLocation(), ...l, upstream: { ...newLocation().upstream, ...l.upstream }, headers: l.headers ?? [] })),
-    forwardAuth: { ...base.forwardAuth, ...h.forwardAuth },
+    forwardAuth: {
+      ...base.forwardAuth,
+      ...h.forwardAuth,
+      provider: h.forwardAuth?.provider || base.forwardAuth.provider,
+      allowedUsers: h.forwardAuth?.allowedUsers ?? [],
+    },
+    maintenance: { ...base.maintenance, ...h.maintenance, title: h.maintenance?.title ?? '', message: h.maintenance?.message ?? '' },
     rateLimit: { ...base.rateLimit, ...h.rateLimit },
     geoBlock: { ...base.geoBlock, ...h.geoBlock, allowCountries: h.geoBlock?.allowCountries ?? [] },
     hsts: h.hsts || 'inherit',
@@ -184,7 +191,7 @@ export function urlError(s: string): string {
 export function tabForField(field: string): HostTab {
   if (field.startsWith('locations')) return 'locations'
   if (/^(certificateId|forceHttps|http3|hsts|upstreamTlsVerify|cipherProfile)/.test(field)) return 'ssl'
-  if (/^(forwardAuth|rateLimit|geoBlock|noIndex|maxBodySize|proxyReadTimeout|proxySendTimeout|customNginx)/.test(field)) return 'advanced'
+  if (/^(maintenance|forwardAuth|rateLimit|geoBlock|noIndex|maxBodySize|proxyReadTimeout|proxySendTimeout|customNginx)/.test(field)) return 'advanced'
   return 'details'
 }
 
@@ -425,7 +432,7 @@ export function featureChips(h: ProxyHost, ctx: ViewCtx): Chip[] {
   if (h.websockets) out.push('websockets')
   const list = h.accessListId ? ctx.lists.get(h.accessListId) : undefined
   if (list) out.push(listIsBasicAuthOnly(list) ? 'basic auth' : list.name)
-  if (h.forwardAuth?.enabled) out.push('sso')
+  if (h.forwardAuth?.enabled) out.push(h.forwardAuth.provider === 'relay' ? 'relay login' : 'sso')
   if (effectiveHsts(h, ctx.tls)) out.push('HSTS')
   if (h.maxBodySize && h.maxBodySize !== '0') out.push(`${sizeLabel(h.maxBodySize)} body`)
   if (h.rateLimit?.enabled) out.push('rate limit')
@@ -446,7 +453,7 @@ export function featureSummary(h: ProxyHost, ctx: ViewCtx): string {
   if (h.locations?.length) parts.push(`${h.locations.length} loc`)
   const list = h.accessListId ? ctx.lists.get(h.accessListId) : undefined
   if (list?.basicAuth?.enabled) parts.push('basic auth')
-  if (h.forwardAuth?.enabled) parts.push('sso')
+  if (h.forwardAuth?.enabled) parts.push(h.forwardAuth.provider === 'relay' ? 'login' : 'sso')
   if (h.rateLimit?.enabled) parts.push('rate')
   if (h.geoBlock?.enabled) parts.push('geo')
   if (h.noIndex) parts.push('noindex')

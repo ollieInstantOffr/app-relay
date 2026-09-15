@@ -184,8 +184,16 @@ func rewriteUpstream(pr *httputil.ProxyRequest) {
 	if rs.stripRemote {
 		delete(h, "Remote-User")
 		delete(h, "Remote-Groups")
+		delete(h, "Remote-Email")
+		delete(h, "Remote-Name")
 		if rs.remoteUser != "" {
 			h["Remote-User"] = []string{rs.remoteUser}
+		}
+		if rs.remoteEmail != "" {
+			h["Remote-Email"] = []string{rs.remoteEmail}
+		}
+		if rs.remoteName != "" {
+			h["Remote-Name"] = []string{rs.remoteName}
 		}
 		if rs.remoteGroups != "" {
 			h["Remote-Groups"] = []string{rs.remoteGroups}

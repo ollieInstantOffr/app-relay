@@ -112,6 +112,7 @@ export function HostsTable({
                           <span className="faint mono small" title={h.domains.slice(1).join(', ')}>+{h.domains.length - 1}</span>
                         )}
                         {h.system && <Badge tone="dark">system</Badge>}
+                        {h.maintenance?.enabled && <Badge tone="warn" title="Visitors see the maintenance page (503)">maintenance</Badge>}
                       </div>
                     </td>
                     {show('upstream') && (

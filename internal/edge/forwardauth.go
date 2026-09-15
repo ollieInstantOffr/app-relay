@@ -76,6 +76,8 @@ func (fa *forwardAuthRT) check(rs *reqState) *authResult {
 	case res.StatusCode >= 200 && res.StatusCode < 300:
 		if fa.passUser {
 			rs.remoteUser = res.Header.Get("Remote-User")
+			rs.remoteEmail = res.Header.Get("Remote-Email")
+			rs.remoteName = res.Header.Get("Remote-Name")
 		}
 		if fa.passGroups {
 			rs.remoteGroups = res.Header.Get("Remote-Groups")

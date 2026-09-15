@@ -153,6 +153,7 @@ function HostCard({ host: h, ctx, selected, focused, canWrite, actions, onToggle
       </div>
       <div className="hosts-card-mid">{mid}</div>
       <div className="hosts-chips">
+        {h.maintenance?.enabled && <span className="badge warn" title="Visitors see the maintenance page (503)">maintenance</span>}
         <ChipView chip={tlsChip(h, ctx)} />
         {h.system && <span className="badge dark">system</span>}
         {features.map((c) => (

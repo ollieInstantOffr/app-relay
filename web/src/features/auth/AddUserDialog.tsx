@@ -4,14 +4,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Button, Callout, Checkbox, CopyButton, Dialog, Field, Input, RadioCard, useToast } from '../../components/ui'
 import { api } from '../../lib/api'
 import type { Role } from '../../lib/types'
-import { authKeys, describeError, fieldErrors, generatePassword, type UserRow } from './authApi'
+import { ROLES, authKeys, describeError, fieldErrors, generatePassword, type UserRow } from './authApi'
 import './auth.css'
-
-const ROLES: { role: Role; title: string; description: string }[] = [
-  { role: 'admin', title: 'Admin', description: 'Everything, incl. users and settings' },
-  { role: 'editor', title: 'Editor', description: 'Hosts, certs, backends · can apply' },
-  { role: 'viewer', title: 'Viewer', description: 'Read-only dashboards and logs' },
-]
 
 export function AddUserDialog({ open, onClose, require2fa }: { open: boolean; onClose: () => void; require2fa: boolean }) {
   const qc = useQueryClient()
@@ -60,7 +54,9 @@ export function AddUserDialog({ open, onClose, require2fa }: { open: boolean; on
       onClose={onClose}
       width={500}
       title="Add user"
-      description={`Signs in with username + password${require2fa ? '; 2FA required for admins' : ''}.`}
+      description={role === 'member'
+        ? 'Signs in to apps protected by Relay login with username + password. Can’t open Relay itself.'
+        : `Signs in with username + password${require2fa ? '; 2FA required for admins' : ''}.`}
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>

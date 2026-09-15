@@ -50,6 +50,13 @@ const (
 func Render(snap *model.Snapshot, env render.Env) (agent.Files, error) {
 	r := newRenderer(snap, env)
 	cfg := r.config()
+	if set := snap.ErrorPages.WithDefaults(); set.Enabled {
+		cfg.ErrorPages = map[string]string{}
+		for _, code := range render.ErrorPageCodes {
+			key := fmt.Sprint(code)
+			cfg.ErrorPages[key] = render.ErrorPageHTML(set, key, nil)
+		}
+	}
 	data, err := encodeJSON(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("edge render: %w", err)

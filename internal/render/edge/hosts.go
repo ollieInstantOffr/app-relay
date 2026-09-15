@@ -12,6 +12,7 @@ import (
 
 	edgecfg "github.com/instantoffr/relay/internal/edge"
 	"github.com/instantoffr/relay/internal/model"
+	"github.com/instantoffr/relay/internal/render"
 )
 
 // ---------------------------------------------------------------- TLS helpers
@@ -143,6 +144,13 @@ func (r *renderer) host(h *model.ProxyHost, asDefault bool) edgecfg.Host {
 		out.SendTimeoutSec = h.ProxySendTimeout
 	}
 	out.RateLimit = r.rateLimit(h)
+	if h.Maintenance.Enabled {
+		m := &edgecfg.Maintenance{Page: render.ErrorPageHTML(r.snap.ErrorPages.WithDefaults(), "maintenance", &h.Maintenance)}
+		if al := r.lists[h.Maintenance.BypassAccessListID]; al != nil {
+			m.Bypass, m.BypassDefault = geoRules(al)
+		}
+		out.Maintenance = m
+	}
 	// nginx only emits proxy_ssl_verify when an upstream uses https; without it
 	// verification is off (also for the forward-auth subrequest).
 	out.UpstreamTLSVerify = h.UpstreamTLSVerify && usesHTTPS(h)
@@ -313,7 +321,7 @@ func hostLocations(h *model.ProxyHost) []hostLocation {
 var headerNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 func (r *renderer) location(h *model.ProxyHost, l hostLocation) edgecfg.Location {
-	out := edgecfg.Location{Path: l.Path}
+	out := edgecfg.Location{Path: l.Path, SkipMaintenance: l.ID == render.PortalLocationID}
 	if l.Kind == model.LocationDeny {
 		// nginx `return 403` runs before the access phase: no auth applies.
 		out.Kind = "deny"
@@ -383,4 +391,33 @@ func upstream(u model.Upstream) edgecfg.Upstream {
 		base = "/" + base
 	}
 	return edgecfg.Upstream{Scheme: scheme, Host: host, Port: port, Path: base}
+}
+
+// geoRules turns an access list into nginx geo semantics (the most specific
+// network decides, a network listed twice takes the later value): allowed
+// networks map to true; "all" sets the default.
+func geoRules(al *model.AccessList) ([]edgecfg.ExemptRule, bool) {
+	var out []edgecfg.ExemptRule
+	def := false
+	index := map[netip.Prefix]int{}
+	for _, rule := range al.Rules {
+		cidr := strings.TrimSpace(rule.CIDR)
+		if strings.EqualFold(cidr, "all") {
+			def = rule.Action == "allow"
+			continue
+		}
+		if !validCIDR(cidr) {
+			continue
+		}
+		er := edgecfg.ExemptRule{CIDR: cidr, Exempt: rule.Action == "allow"}
+		if p, ok := prefixOf(cidr); ok {
+			if i, dup := index[p]; dup {
+				out[i].Exempt = er.Exempt
+				continue
+			}
+			index[p] = len(out)
+		}
+		out = append(out, er)
+	}
+	return out, def
 }

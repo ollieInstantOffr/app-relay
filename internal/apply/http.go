@@ -23,6 +23,7 @@ import (
 	"github.com/instantoffr/relay/internal/events"
 	"github.com/instantoffr/relay/internal/httpx"
 	"github.com/instantoffr/relay/internal/model"
+	"github.com/instantoffr/relay/internal/render"
 	"github.com/instantoffr/relay/internal/render/nginx"
 	"github.com/instantoffr/relay/internal/store"
 )
@@ -52,6 +53,7 @@ func Routes(app *core.App, r chi.Router) {
 	r.Get("/engines/{engine}/listeners", h.engineListeners)
 	r.Post("/preview/proxy/host", h.previewHost)
 	r.Post("/preview/proxy/stream", h.previewStream)
+	r.Post("/preview/error-page", h.previewErrorPage)
 	// Aliases kept for older clients; they preview the active proxy engine too.
 	r.Post("/preview/nginx/host", h.previewHost)
 	r.Post("/preview/nginx/stream", h.previewStream)
@@ -549,6 +551,7 @@ func (h *handlers) previewHost(w http.ResponseWriter, r *http.Request) {
 	ensureDefaultCert(env)
 	rs := s.renderSnapshot(snap, env)
 	host := *body.Host
+	render.PrepareHost(&host, env)
 	cfg, rerr := pr.host(rs, &host, env)
 	resp := configPreview{Config: cfg, Valid: rerr == nil, Engine: engine}
 	if rerr != nil {

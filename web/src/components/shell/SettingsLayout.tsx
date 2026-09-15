@@ -6,6 +6,7 @@ import GeneralSettings from '../../features/settings/GeneralSettings'
 import UsersSettings from '../../features/settings/UsersSettings'
 import DockerSettings from '../../features/settings/DockerSettings'
 import TLSSettings from '../../features/settings/TLSSettings'
+import ErrorPagesSettings from '../../features/settings/ErrorPagesSettings'
 import ProxyEngineSettings from '../../features/settings/ProxyEngineSettings'
 import HAProxySettings from '../../features/settings/HAProxySettings'
 import EnginesSettings from '../../features/settings/EnginesSettings'
@@ -33,6 +34,7 @@ export const SETTINGS_GROUPS: { label: string; sections: SettingsSection[] }[] =
       { id: 'proxy', label: 'Proxy engine', icon: 'hosts', component: ProxyEngineSettings },
       { id: 'haproxy', label: 'HAProxy engine', icon: 'load-balancer', component: HAProxySettings },
       { id: 'tls', label: 'Default TLS', icon: 'certificates', component: TLSSettings },
+      { id: 'error-pages', label: 'Error pages', icon: 'warning', component: ErrorPagesSettings },
     ],
   },
   {

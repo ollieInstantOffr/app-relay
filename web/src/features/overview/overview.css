@@ -54,3 +54,6 @@
   .ov-grid { grid-template-columns: minmax(0, 1fr); }
   .overview .grid-4 { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ---------------------------------------------------------------- update banner */
+.pending-bar.update-bar .pb-dot { background: var(--info, var(--accent, #60a5fa)); }

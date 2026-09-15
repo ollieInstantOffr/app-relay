@@ -437,6 +437,10 @@ func (s *Service) handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Reques
 		httpx.WriteError(w, http.StatusForbidden, "account_disabled", "This account is disabled. Ask an admin to re-enable it.")
 		return
 	}
+	if u.Role == core.RoleMember {
+		httpx.WriteError(w, http.StatusForbidden, "app_access_only", appAccessOnlyMessage)
+		return
+	}
 	if data, err := json.Marshal(cred); err == nil {
 		_ = s.app.Store.UpdateWebAuthnCredentialUse(ctx, credentialID(cred.ID), string(data), s.now())
 	}

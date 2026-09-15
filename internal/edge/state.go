@@ -54,6 +54,8 @@ type reqState struct {
 	stripRemote  bool
 	remoteUser   string
 	remoteGroups string
+	remoteEmail  string
+	remoteName   string
 
 	aborted    bool // default server "close" (status 444)
 	cacheFetch bool // leader fetch for the asset cache (GET, no validators)

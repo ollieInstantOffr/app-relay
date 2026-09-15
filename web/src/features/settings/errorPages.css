@@ -1,0 +1,61 @@
+/* Settings → Error pages and the host drawer's maintenance preview */
+
+.ep-preview { border: 1px solid var(--hairline); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.ep-preview-bar {
+  display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 12px; border-bottom: 1px solid var(--hairline);
+  background: var(--surface-3); font: 11px var(--font-mono); color: var(--ink-faint);
+}
+.ep-preview-dots { display: inline-flex; gap: 5px; flex: none; }
+.ep-preview-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--hairline-mid); display: block; }
+.ep-preview-label { flex: 1; min-width: 0; }
+.ep-preview-frame { display: block; width: 100%; border: 0; background: #fff; }
+
+.ep-tabs { padding: 0 18px; }
+.ep-tabs .tab .dot { margin-left: 6px; }
+.ep-tab-flag { font: 10px var(--font-mono); color: var(--ink-faint); margin-left: 6px; }
+
+.ep-color { position: relative; display: flex; align-items: center; }
+.ep-color .input { padding-left: 40px; }
+.ep-color-swatch {
+  position: absolute; left: 10px; width: 20px; height: 20px; border-radius: 5px; border: 1px solid rgba(0, 0, 0, .12);
+  pointer-events: none;
+}
+.ep-color-swatch.empty {
+  background: repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 3px, var(--surface) 3px, var(--surface) 6px);
+}
+.ep-presets { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.ep-preset {
+  width: 22px; height: 22px; border-radius: 6px; border: 1px solid rgba(0, 0, 0, .12); cursor: pointer; padding: 0;
+  display: inline-grid; place-content: center; color: #fff;
+}
+.ep-preset.selected { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--ink); }
+.ep-preset:disabled { cursor: not-allowed; opacity: .5; }
+.ep-preset.default { background: var(--surface); color: var(--ink-faint); font-size: 10px; width: auto; padding: 0 7px; font-weight: 500; }
+
+.ep-disclosure {
+  display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 0; cursor: pointer;
+  font-size: 13px; font-weight: 500; color: var(--ink);
+}
+.ep-disclosure svg { transition: transform .15s; transform: rotate(-90deg); color: var(--ink-faint); }
+.ep-disclosure.open svg { transform: none; }
+.ep-disclosure:disabled { cursor: default; }
+
+/* Relay login: who can sign in */
+.fa-users { border: 1px solid var(--hairline-mid); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.fa-users-search { padding: 8px; border-bottom: 1px solid var(--hairline-soft); }
+.fa-users-list { max-height: 264px; overflow-y: auto; }
+.fa-user {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--hairline-soft);
+  min-width: 0;
+}
+.fa-user:last-child { border-bottom: 0; }
+.fa-user:hover { background: var(--surface-3); }
+.fa-user.dim .fa-user-name, .fa-user.dim .fa-user-sub { color: var(--ink-faint); }
+.fa-user-avatar {
+  width: 24px; height: 24px; border-radius: 50%; background: var(--surface-2); color: var(--ink-subtle); font-size: 11px; font-weight: 600;
+  display: inline-grid; place-content: center; flex: none;
+}
+.fa-user-name { display: block; font-size: 13px; font-weight: 500; }
+.fa-user-sub { display: block; font-size: 11px; color: var(--ink-faint); }
+.fa-users-empty { padding: 14px; font-size: 12px; color: var(--ink-faint); }
+.fa-users-foot { padding: 8px 12px; border-top: 1px solid var(--hairline-soft); font-size: 12px; color: var(--ink-faint); display: flex; align-items: center; gap: 8px; }

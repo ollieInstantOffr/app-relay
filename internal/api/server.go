@@ -77,6 +77,8 @@ func (s *Server) Handler() http.Handler {
 		})
 	})
 
+	s.routesPortal(r)
+
 	if s.app.MCP != nil {
 		h := s.app.MCP.Handler()
 		r.Handle("/mcp", h)

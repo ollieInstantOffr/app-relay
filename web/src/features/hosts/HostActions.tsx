@@ -4,15 +4,16 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Callout, Checkbox, Dialog, Input, useToast, type MenuEntry } from '../../components/ui'
 import { api, errorMessage } from '../../lib/api'
-import { keys, useEntities, useRole } from '../../lib/queries'
+import { keys, useEntities, useRole, useSaveEntity } from '../../lib/queries'
 import { pluralize, upstreamUrl } from '../../lib/format'
 import type { HealthStatus, ProxyHost } from '../../lib/types'
-import { applyNowAction, openableDomain, probeMessage, useInvalidateHosts, type HostTab, type HostUsage } from './lib'
+import { applyNowAction, hostToDraft, openableDomain, probeMessage, useInvalidateHosts, type HostTab, type HostUsage } from './lib'
 
 export interface HostActions {
   edit: (h: ProxyHost, tab?: HostTab) => void
   duplicate: (h: ProxyHost) => Promise<void>
   toggle: (h: ProxyHost) => Promise<void>
+  toggleMaintenance: (h: ProxyHost) => Promise<void>
   probe: (h: ProxyHost) => Promise<void>
   requestDelete: (h: ProxyHost) => void
   menuItems: (h: ProxyHost) => MenuEntry[]
@@ -26,6 +27,7 @@ export function useHostActions(): HostActions {
   const qc = useQueryClient()
   const invalidate = useInvalidateHosts()
   const { canWrite } = useRole()
+  const { mutateAsync: saveHost } = useSaveEntity('hosts')
   const [deleting, setDeleting] = useState<ProxyHost | null>(null)
 
   const edit = useCallback(
@@ -72,6 +74,26 @@ export function useHostActions(): HostActions {
     [invalidate, toast],
   )
 
+  const toggleMaintenance = useCallback(
+    async (h: ProxyHost) => {
+      const start = !h.maintenance?.enabled
+      const d = hostToDraft(h)
+      try {
+        await saveHost({ ...d, maintenance: { ...d.maintenance, enabled: start } })
+        invalidate()
+        toast.show({
+          kind: 'success',
+          title: start ? 'Maintenance started' : 'Maintenance ended',
+          message: `${h.domains[0]} added to pending changes.`,
+          actions: [applyNowAction],
+        })
+      } catch (err) {
+        toast.error(err, start ? 'Could not start maintenance' : 'Could not end maintenance')
+      }
+    },
+    [saveHost, invalidate, toast],
+  )
+
   const probe = useCallback(
     async (h: ProxyHost) => {
       const target = upstreamUrl(h.upstream)
@@ -114,18 +136,25 @@ export function useHostActions(): HostActions {
           'separator',
           { label: 'Duplicate', icon: 'copy', onSelect: () => void duplicate(h) },
           { label: h.enabled ? 'Disable' : 'Enable', icon: 'power', disabled: h.system && h.enabled, onSelect: () => void toggle(h) },
+          {
+            label: h.maintenance?.enabled ? 'End maintenance' : 'Start maintenance',
+            icon: 'drain',
+            disabled: h.system && !h.maintenance?.enabled,
+            onSelect: () => void toggleMaintenance(h),
+          },
           { label: 'Delete…', icon: 'trash', shortcut: '⌫', danger: true, disabled: h.system, onSelect: () => setDeleting(h) },
         )
       }
       return items
     },
-    [canWrite, edit, probe, navigate, duplicate, toggle],
+    [canWrite, edit, probe, navigate, duplicate, toggle, toggleMaintenance],
   )
 
   return {
     edit,
     duplicate,
     toggle,
+    toggleMaintenance,
     probe,
     requestDelete: (h) => {
       if (canWrite && !h.system) setDeleting(h)

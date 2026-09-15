@@ -202,6 +202,9 @@ func (r *renderer) all() (agent.Files, error) {
 	}
 	files["conf.d/00-global.conf"] = r.globalConf(hosts)
 	files["conf.d/10-default.conf"] = r.defaultConf()
+	for name, body := range r.errorPageFiles(hosts) {
+		files[name] = body
+	}
 
 	used := map[string]bool{}
 	for _, h := range hosts {
@@ -544,6 +547,13 @@ func (r *renderer) globalConf(hosts []*model.ProxyHost) string {
 
 	for _, h := range sortedByID(hosts) {
 		sid := safeID(h.ID)
+		if h.Maintenance.Enabled {
+			if al := r.lists[h.Maintenance.BypassAccessListID]; al != nil {
+				w.l("")
+				w.l("# Maintenance for %s: 1 = show the maintenance page, 0 = bypass (access list %s)", comment(h.Domains[0]), comment(al.Name))
+				r.geoFromList(w, "$relay_maint_"+sid, al, "0", "1")
+			}
+		}
 		if h.RateLimit.Enabled && h.RateLimit.RequestsPerSecond > 0 {
 			w.l("")
 			w.l("# Rate limit for %s", comment(h.Domains[0]))
@@ -967,6 +977,13 @@ func (r *renderer) hostBody(w *writer, h *model.ProxyHost, custom bool) {
 		}
 	}
 
+	if r.errorPages(w, h) {
+		w.open("location ^~ %s", render.ErrorsPath)
+		w.l("internal;")
+		w.l("alias %s;", q(strings.TrimRight(r.env.ConfDir, "/")+"/errors/"))
+		w.close()
+	}
+
 	fa := r.forwardAuth(h)
 	if fa {
 		w.l("")
@@ -1095,6 +1112,7 @@ var staticExt = `\.(?:css|js|mjs|map|png|jpe?g|gif|ico|svg|webp|avif|bmp|woff2?|
 
 func (r *renderer) location(w *writer, h *model.ProxyHost, l hostLocation) {
 	w.open("location %s", q(l.Path))
+	r.maintenance(w, h, l)
 	if l.Kind == model.LocationDeny {
 		w.l("return 403;")
 		w.close()
@@ -1121,6 +1139,8 @@ func (r *renderer) location(w *writer, h *model.ProxyHost, l hostLocation) {
 	if r.forwardAuthActive(h, l) {
 		if h.ForwardAuth.PassRemoteUser {
 			w.l("proxy_set_header Remote-User $relay_remote_user;")
+			w.l("proxy_set_header Remote-Email $relay_remote_email;")
+			w.l("proxy_set_header Remote-Name $relay_remote_name;")
 		}
 		if h.ForwardAuth.PassRemoteGroups {
 			w.l("proxy_set_header Remote-Groups $relay_remote_groups;")
@@ -1134,6 +1154,7 @@ func (r *renderer) location(w *writer, h *model.ProxyHost, l hostLocation) {
 	}
 	if h.CacheAssets || l.Cache {
 		w.open("location ~* %s", q(staticExt))
+		r.maintenance(w, h, l)
 		w.l("proxy_cache relay_assets;")
 		w.l("proxy_cache_valid 200 301 302 30d;")
 		w.l("proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;")
@@ -1179,12 +1200,16 @@ func (r *renderer) access(w *writer, h *model.ProxyHost, l hostLocation) {
 		w.l("auth_request %s;", authLocation)
 		if h.ForwardAuth.PassRemoteUser {
 			w.l("auth_request_set $relay_remote_user $upstream_http_remote_user;")
+			w.l("auth_request_set $relay_remote_email $upstream_http_remote_email;")
+			w.l("auth_request_set $relay_remote_name $upstream_http_remote_name;")
 		}
 		if h.ForwardAuth.PassRemoteGroups {
 			w.l("auth_request_set $relay_remote_groups $upstream_http_remote_groups;")
 		}
 		if strings.TrimSpace(h.ForwardAuth.SignInURL) != "" {
 			w.l("error_page 401 = @relay_signin;")
+			// A location's own error_page stops the server's from applying.
+			r.errorPages(w, h)
 		}
 	}
 }
@@ -1681,4 +1706,88 @@ func htpasswd(al *model.AccessList) string {
 		b.WriteString(name + ":" + strings.TrimSpace(u.PasswordHash) + "\n")
 	}
 	return b.String()
+}
+
+// ---------------------------------------------------------------- error & maintenance pages
+
+// errorPageFiles renders Relay's error pages and each host's maintenance page.
+func (r *renderer) errorPageFiles(hosts []*model.ProxyHost) map[string]string {
+	out := map[string]string{}
+	set := r.snap.ErrorPages.WithDefaults()
+	if set.Enabled {
+		for _, code := range render.ErrorPageCodes {
+			key := fmt.Sprint(code)
+			out["errors/"+key+".html"] = render.ErrorPageHTML(set, key, nil)
+		}
+	}
+	for _, h := range hosts {
+		if h.Maintenance.Enabled {
+			out["errors/maintenance-"+safeID(h.ID)+".html"] = render.ErrorPageHTML(set, "maintenance", &h.Maintenance)
+		}
+	}
+	return out
+}
+
+// errorPages renders the error_page directives of a host; it reports whether
+// any were written (then the server needs the internal errors location).
+func (r *renderer) errorPages(w *writer, h *model.ProxyHost) bool {
+	on := r.snap.ErrorPages.Enabled
+	if !on && !h.Maintenance.Enabled {
+		return false
+	}
+	if on {
+		for _, code := range render.ErrorPageCodes {
+			if code == 503 && h.Maintenance.Enabled {
+				continue
+			}
+			w.l("error_page %d %s%d.html;", code, render.ErrorsPath, code)
+		}
+	}
+	if h.Maintenance.Enabled {
+		w.l("error_page 503 %smaintenance-%s.html;", render.ErrorsPath, safeID(h.ID))
+	}
+	return true
+}
+
+// maintenance answers a location with 503 while the host is in maintenance
+// (the Relay login location keeps working; ACME has its own location).
+func (r *renderer) maintenance(w *writer, h *model.ProxyHost, l hostLocation) {
+	if !h.Maintenance.Enabled || l.ID == render.PortalLocationID {
+		return
+	}
+	if r.lists[h.Maintenance.BypassAccessListID] != nil {
+		w.open("if ($relay_maint_%s)", safeID(h.ID))
+		w.l("return 503;")
+		w.close()
+		return
+	}
+	w.l("return 503;")
+}
+
+// geoFromList renders an access list as an nginx geo map: allowed networks
+// get allowed, denied ones denied; "all" sets the default.
+func (r *renderer) geoFromList(w *writer, name string, al *model.AccessList, allowed, denied string) {
+	w.open("geo %s", name)
+	def := denied
+	for _, rule := range al.Rules {
+		cidr := strings.TrimSpace(rule.CIDR)
+		if strings.EqualFold(cidr, "all") {
+			if rule.Action == "allow" {
+				def = allowed
+			} else {
+				def = denied
+			}
+			continue
+		}
+		if !validCIDR(cidr) {
+			continue
+		}
+		if rule.Action == "allow" {
+			w.l("%s %s;", cidr, allowed)
+		} else {
+			w.l("%s %s;", cidr, denied)
+		}
+	}
+	w.l("default %s;", def)
+	w.close()
 }

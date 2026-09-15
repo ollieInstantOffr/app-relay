@@ -14,7 +14,7 @@ import NotAllowed from '../auth/NotAllowed'
 import CreateTokenDialog from '../auth/CreateTokenDialog'
 import { AddUserDialog } from '../auth/AddUserDialog'
 import { MyAccount } from '../auth/MyAccount'
-import { authKeys, describeError, useAuthSession, useTokens, useUsers, type UserRow } from '../auth/authApi'
+import { ROLES, authKeys, describeError, roleBadge, useAuthSession, useTokens, useUsers, type UserRow } from '../auth/authApi'
 import '../auth/auth.css'
 
 export default function UsersSettings() {
@@ -145,8 +145,8 @@ function UsersCard() {
 
   const menuFor = (u: UserRow): MenuEntry[] => {
     const items: MenuEntry[] = [{ header: u.username }]
-    for (const r of ['admin', 'editor', 'viewer'] as Role[]) {
-      if (r !== u.role) items.push({ label: `Change role to ${r}`, icon: 'users', onSelect: () => update(u, { role: r }, `Role changed to ${r}`) })
+    for (const { role: r } of ROLES) {
+      if (r !== u.role) items.push({ label: `Change role to ${roleBadge[r]}`, icon: 'users', onSelect: () => update(u, { role: r }, `Role changed to ${roleBadge[r]}`) })
     }
     items.push('separator')
     items.push({ label: 'Reset password…', icon: 'reload', onSelect: () => setPending({ kind: 'reset', user: u }) })
@@ -220,7 +220,9 @@ function UsersCard() {
             </div>
             {u.disabled && <Badge>disabled</Badge>}
             {u.mustChangePassword && <Badge tone="pending">temporary password</Badge>}
-            <Badge tone={u.role === 'admin' ? 'dark' : undefined}>{u.role}</Badge>
+            <Badge tone={u.role === 'admin' ? 'dark' : u.role === 'member' ? 'outline' : undefined} title={ROLES.find((r) => r.role === u.role)?.description}>
+              {roleBadge[u.role] ?? u.role}
+            </Badge>
             <span className={cx('twofa', u.twoFactor ? 'on' : 'off')} title={u.twoFactor ? [u.totpEnabled && 'authenticator app', u.passkeys > 0 && `${u.passkeys} passkey${u.passkeys === 1 ? '' : 's'}`].filter(Boolean).join(' + ') : undefined}>
               <span className="d" />
               2FA {u.twoFactor ? 'on' : 'off'}

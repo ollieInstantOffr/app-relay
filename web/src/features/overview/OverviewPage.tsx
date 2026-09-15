@@ -10,6 +10,7 @@ import type { ActivityRow, HealthState, HealthStatus, ProxyHost } from '../../li
 import DockerSuggestionsDialog from '../docker/DockerSuggestionsDialog'
 import { OVERVIEW_RANGES, useActivity, useNow, useOverview, type Overview, type OverviewRange } from './api'
 import { TrafficChart } from './TrafficChart'
+import UpdateBanner from './UpdateBanner'
 import './overview.css'
 
 const RANGE_KEY = 'relay.overview.range'
@@ -90,6 +91,7 @@ export default function OverviewPage() {
 
   return (
     <>
+      <UpdateBanner />
       <TopBar
         title="Overview"
         meta={<ProxyMeta label={proxyLabel} nginx={nginx} />}

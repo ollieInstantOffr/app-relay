@@ -72,6 +72,7 @@ func Routes(app *core.App, r chi.Router) {
 	r.Get("/about", s.handleAbout)
 
 	r.Get("/users", httpx.RequireAdmin(s.handleUsersList))
+	r.Get("/users/directory", s.handleUsersDirectory)
 	r.Post("/users", httpx.RequireAdmin(s.handleUserCreate))
 	r.Put("/users/{id}", httpx.RequireAdmin(s.handleUserUpdate))
 	r.Delete("/users/{id}", httpx.RequireAdmin(s.handleUserDelete))

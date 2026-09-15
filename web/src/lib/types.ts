@@ -31,15 +31,20 @@ export interface Location {
 }
 export interface ForwardAuth {
   enabled: boolean
-  provider: 'authelia' | 'authentik' | 'oauth2-proxy' | 'custom' | string
+  /** "relay" = Relay login (built in); verifyUrl/signInUrl are ignored and sent empty. */
+  provider: 'relay' | 'authelia' | 'authentik' | 'oauth2-proxy' | 'custom' | string
   verifyUrl: string
   signInUrl?: string
+  /** Relay login only: Relay user ids allowed to sign in. Empty = every enabled Relay user. */
+  allowedUsers?: string[]
   passRemoteUser: boolean
   passRemoteGroups: boolean
   skipWellKnown: boolean
 }
 export interface RateLimit { enabled: boolean; requestsPerSecond: number; burst: number; exemptAccessListId?: string }
 export interface GeoBlock { enabled: boolean; allowCountries: string[] }
+/** Maintenance mode: visitors get 503 with the maintenance page; empty title/message = Settings → Error pages. */
+export interface HostMaintenance { enabled: boolean; title: string; message: string; bypassAccessListId?: string }
 export type Source = 'manual' | 'docker' | 'expose' | 'import' | 'mcp'
 
 export interface ProxyHost extends Meta {
@@ -61,6 +66,7 @@ export interface ProxyHost extends Meta {
   forwardAuth: ForwardAuth
   rateLimit: RateLimit
   geoBlock: GeoBlock
+  maintenance: HostMaintenance
   noIndex: boolean
   maxBodySize: string
   proxyReadTimeout: number
@@ -321,6 +327,30 @@ export interface BackupSettings {
   passphraseSet: boolean
   includePrivateKeys: boolean
 }
+export type ErrorPageKey = '403' | '404' | '429' | '500' | '502' | '503' | '504' | 'maintenance'
+export interface ErrorPage {
+  title: string
+  message: string
+  /** Replaces the built-in design for this page (max 100 KB). */
+  html?: string
+}
+/** GET/PUT /api/settings/error_pages */
+export interface ErrorPagesSettings {
+  /** Relay's pages replace the engine's plain pages for errors Relay generates. The maintenance page is always used. */
+  enabled: boolean
+  brandName: string
+  /** #rrggbb, "" = default */
+  accentColor: string
+  pages: Record<ErrorPageKey, ErrorPage>
+}
+/** POST /api/preview/error-page → ErrorPagePreview */
+export interface ErrorPagePreviewRequest {
+  settings: ErrorPagesSettings
+  page: ErrorPageKey
+  maintenance?: { title: string; message: string }
+}
+export interface ErrorPagePreview { html: string }
+
 export interface BlockEntry { cidr: string; note: string; createdAt: string; createdBy: string }
 export interface BlocklistSettings { entries: BlockEntry[] }
 
@@ -336,6 +366,7 @@ export interface SettingsMap {
   backup: BackupSettings
   blocklist: BlocklistSettings
   engines: EnginesSettings
+  error_pages: ErrorPagesSettings
 }
 export type SettingsKey = keyof SettingsMap
 
@@ -363,7 +394,10 @@ export interface SessionUser {
   totpEnabled: boolean
   mustChangePassword: boolean
 }
-export type Role = 'admin' | 'editor' | 'viewer'
+/** member = "App access only": signs in to apps behind Relay login, not to the admin UI. */
+export type Role = 'admin' | 'editor' | 'viewer' | 'member'
+/** GET /api/users/directory (any signed-in user) */
+export interface DirectoryUser { id: string; username: string; email: string; role: Role; disabled: boolean }
 export interface Session {
   authenticated: boolean
   setupRequired: boolean

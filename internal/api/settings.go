@@ -18,6 +18,7 @@ var configSettings = map[string]bool{
 	model.SettingsDefaultHost: true,
 	model.SettingsHAProxy:     true,
 	model.SettingsBlocklist:   true,
+	model.SettingsErrorPages:  true,
 }
 
 // Settings keys editors may change (the rest are admin-only).

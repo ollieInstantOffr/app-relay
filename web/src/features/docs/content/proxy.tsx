@@ -323,6 +323,9 @@ function Protection() {
         asks the portal whether the visitor is signed in. If not, the visitor is sent to the sign-in page.
       </P>
       <Flow steps={[{ label: 'Browser' }, { label: 'Reverse proxy', sub: 'forward auth' }, { label: 'Authelia', sub: 'verify URL' }, { label: 'Your app', sub: 'if 2xx' }]} />
+      <Tip title="No login portal?">
+        Pick <UI>Relay login</UI> as the provider instead: people sign in with their Relay account and there is nothing else to install. <See id="relay-login">Relay login →</See>
+      </Tip>
       <Steps>
         <Step title="Pick a provider">Under <UI>Authentication</UI>, choose Authelia, Authentik or oauth2-proxy. Relay fills in typical URLs.</Step>
         <Step title="Adjust the URLs to your setup">
@@ -353,6 +356,12 @@ Exempt     LAN only    (your own network is never limited)`}
         Allow or block visitors by country using two-letter codes (<C>NO</C>, <C>SE</C>, <C>DE</C>). Press <Kbd>⏎</Kbd> after each code.
       </P>
       <Note>The official nginx image has no GeoIP2 module and Relay Edge doesn’t support country rules, so they are saved but not enforced. <UI>Settings → Updates</UI> shows the current status.</Note>
+
+      <H2>Maintenance mode</H2>
+      <P>
+        Show a maintenance page (HTTP <C>503</C>) instead of the app while you work on it, with an access list that still lets you in. Relay’s branded error pages
+        for 502s, 404s and friends are set up in <UI>Settings → Error pages</UI>. <See id="error-pages">Error &amp; maintenance pages →</See>
+      </P>
 
       <H2>Other options</H2>
       <Table
@@ -481,8 +490,8 @@ export const proxySections: DocSection[] = [
     group: 'Reverse proxy',
     title: 'Single sign-on & protection',
     icon: 'token',
-    summary: 'Forward auth with Authelia/Authentik, rate limits, geo-blocking, upload limits and custom nginx.',
-    keywords: 'forward auth authelia authentik oauth2-proxy sso login rate limit 429 geo block country upload size 413 timeout snippet custom nginx advanced',
+    summary: 'Relay login or forward auth with Authelia/Authentik, rate limits, maintenance mode, geo-blocking, upload limits and custom nginx.',
+    keywords: 'forward auth relay login maintenance authelia authentik oauth2-proxy sso login rate limit 429 geo block country upload size 413 timeout snippet custom nginx advanced',
     Body: Protection,
   },
   {

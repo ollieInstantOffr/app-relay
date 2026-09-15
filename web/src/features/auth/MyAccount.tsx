@@ -9,7 +9,7 @@ import { ago, date, dateTime } from '../../lib/format'
 import { ConfirmPasswordInput, StrengthMeter } from './PasswordFields'
 import { TotpEnrollment } from './TotpEnrollment'
 import {
-  MIN_PASSWORD, authKeys, describeError, deviceLabel, errCode, fieldErrors, passkeysSupported, registerPasskey,
+  MIN_PASSWORD, authKeys, describeError, deviceLabel, errCode, fieldErrors, passkeysSupported, registerPasskey, roleBadge,
   useAuthSession, useMySessions, usePasskeys, type AuthSession, type Passkey, type SessionRow,
 } from './authApi'
 import './auth.css'
@@ -67,7 +67,7 @@ export function MyAccount() {
 
   return (
     <>
-      <Card title="My account" sub={`${user.username} · ${user.role}`}>
+      <Card title="My account" sub={`${user.username} · ${roleBadge[user.role] ?? user.role}`}>
         <div className="account-section">
           <div className="mini-row">
             <div className="grow">

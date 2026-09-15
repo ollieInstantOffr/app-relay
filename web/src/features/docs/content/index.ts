@@ -3,6 +3,8 @@ import { startSections } from './start'
 import { setupSections } from './setup'
 import { proxySections } from './proxy'
 import { edgeSections } from './edge'
+import { loginSections } from './login'
+import { errorPageSections } from './errorpages'
 import { tlsSections } from './tls'
 import { lbSections } from './lb'
 import { dockerSections } from './docker'
@@ -18,6 +20,8 @@ export const DOC_SECTIONS: DocSection[] = [
   ...setupSections,
   ...restStart,
   ...proxySections,
+  ...loginSections,
+  ...errorPageSections,
   ...edgeSections,
   ...tlsSections,
   ...lbSections,

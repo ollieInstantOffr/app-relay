@@ -422,7 +422,7 @@ func (s *Service) Restore(ctx context.Context, src io.Reader, passphrase string)
 	for _, kind := range []string{model.KindHost, model.KindRedirect, model.KindStream, model.KindAccessList, model.KindCertificate, model.KindDNSProvider, model.KindBackend, model.KindFrontend} {
 		s.app.Changed(ctx, kind, "", "", core.ActionUpdated)
 	}
-	for _, key := range []string{model.SettingsGeneral, model.SettingsTLS, model.SettingsDefaultHost, model.SettingsHAProxy, model.SettingsBlocklist} {
+	for _, key := range []string{model.SettingsGeneral, model.SettingsTLS, model.SettingsDefaultHost, model.SettingsHAProxy, model.SettingsBlocklist, model.SettingsErrorPages} {
 		s.app.Changed(ctx, "settings", key, key, core.ActionUpdated)
 	}
 	detail := fmt.Sprintf("archive from %s · %d hosts · %d backends · %d certs", a.Manifest.Created.In(location(ctx, s.app.Store)).Format("2006-01-02 15:04"),

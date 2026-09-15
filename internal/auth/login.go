@@ -135,6 +135,10 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "account_disabled", "This account is disabled. Ask an admin to re-enable it.")
 		return
 	}
+	if u.Role == core.RoleMember {
+		httpx.WriteError(w, http.StatusForbidden, "app_access_only", appAccessOnlyMessage)
+		return
+	}
 	method := "password"
 	if u.TOTPEnabled {
 		code := strings.TrimSpace(req.TOTP)
@@ -332,3 +336,5 @@ func (s *Service) handleRequestAccess(w http.ResponseWriter, r *http.Request, u 
 	s.app.Activity(r.Context(), "auth.request_access", "info", u.Username+" requested access", what, detail)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"requested": true})
 }
+
+const appAccessOnlyMessage = "This account can only sign in to apps protected by Relay login, not to the Relay admin UI."

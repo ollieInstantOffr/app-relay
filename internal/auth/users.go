@@ -44,7 +44,7 @@ func toUserDTO(u *store.User, passkeys int, selfID string) userDTO {
 }
 
 func validRole(r string) bool {
-	return r == core.RoleAdmin || r == core.RoleEditor || r == core.RoleViewer
+	return r == core.RoleAdmin || r == core.RoleEditor || r == core.RoleViewer || r == core.RoleMember
 }
 
 func emailError(e string) string {
@@ -110,7 +110,7 @@ func (s *Service) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 		e.Add("email", "%s", msg)
 	}
 	if !validRole(req.Role) {
-		e.Add("role", "Pick admin, editor or viewer")
+		e.Add("role", "Pick admin, editor, viewer or app access only")
 	}
 	if msg := passwordError(req.Password, req.Username); msg != "" {
 		e.Add("password", "%s", msg)
@@ -171,7 +171,7 @@ func (s *Service) handleUserUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.Role != nil {
 		next.Role = *req.Role
 		if !validRole(next.Role) {
-			e.Add("role", "Pick admin, editor or viewer")
+			e.Add("role", "Pick admin, editor, viewer or app access only")
 		}
 	}
 	if req.Disabled != nil {
@@ -393,4 +393,27 @@ func (s *Service) handleAbout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, aboutDTO{Version: s.app.Config.Version, InstalledAt: installed, DatabaseBytes: size, GoVersion: runtime.Version()})
+}
+
+type directoryUser struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Role     string `json:"role"`
+	Disabled bool   `json:"disabled"`
+}
+
+// handleUsersDirectory lists accounts for pickers (Relay login allowed users)
+// to anyone who may use the admin UI; the full user list stays admin-only.
+func (s *Service) handleUsersDirectory(w http.ResponseWriter, r *http.Request) {
+	users, err := s.app.Store.ListUsers(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	out := make([]directoryUser, 0, len(users))
+	for _, u := range users {
+		out = append(out, directoryUser{ID: u.ID, Username: u.Username, Email: u.Email, Role: u.Role, Disabled: u.Disabled})
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }

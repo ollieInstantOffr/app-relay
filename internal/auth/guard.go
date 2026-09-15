@@ -9,6 +9,7 @@ import (
 	"github.com/instantoffr/relay/internal/core"
 	"github.com/instantoffr/relay/internal/httpx"
 	"github.com/instantoffr/relay/internal/model"
+	"github.com/instantoffr/relay/internal/render"
 	"github.com/instantoffr/relay/internal/store"
 )
 
@@ -26,7 +27,8 @@ func init() { httpx.NetworkGuard = networkGuard }
 func networkGuard(app *core.App, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s := serviceOf(app)
-		if s == nil {
+		// Relay login is served to app visitors through the proxy engine.
+		if s == nil || strings.HasPrefix(r.URL.Path, render.PortalPrefix) {
 			next.ServeHTTP(w, r)
 			return
 		}

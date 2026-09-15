@@ -58,6 +58,8 @@ func DefaultDefaultHost() model.DefaultHostSettings {
 	return model.DefaultHostSettings{Action: "close"}
 }
 
+func DefaultErrorPages() model.ErrorPagesSettings { return model.DefaultErrorPages() }
+
 func DefaultHAProxy() model.HAProxySettings {
 	return model.HAProxySettings{
 		TimeoutConnect:  "5s",
@@ -212,6 +214,9 @@ func SettingsDefaults(key string) any {
 		return &v
 	case model.SettingsBlocklist:
 		return &model.BlocklistSettings{Entries: []model.BlockEntry{}}
+	case model.SettingsErrorPages:
+		v := DefaultErrorPages()
+		return &v
 	case model.SettingsEngines:
 		v := DefaultEngines()
 		return &v

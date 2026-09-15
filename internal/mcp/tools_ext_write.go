@@ -22,7 +22,7 @@ import (
 // excluded so an assistant can't loosen its own safeguards.
 var mcpSettingsKeys = []any{
 	model.SettingsGeneral, model.SettingsTLS, model.SettingsDefaultHost, model.SettingsHAProxy, model.SettingsDocker,
-	model.SettingsNotifications, model.SettingsBackup, model.SettingsEngines, model.SettingsBlocklist,
+	model.SettingsNotifications, model.SettingsBackup, model.SettingsEngines, model.SettingsBlocklist, model.SettingsErrorPages,
 }
 
 func checkSettingsKey(key string) error {
@@ -31,7 +31,7 @@ func checkSettingsKey(key string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("settings %q are not available over MCP (use one of general, tls, default_host, haproxy, docker, notifications, backup, engines, blocklist)", key)
+	return fmt.Errorf("settings %q are not available over MCP (use one of general, tls, default_host, haproxy, docker, notifications, backup, engines, blocklist, error_pages)", key)
 }
 
 type hostConfigArgs struct {
@@ -139,7 +139,7 @@ func (s *Service) registerExtWriteTools() {
 		Description: "Change any setting of a proxy host (found by id or domain) with a JSON merge patch of its full configuration as returned by get_host: locations (per-path rules), forward auth / single sign-on, rate limiting, headers, timeouts, upload size, HSTS, HTTP/3, cipher profile, geo-blocking, no-index, upstream TLS verification, custom nginx snippet. Validated like the UI; saved to pending changes, not live until apply_changes. May wait for human approval."},
 		nil, false, s.planUpdateHostConfig)
 	addWrite(s, toolInfo{Name: "update_settings", Title: "Change Relay settings",
-		Description: "Change a settings document (general, tls, default_host, haproxy, docker, notifications, backup, engines, blocklist) with a JSON merge patch of what get_settings returns. Security and MCP settings, the admin UI port and the admin domain can't be changed over MCP. Settings that affect the proxy become pending changes. May wait for human approval."},
+		Description: "Change a settings document (general, tls, default_host, haproxy, docker, notifications, backup, engines, blocklist, error_pages) with a JSON merge patch of what get_settings returns. Security and MCP settings, the admin UI port and the admin domain can't be changed over MCP. Settings that affect the proxy become pending changes. May wait for human approval."},
 		map[string][]any{"key": mcpSettingsKeys}, false, s.planUpdateSettings)
 	addWrite(s, toolInfo{Name: "set_default_host", Title: "Set the default host",
 		Description: "Choose what requests for unknown domains (or the bare IP) get: close the connection, a 404 page, a redirect, or a proxy host. Saved to pending changes; not live until apply_changes. May wait for human approval."},

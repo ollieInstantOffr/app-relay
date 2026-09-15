@@ -20,10 +20,11 @@ type refs struct {
 	accessLists map[string]string // id → name
 	certs       map[string]model.Certificate
 	backends    map[string]string // id → name
+	users       map[string]bool   // user ids (Relay login allowed users)
 }
 
 func loadRefs(ctx context.Context, st *store.Store) (*refs, error) {
-	rf := &refs{accessLists: map[string]string{}, certs: map[string]model.Certificate{}, backends: map[string]string{}}
+	rf := &refs{accessLists: map[string]string{}, certs: map[string]model.Certificate{}, backends: map[string]string{}, users: map[string]bool{}}
 	var err error
 	if rf.hosts, err = st.Hosts().List(ctx); err != nil {
 		return nil, err
@@ -51,6 +52,13 @@ func loadRefs(ctx context.Context, st *store.Store) (*refs, error) {
 	}
 	for _, b := range backends {
 		rf.backends[b.ID] = b.Name
+	}
+	users, err := st.ListUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, u := range users {
+		rf.users[u.ID] = true
 	}
 	return rf, nil
 }
@@ -146,6 +154,19 @@ func checkHostRefs(e model.Errs, rf *refs, h *model.ProxyHost) {
 	if id := h.RateLimit.ExemptAccessListID; id != "" {
 		if _, ok := rf.accessLists[id]; !ok {
 			e.Add("rateLimit.exemptAccessListId", "This access list no longer exists")
+		}
+	}
+	if id := h.Maintenance.BypassAccessListID; id != "" {
+		if _, ok := rf.accessLists[id]; !ok {
+			e.Add("maintenance.bypassAccessListId", "This access list no longer exists")
+		}
+	}
+	if h.ForwardAuth.Provider == model.ForwardAuthRelay {
+		for _, id := range h.ForwardAuth.AllowedUsers {
+			if !rf.users[id] {
+				e.Add("forwardAuth.allowedUsers", "One of the selected users no longer exists")
+				break
+			}
 		}
 	}
 	if id := h.CertificateID; id != "" {

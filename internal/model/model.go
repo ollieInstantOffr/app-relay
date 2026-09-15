@@ -82,6 +82,8 @@ type ForwardAuth struct {
 	PassRemoteUser   bool   `json:"passRemoteUser"`
 	PassRemoteGroups bool   `json:"passRemoteGroups"`
 	SkipWellKnown    bool   `json:"skipWellKnown"`
+	// AllowedUsers (provider relay): Relay user ids that may sign in; empty = every enabled user.
+	AllowedUsers []string `json:"allowedUsers,omitempty"`
 }
 
 type RateLimit struct {
@@ -94,6 +96,15 @@ type RateLimit struct {
 type GeoBlock struct {
 	Enabled        bool     `json:"enabled"`
 	AllowCountries []string `json:"allowCountries"` // ISO 3166-1 alpha-2
+}
+
+// Maintenance answers a host's visitors with 503 and the maintenance page.
+type Maintenance struct {
+	Enabled bool   `json:"enabled"`
+	Title   string `json:"title"`   // "" = the maintenance page from the error page settings
+	Message string `json:"message"` // "" = the maintenance page from the error page settings
+	// BypassAccessListID: addresses this access list allows see the app as usual.
+	BypassAccessListID string `json:"bypassAccessListId,omitempty"`
 }
 
 type ProxyHost struct {
@@ -122,6 +133,7 @@ type ProxyHost struct {
 	ForwardAuth      ForwardAuth `json:"forwardAuth"`
 	RateLimit        RateLimit   `json:"rateLimit"`
 	GeoBlock         GeoBlock    `json:"geoBlock"`
+	Maintenance      Maintenance `json:"maintenance"`
 	NoIndex          bool        `json:"noIndex"`
 	MaxBodySize      string      `json:"maxBodySize"`      // nginx size, e.g. "10g"; "" = 1m default, "0" = unlimited
 	ProxyReadTimeout int         `json:"proxyReadTimeout"` // seconds, 0 = default 60
@@ -587,4 +599,5 @@ type Snapshot struct {
 	DefaultHost  DefaultHostSettings `json:"defaultHost"`
 	HAProxy      HAProxySettings     `json:"haproxy"`
 	Blocklist    BlocklistSettings   `json:"blocklist"`
+	ErrorPages   ErrorPagesSettings  `json:"errorPages"`
 }

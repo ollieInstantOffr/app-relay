@@ -1,13 +1,18 @@
 // Owner: slice hosts. Host drawer · Advanced tab (design 18b).
-import { useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { Badge, Callout, ChipsInput, Field, Input, Select, Textarea, Toggle, ToggleCard } from '../../../components/ui'
-import { useEntities, useSettings } from '../../../lib/queries'
+import { Badge, Button, Callout, Checkbox, ChipsInput, Field, Input, RadioCard, Select, Skeleton, Textarea, Toggle, ToggleCard, cx } from '../../../components/ui'
+import { useEntities, useSettings, useUserDirectory } from '../../../lib/queries'
+import type { DirectoryUser, HostMaintenance } from '../../../lib/types'
+import { roleBadge } from '../../auth/authApi'
+import { ErrorPagePreviewFrame } from '../../settings/ErrorPagePreview'
+import { ERROR_PAGE_INFO, normalizeErrorPages, useErrorPagePreview } from '../../settings/errorPagesApi'
 import { ConfigPreviewPanel } from '../ConfigPreview'
 import type { HostFormCtx } from '../HostDrawer'
-import { formatSize, parseSize, urlError, type SizeUnit } from '../lib'
+import { accessSummary, formatSize, parseSize, urlError, type SizeUnit } from '../lib'
 
-const PROVIDERS: { value: string; label: string; verify: string; signIn: string }[] = [
+const PROVIDERS: { value: string; label: string; hint?: string; verify: string; signIn: string }[] = [
+  { value: 'relay', label: 'Relay login', hint: 'recommended', verify: '', signIn: '' },
   { value: 'authelia', label: 'Authelia', verify: 'http://authelia:9091/api/verify?rd=https://auth.home.lan', signIn: '' },
   {
     value: 'authentik',
@@ -75,6 +80,215 @@ function NumInput({ value, onChange, suffix, placeholder, invalid, min = 0 }: {
   )
 }
 
+/** First non-wildcard domain of the draft, for example URLs. */
+function exampleOrigin(domains: string[]): string {
+  const d = domains.find((x) => !x.startsWith('*.'))
+  return `https://${d ?? 'your-domain'}`
+}
+
+// ---------------------------------------------------------------- maintenance mode
+
+function MaintenanceSection({ ctx }: { ctx: HostFormCtx }) {
+  const { draft, update, errors, readOnly } = ctx
+  const m = draft.maintenance
+  const lists = useEntities('access-lists').data ?? []
+  const errorPages = useSettings('error_pages')
+  const defaults = errorPages.data?.pages?.maintenance
+  const [showPreview, setShowPreview] = useState(false)
+  const set = (patch: Partial<HostMaintenance>) => update({ maintenance: { ...m, ...patch } })
+
+  const previewReq = useMemo(
+    () => (errorPages.data ? { settings: normalizeErrorPages(errorPages.data), page: 'maintenance' as const, maintenance: { title: m.title, message: m.message } } : null),
+    [errorPages.data, m.title, m.message],
+  )
+  const preview = useErrorPagePreview(previewReq, m.enabled && showPreview)
+
+  const missingList = !!m.bypassAccessListId && !lists.some((l) => l.id === m.bypassAccessListId)
+  const listOptions = [
+    { value: '', label: 'Nobody' },
+    ...(missingList ? [{ value: m.bypassAccessListId!, label: '(deleted list)' }] : []),
+    ...lists.map((l) => ({ value: l.id, label: l.name, hint: accessSummary(l) })),
+  ]
+  const domain = draft.domains.find((d) => !d.startsWith('*.')) ?? draft.domains[0] ?? 'this host'
+
+  return (
+    <Section
+      title="Maintenance mode"
+      badge={m.enabled ? <Badge tone="warn">on</Badge> : undefined}
+      desc="Show a maintenance page instead of the app · visitors get 503"
+      checked={m.enabled}
+      disabled={readOnly}
+      onToggle={(enabled) => set({ enabled })}
+    >
+      {m.enabled && (
+        <>
+          <Field
+            label="Title"
+            error={errors['maintenance.title']}
+            hint={<>Optional · leave empty to use the page from <Link to="/settings/error-pages">Settings → Error pages</Link></>}
+          >
+            <Input
+              value={m.title}
+              invalid={!!errors['maintenance.title']}
+              maxLength={120}
+              placeholder={defaults?.title || ERROR_PAGE_INFO.maintenance.title}
+              onChange={(e) => set({ title: e.target.value })}
+            />
+          </Field>
+          <Field label="Message" error={errors['maintenance.message']}>
+            <Textarea
+              rows={3}
+              value={m.message}
+              invalid={!!errors['maintenance.message']}
+              placeholder={defaults?.message || ERROR_PAGE_INFO.maintenance.message}
+              onChange={(e) => set({ message: e.target.value })}
+            />
+          </Field>
+          <Field label="Who still sees the app" error={errors['maintenance.bypassAccessListId']} hint="Addresses allowed by this access list skip the maintenance page">
+            <Select
+              value={m.bypassAccessListId ?? ''}
+              options={listOptions}
+              invalid={!!errors['maintenance.bypassAccessListId']}
+              onChange={(v) => set({ bypassAccessListId: v || undefined })}
+              aria-label="Bypass access list"
+            />
+          </Field>
+          <Callout
+            tone="info"
+            actions={
+              <Button size="sm" icon="reveal" onClick={() => setShowPreview((s) => !s)} disabled={!errorPages.data && !errorPages.isError}>
+                {showPreview ? 'Hide preview' : 'Preview'}
+              </Button>
+            }
+          >
+            Visitors get HTTP 503 with the maintenance page. Certificate renewals and the Relay login page keep working. Starts on apply.
+          </Callout>
+          {showPreview &&
+            (errorPages.isError ? (
+              <Callout tone="warn">Couldn't load the error page settings for the preview.</Callout>
+            ) : (
+              <ErrorPagePreviewFrame state={preview} label={`${domain} · 503`} height={340} />
+            ))}
+        </>
+      )}
+    </Section>
+  )
+}
+
+// ---------------------------------------------------------------- Relay login
+
+function UserRowItem({ user, checked, disabled, onChange }: { user: DirectoryUser; checked: boolean; disabled: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className={cx('fa-user', user.disabled && 'dim')}>
+      <Checkbox checked={checked} disabled={disabled} onChange={onChange} />
+      <span className="fa-user-avatar">{user.username.slice(0, 1).toUpperCase()}</span>
+      <span className="grow" style={{ minWidth: 0 }}>
+        <span className="fa-user-name truncate">{user.username}</span>
+        {user.email && <span className="fa-user-sub truncate">{user.email}</span>}
+      </span>
+      {user.disabled && <Badge>disabled</Badge>}
+      <Badge tone={user.role === 'admin' ? 'dark' : user.role === 'member' ? 'outline' : undefined}>{roleBadge[user.role] ?? user.role}</Badge>
+    </label>
+  )
+}
+
+function RelayLoginOptions({ ctx }: { ctx: HostFormCtx }) {
+  const { draft, update, errors, readOnly } = ctx
+  const fa = draft.forwardAuth
+  const allowed = fa.allowedUsers ?? []
+  const [restrict, setRestrict] = useState(allowed.length > 0)
+  const [query, setQuery] = useState('')
+  const directory = useUserDirectory()
+  const origin = exampleOrigin(draft.domains)
+  const setAllowed = (ids: string[]) => update({ forwardAuth: { ...fa, allowedUsers: ids } })
+
+  const users = useMemo(
+    () => [...(directory.data ?? [])].sort((a, b) => Number(a.disabled) - Number(b.disabled) || a.username.localeCompare(b.username)),
+    [directory.data],
+  )
+  const q = query.trim().toLowerCase()
+  const shown = q ? users.filter((u) => `${u.username} ${u.email} ${roleBadge[u.role] ?? u.role}`.toLowerCase().includes(q)) : users
+  const unknown = directory.data ? allowed.filter((id) => !users.some((u) => u.id === id)) : []
+  const allowedErr = errors['forwardAuth.allowedUsers']
+
+  return (
+    <>
+      <Field label="Who can sign in" error={allowedErr}>
+        <div className="grid-2">
+          <RadioCard
+            selected={!restrict}
+            disabled={readOnly}
+            title="Every Relay user"
+            description="Any enabled account"
+            onSelect={() => {
+              setRestrict(false)
+              if (allowed.length) setAllowed([])
+            }}
+          />
+          <RadioCard selected={restrict} disabled={readOnly} title="Only selected users" description="Pick people from the list" onSelect={() => setRestrict(true)} />
+        </div>
+      </Field>
+
+      {restrict && (
+        <div className="fa-users">
+          {users.length > 8 && (
+            <div className="fa-users-search">
+              <Input inputSize="sm" value={query} placeholder="Filter users" aria-label="Filter users" onChange={(e) => setQuery(e.target.value)} />
+            </div>
+          )}
+          <div className="fa-users-list">
+            {directory.isLoading && (
+              <div className="col gap-8" style={{ padding: 12 }}>
+                <Skeleton height={28} />
+                <Skeleton height={28} />
+              </div>
+            )}
+            {directory.isError && <div className="fa-users-empty danger-text">Couldn't load Relay users. Close the drawer and try again.</div>}
+            {directory.data && shown.length === 0 && <div className="fa-users-empty">{q ? 'No users match.' : 'No Relay users yet.'}</div>}
+            {shown.map((u) => (
+              <UserRowItem
+                key={u.id}
+                user={u}
+                checked={allowed.includes(u.id)}
+                disabled={readOnly}
+                onChange={(v) => setAllowed(v ? [...allowed, u.id] : allowed.filter((id) => id !== u.id))}
+              />
+            ))}
+            {unknown.map((id) => (
+              <label key={id} className="fa-user dim">
+                <Checkbox checked disabled={readOnly} onChange={() => setAllowed(allowed.filter((x) => x !== id))} />
+                <span className="grow" style={{ minWidth: 0 }}>
+                  <span className="fa-user-name">Deleted user</span>
+                  <span className="fa-user-sub mono truncate">{id}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="fa-users-foot">
+            {allowed.length === 0 ? (
+              <span className="warn-text">Nobody picked yet · until you pick someone, every Relay user can sign in</span>
+            ) : (
+              <span>
+                {allowed.length} {allowed.length === 1 ? 'person' : 'people'} can sign in
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      <Callout tone="info" title="How signing in works">
+        People open the app and land on <span className="mono">{origin}/.relay/login</span>. They sign in with their Relay username and password, plus their
+        authenticator code if they use 2FA. Sign out at <span className="mono">{origin}/.relay/logout</span>.
+        <div style={{ marginTop: 6 }}>
+          For people who should only use apps, give them the <span className="medium">App access only</span> role in <Link to="/settings/users">Settings → Users &amp; access</Link>.
+        </div>
+      </Callout>
+    </>
+  )
+}
+
+// ---------------------------------------------------------------- tab
+
 export function AdvancedTab({ ctx }: { ctx: HostFormCtx }) {
   const { draft, update, errors, readOnly, preview } = ctx
   const lists = useEntities('access-lists').data ?? []
@@ -84,6 +298,12 @@ export function AdvancedTab({ ctx }: { ctx: HostFormCtx }) {
   const rl = draft.rateLimit
   const gb = draft.geoBlock
   const [size, setSize] = useState(() => parseSize(draft.maxBodySize))
+
+  const relay = fa.provider === 'relay'
+  // URLs of the last SSO provider, restored when switching away from Relay login.
+  const lastSso = useRef<{ provider: string; verifyUrl: string; signInUrl: string } | null>(
+    relay ? null : { provider: fa.provider, verifyUrl: fa.verifyUrl, signInUrl: fa.signInUrl ?? '' },
+  )
 
   const provider = PROVIDERS.find((p) => p.value === fa.provider) ?? PROVIDERS[PROVIDERS.length - 1]
   const verifyErr = errors['forwardAuth.verifyUrl'] || (fa.verifyUrl ? urlError(fa.verifyUrl) : '')
@@ -97,11 +317,28 @@ export function AdvancedTab({ ctx }: { ctx: HostFormCtx }) {
     update({ maxBodySize: formatSize(num, unit) })
   }
 
+  const changeProvider = (value: string) => {
+    if (value === fa.provider) return
+    if (value === 'relay') {
+      lastSso.current = { provider: fa.provider, verifyUrl: fa.verifyUrl, signInUrl: fa.signInUrl ?? '' }
+      update({ forwardAuth: { ...fa, provider: value, verifyUrl: '', signInUrl: '' } })
+      return
+    }
+    const next = PROVIDERS.find((p) => p.value === value)!
+    const from = relay ? lastSso.current : { provider: fa.provider, verifyUrl: fa.verifyUrl, signInUrl: fa.signInUrl ?? '' }
+    const prev = PROVIDERS.find((p) => p.value === from?.provider)
+    const verifyUrl = !from?.verifyUrl || from.verifyUrl === prev?.verify ? next.verify : from.verifyUrl
+    const signInUrl = !from?.signInUrl || from.signInUrl === prev?.signIn ? next.signIn : from.signInUrl
+    update({ forwardAuth: { ...fa, provider: value, verifyUrl, signInUrl } })
+  }
+
   return (
     <>
+      <MaintenanceSection ctx={ctx} />
+
       <Section
         title="Authentication"
-        desc="Forward-auth to an SSO provider, in addition to the access list"
+        desc="Require sign-in with Relay login or your SSO provider, in addition to the access list"
         checked={fa.enabled}
         disabled={readOnly}
         onToggle={(enabled) =>
@@ -110,39 +347,48 @@ export function AdvancedTab({ ctx }: { ctx: HostFormCtx }) {
       >
         {fa.enabled && (
           <>
-            <Field label="Provider" error={errors['forwardAuth.provider']}>
-              <Select
-                value={fa.provider}
-                options={PROVIDERS.map((p) => ({ value: p.value, label: p.label }))}
-                onChange={(value) => {
-                  const next = PROVIDERS.find((p) => p.value === value)!
-                  const verifyUrl = !fa.verifyUrl || fa.verifyUrl === provider.verify ? next.verify : fa.verifyUrl
-                  const signInUrl = !fa.signInUrl || fa.signInUrl === provider.signIn ? next.signIn : fa.signInUrl
-                  update({ forwardAuth: { ...fa, provider: value, verifyUrl, signInUrl } })
-                }}
-              />
+            <Field label="Provider" error={errors['forwardAuth.provider']} hint={relay ? 'Built in: people sign in with a Relay account' : undefined}>
+              <Select value={fa.provider} options={PROVIDERS.map((p) => ({ value: p.value, label: p.label, hint: p.hint }))} onChange={changeProvider} />
             </Field>
-            <Field label="Verify URL" error={verifyErr} hint={provider.value === 'custom' ? 'Returns 2xx when the request is signed in' : `Adjust host and port to where ${provider.label} runs`}>
-              <Input
-                mono
-                value={fa.verifyUrl}
-                invalid={!!verifyErr}
-                placeholder={provider.verify || 'http://sso.home.lan/verify'}
-                onChange={(e) => update({ forwardAuth: { ...fa, verifyUrl: e.target.value.trim() } })}
-              />
-            </Field>
-            <Field label="Sign-in URL" error={signInErr} hint="Optional · where signed-out browsers are sent">
-              <Input
-                mono
-                value={fa.signInUrl ?? ''}
-                invalid={!!signInErr}
-                placeholder={provider.signIn || 'https://auth.home.lan'}
-                onChange={(e) => update({ forwardAuth: { ...fa, signInUrl: e.target.value.trim() } })}
-              />
-            </Field>
+            {relay ? (
+              <RelayLoginOptions ctx={ctx} />
+            ) : (
+              <>
+                <Field label="Verify URL" error={verifyErr} hint={provider.value === 'custom' ? 'Returns 2xx when the request is signed in' : `Adjust host and port to where ${provider.label} runs`}>
+                  <Input
+                    mono
+                    value={fa.verifyUrl}
+                    invalid={!!verifyErr}
+                    placeholder={provider.verify || 'http://sso.home.lan/verify'}
+                    onChange={(e) => update({ forwardAuth: { ...fa, verifyUrl: e.target.value.trim() } })}
+                  />
+                </Field>
+                <Field label="Sign-in URL" error={signInErr} hint="Optional · where signed-out browsers are sent">
+                  <Input
+                    mono
+                    value={fa.signInUrl ?? ''}
+                    invalid={!!signInErr}
+                    placeholder={provider.signIn || 'https://auth.home.lan'}
+                    onChange={(e) => update({ forwardAuth: { ...fa, signInUrl: e.target.value.trim() } })}
+                  />
+                </Field>
+              </>
+            )}
             <div className="grid-2">
-              <ToggleCard title="Pass Remote-User" description="Username header to upstream" checked={fa.passRemoteUser} disabled={readOnly} onChange={(passRemoteUser) => update({ forwardAuth: { ...fa, passRemoteUser } })} />
-              <ToggleCard title="Pass Remote-Groups" description="Groups header to upstream" checked={fa.passRemoteGroups} disabled={readOnly} onChange={(passRemoteGroups) => update({ forwardAuth: { ...fa, passRemoteGroups } })} />
+              <ToggleCard
+                title="Pass Remote-User"
+                description={relay ? 'Username, email and name headers' : 'Username header to upstream'}
+                checked={fa.passRemoteUser}
+                disabled={readOnly}
+                onChange={(passRemoteUser) => update({ forwardAuth: { ...fa, passRemoteUser } })}
+              />
+              <ToggleCard
+                title="Pass Remote-Groups"
+                description={relay ? "The user's Relay role" : 'Groups header to upstream'}
+                checked={fa.passRemoteGroups}
+                disabled={readOnly}
+                onChange={(passRemoteGroups) => update({ forwardAuth: { ...fa, passRemoteGroups } })}
+              />
               <ToggleCard title="Skip for /.well-known/" description="ACME & discovery paths" checked={fa.skipWellKnown} disabled={readOnly} onChange={(skipWellKnown) => update({ forwardAuth: { ...fa, skipWellKnown } })} />
             </div>
           </>

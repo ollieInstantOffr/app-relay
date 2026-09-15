@@ -37,12 +37,14 @@ func (s *Store) Snapshot(ctx context.Context) (*model.Snapshot, error) {
 	snap.DefaultHost = DefaultDefaultHost()
 	snap.HAProxy = DefaultHAProxy()
 	snap.Blocklist = model.BlocklistSettings{Entries: []model.BlockEntry{}}
+	snap.ErrorPages = DefaultErrorPages()
 	for key, out := range map[string]any{
 		model.SettingsGeneral:     &snap.General,
 		model.SettingsTLS:         &snap.TLS,
 		model.SettingsDefaultHost: &snap.DefaultHost,
 		model.SettingsHAProxy:     &snap.HAProxy,
 		model.SettingsBlocklist:   &snap.Blocklist,
+		model.SettingsErrorPages:  &snap.ErrorPages,
 	} {
 		if err := s.GetSettings(ctx, key, out); err != nil {
 			return nil, err
@@ -80,6 +82,7 @@ func (s *Store) RestoreSnapshot(ctx context.Context, snap *model.Snapshot) error
 			model.SettingsDefaultHost: snap.DefaultHost,
 			model.SettingsHAProxy:     snap.HAProxy,
 			model.SettingsBlocklist:   snap.Blocklist,
+			model.SettingsErrorPages:  snap.ErrorPages.WithDefaults(),
 		} {
 			if err := putSettings(ctx, tx, key, v); err != nil {
 				return err

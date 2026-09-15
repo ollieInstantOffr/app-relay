@@ -18,6 +18,8 @@ const (
 	RoleAdmin  = "admin"
 	RoleEditor = "editor"
 	RoleViewer = "viewer"
+	// RoleMember may only sign in to apps protected by Relay login, not the admin UI.
+	RoleMember = "member"
 
 	ScopeRead  = "read"
 	ScopeWrite = "write"

@@ -12,6 +12,7 @@ function Users() {
           ['admin', 'Everything, including users, backups, engine upgrades, MCP and instance settings.'],
           ['editor', 'Create and change hosts, certificates, access lists, streams and backends; apply and roll back; approve AI requests.'],
           ['viewer', 'See everything read-only: dashboards, logs, configs. Good for on-call colleagues.'],
+          ['member', <>Shown as <strong>App access only</strong>. Signs in to apps protected by <See id="relay-login">Relay login</See>, but not to Relay itself.</>],
         ]}
       />
 
@@ -228,7 +229,7 @@ export const adminSections: DocSection[] = [
     title: 'Users, roles & 2FA',
     icon: 'users',
     summary: 'Invite colleagues with the right role, enforce two-factor authentication and protect the admin UI.',
-    keywords: 'users roles admin editor viewer 2fa totp passkey webauthn password reset locked out session lan admin domain',
+    keywords: 'users roles admin editor viewer member app access only 2fa totp passkey webauthn password reset locked out session lan admin domain',
     app: [{ to: '/settings/users', label: 'Users & access' }],
     Body: Users,
   },

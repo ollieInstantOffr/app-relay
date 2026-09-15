@@ -27,8 +27,11 @@ func (s *Server) withActor(next http.Handler) http.Handler {
 
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if actorOf(r).IsZero() {
+		if a := actorOf(r); a.IsZero() {
 			writeError(w, http.StatusUnauthorized, "unauthenticated", "sign in required")
+			return
+		} else if a.Type == core.ActorUser && a.Role == core.RoleMember {
+			writeError(w, http.StatusForbidden, "app_access_only", "This account can only sign in to apps protected by Relay login")
 			return
 		}
 		next.ServeHTTP(w, r)

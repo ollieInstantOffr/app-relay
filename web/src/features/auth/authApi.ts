@@ -112,7 +112,16 @@ export function safeNext(next: string | null): string {
   return next
 }
 
-export const roleLabel: Record<Role, string> = { admin: 'Admin', editor: 'Editor', viewer: 'Viewer' }
+export const roleLabel: Record<Role, string> = { admin: 'Admin', editor: 'Editor', viewer: 'Viewer', member: 'App access only' }
+/** Lower-case role text for badges and menus. */
+export const roleBadge: Record<Role, string> = { admin: 'admin', editor: 'editor', viewer: 'viewer', member: 'app access only' }
+/** Every role in picker order, with a short description. */
+export const ROLES: { role: Role; title: string; description: string }[] = [
+  { role: 'admin', title: 'Admin', description: 'Everything, incl. users and settings' },
+  { role: 'editor', title: 'Editor', description: 'Hosts, certs, backends · can apply' },
+  { role: 'viewer', title: 'Viewer', description: 'Read-only dashboards and logs' },
+  { role: 'member', title: 'App access only', description: 'Signs in to apps protected by Relay login · no access to Relay itself' },
+]
 
 // ---------------------------------------------------------------- passkeys (WebAuthn)
 function b64urlToBuf(s: string): ArrayBuffer {

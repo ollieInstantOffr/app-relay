@@ -38,6 +38,9 @@ type Config struct {
 	Blocklist []string `json:"blocklist"`
 	// AccessLists by id, referenced from locations.
 	AccessLists map[string]AccessList `json:"accessLists"`
+	// ErrorPages replace the plain pages of errors the engine generates
+	// (status code → HTML). Responses from upstreams pass through.
+	ErrorPages map[string]string `json:"errorPages,omitempty"`
 
 	Default   DefaultServer   `json:"default"`
 	Hosts     []Host          `json:"hosts"`     // enabled hosts; for duplicate names the first wins
@@ -101,6 +104,8 @@ type Host struct {
 	RateLimit         *RateLimit   `json:"rateLimit,omitempty"`
 	UpstreamTLSVerify bool         `json:"upstreamTlsVerify,omitempty"`
 	ForwardAuth       *ForwardAuth `json:"forwardAuth,omitempty"`
+	// Maintenance answers requests with 503 and its page, except bypassed addresses.
+	Maintenance *Maintenance `json:"maintenance,omitempty"`
 
 	// Locations are prefix matches, sorted longest path first; "/" is always present.
 	Locations []Location `json:"locations"`
@@ -118,6 +123,14 @@ type RateLimit struct {
 	// CIDR decides; ExemptDefault applies when none match.
 	Exempt        []ExemptRule `json:"exempt,omitempty"`
 	ExemptDefault bool         `json:"exemptDefault,omitempty"`
+}
+
+// Maintenance: Bypass uses longest-prefix match like RateLimit.Exempt; an
+// Exempt rule bypasses the maintenance page. BypassDefault applies when none match.
+type Maintenance struct {
+	Page          string       `json:"page"`
+	Bypass        []ExemptRule `json:"bypass,omitempty"`
+	BypassDefault bool         `json:"bypassDefault,omitempty"`
 }
 
 type ExemptRule struct {
@@ -149,6 +162,8 @@ type Location struct {
 	DenyAll bool `json:"denyAll,omitempty"`
 	// ForwardAuth applies the host's forward auth on this path.
 	ForwardAuth bool `json:"forwardAuth,omitempty"`
+	// SkipMaintenance serves the path during maintenance (the Relay login page).
+	SkipMaintenance bool `json:"skipMaintenance,omitempty"`
 }
 
 type Upstream struct {

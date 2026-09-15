@@ -74,6 +74,7 @@ type runtime struct {
 	https      serverSet
 	blocklist  *prefixMap[struct{}]
 	acmeRoot   string
+	pages      map[int][]byte // custom error pages
 	httpsPort  int
 	cacheBytes int64
 	listeners  []listenSpec
@@ -120,6 +121,7 @@ type hostRT struct {
 	maxBody       int64
 	limiter       *hostLimiter
 	fa            *forwardAuthRT
+	maint         *maintenanceRT
 	locations     []*locationRT // longest path first
 	pathRedirects []pathRedirectRT
 }
@@ -136,6 +138,7 @@ type locationRT struct {
 	access      *accessRT
 	denyAll     bool
 	forwardAuth bool
+	skipMaint   bool
 }
 
 type upstreamRT struct {
@@ -263,6 +266,15 @@ func (c *compiler) globals() {
 	}
 	c.rt.acmeRoot = c.path(cfg.ACMEWebroot)
 	c.rt.blocklist = newPrefixMap[struct{}]()
+	c.rt.pages = map[int][]byte{}
+	for code, page := range cfg.ErrorPages {
+		n, err := strconv.Atoi(code)
+		if err != nil || n < 400 || n > 599 {
+			c.fail("errorPages: %q is not an HTTP error status", code)
+			continue
+		}
+		c.rt.pages[n] = []byte(page)
+	}
 	for _, e := range cfg.Blocklist {
 		p, err := parsePrefix(e)
 		if err != nil {
@@ -451,6 +463,18 @@ func (c *compiler) host(h *Host, where string) *hostRT {
 	if fa := h.ForwardAuth; fa != nil {
 		hr.fa = c.forwardAuth(fa, key, where)
 	}
+	if m := h.Maintenance; m != nil {
+		mr := &maintenanceRT{page: []byte(m.Page), bypass: newPrefixMap[bool](), bypassDefault: m.BypassDefault}
+		for _, e := range m.Bypass {
+			p, err := parsePrefix(e.CIDR)
+			if err != nil {
+				c.fail("%s: maintenance bypass: %v", where, err)
+				continue
+			}
+			mr.bypass.add(p, e.Exempt)
+		}
+		hr.maint = mr
+	}
 	for i := range h.Locations {
 		if l := c.location(h, hr, &h.Locations[i], key, where); l != nil {
 			hr.locations = append(hr.locations, l)
@@ -486,7 +510,7 @@ func (c *compiler) location(h *Host, hr *hostRT, l *Location, key transportKey, 
 		c.fail("%s: path must start with /", where)
 		return nil
 	}
-	lr := &locationRT{path: l.Path, prefix: strings.TrimRight(l.Path, "/"), strip: l.StripPrefix, websockets: l.Websockets, cache: l.Cache, denyAll: l.DenyAll}
+	lr := &locationRT{path: l.Path, prefix: strings.TrimRight(l.Path, "/"), strip: l.StripPrefix, websockets: l.Websockets, cache: l.Cache, denyAll: l.DenyAll, skipMaint: l.SkipMaintenance}
 	switch l.Kind {
 	case "deny":
 		lr.deny = true

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@ta
 import { api } from './api'
 import { proxyEngineLabel } from './types'
 import type {
-  Approval, Container, EngineKind, EngineState, EnginesStatus, EntityKind, EntityMap, HealthStatus, LBStats, Pending, Session,
+  Approval, Container, DirectoryUser, EngineKind, EngineState, EnginesStatus, EntityKind, EntityMap, HealthStatus, LBStats, Pending, Session,
   ProxyEngineName, SettingsKey, SettingsMap,
 } from './types'
 
@@ -19,6 +19,7 @@ export const keys = {
   lbStats: ['lb', 'stats'] as const,
   containers: ['docker', 'containers'] as const,
   approvals: ['approvals'] as const,
+  userDirectory: ['auth', 'users', 'directory'] as const,
 }
 
 // ---------------------------------------------------------------- session
@@ -31,6 +32,11 @@ export function useRole() {
   const { data } = useSession()
   const role = data?.user?.role
   return { role, isAdmin: role === 'admin', canWrite: role === 'admin' || role === 'editor' }
+}
+
+/** Relay users for pickers (e.g. who may use Relay login); readable by every signed-in user. */
+export function useUserDirectory(enabled = true) {
+  return useQuery({ queryKey: keys.userDirectory, queryFn: () => api.get<DirectoryUser[]>('/api/users/directory'), enabled, staleTime: 30_000 })
 }
 
 // ---------------------------------------------------------------- entities

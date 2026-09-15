@@ -33,6 +33,7 @@ var settingsLabels = map[string]string{
 	model.SettingsDefaultHost: "Default host",
 	model.SettingsHAProxy:     "HAProxy engine settings",
 	model.SettingsBlocklist:   "Blocked IPs",
+	model.SettingsErrorPages:  "Error pages",
 }
 
 func jsonSum(v any) string {
@@ -117,6 +118,7 @@ func projections(s *model.Snapshot) map[string]entityState {
 	}
 	sort.Strings(cidrs)
 	add("settings", model.SettingsBlocklist, settingsLabels[model.SettingsBlocklist], cidrs)
+	add("settings", model.SettingsErrorPages, settingsLabels[model.SettingsErrorPages], s.ErrorPages.WithDefaults())
 	return out
 }
 
@@ -128,6 +130,7 @@ func defaultSnapshot() *model.Snapshot {
 		DefaultHost: store.DefaultDefaultHost(),
 		HAProxy:     store.DefaultHAProxy(),
 		Blocklist:   model.BlocklistSettings{Entries: []model.BlockEntry{}},
+		ErrorPages:  store.DefaultErrorPages(),
 	}
 }
 

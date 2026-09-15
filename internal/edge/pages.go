@@ -2,6 +2,7 @@ package edge
 
 import (
 	"net/http"
+	"net/netip"
 	"strconv"
 )
 
@@ -45,9 +46,31 @@ func pageFor(code int) []byte {
 	return []byte("<!doctype html><html><head><title>" + title + "</title></head><body><h1>" + title + "</h1></body></html>\n")
 }
 
-// writePage answers with a small HTML page for code.
+// writePage answers with a small HTML page for code, or the configured
+// custom error page.
 func writePage(w http.ResponseWriter, code int) {
+	if fw, ok := w.(*filterWriter); ok && fw.rs != nil && fw.rs.rt != nil {
+		if p := fw.rs.rt.pages[code]; p != nil {
+			writeBody(w, code, "text/html; charset=utf-8", p)
+			return
+		}
+	}
 	writeBody(w, code, "text/html", pageFor(code))
+}
+
+// maintenanceRT answers a host's requests with the maintenance page.
+type maintenanceRT struct {
+	page          []byte
+	bypass        *prefixMap[bool]
+	bypassDefault bool
+}
+
+func (m *maintenanceRT) bypassed(addr netip.Addr) bool {
+	v, ok := m.bypass.lookup(addr)
+	if !ok {
+		return m.bypassDefault
+	}
+	return v
 }
 
 func writeBody(w http.ResponseWriter, code int, contentType string, body []byte) {

@@ -216,7 +216,7 @@ func (s *Service) renderSnapshot(snap *model.Snapshot, env render.Env) *model.Sn
 			c.Status = "PEM files missing"
 		}
 	}
-	return &out
+	return render.PrepareSnapshot(&out, env)
 }
 
 func fileExists(p string) bool {

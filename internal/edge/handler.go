@@ -198,6 +198,11 @@ func (s *Server) serveHost(rs *reqState, h *hostRT) {
 		return
 	}
 	rs.loc = loc
+	if m := h.maint; m != nil && !loc.skipMaint && !m.bypassed(rs.clientIP) {
+		w.Header()["Retry-After"] = []string{"300"}
+		writeBody(w, http.StatusServiceUnavailable, "text/html; charset=utf-8", m.page)
+		return
+	}
 	if !s.authorize(rs, h, loc) {
 		return
 	}

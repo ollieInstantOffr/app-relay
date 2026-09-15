@@ -32,6 +32,7 @@ const (
 	ForwardAuthAuthentik   = "authentik"
 	ForwardAuthOAuth2Proxy = "oauth2-proxy"
 	ForwardAuthCustom      = "custom"
+	ForwardAuthRelay       = "relay" // Relay login (built in)
 )
 
 // Default host actions.
@@ -347,6 +348,25 @@ func (h *ProxyHost) Normalize() {
 	h.ForwardAuth.Provider = strings.ToLower(strings.TrimSpace(h.ForwardAuth.Provider))
 	h.ForwardAuth.VerifyURL = strings.TrimSpace(h.ForwardAuth.VerifyURL)
 	h.ForwardAuth.SignInURL = strings.TrimSpace(h.ForwardAuth.SignInURL)
+	if h.ForwardAuth.Provider == ForwardAuthRelay {
+		// Relay fills these in when rendering.
+		h.ForwardAuth.VerifyURL, h.ForwardAuth.SignInURL = "", ""
+	}
+	users := make([]string, 0, len(h.ForwardAuth.AllowedUsers))
+	seenUsers := map[string]bool{}
+	for _, u := range h.ForwardAuth.AllowedUsers {
+		if u = strings.TrimSpace(u); u != "" && !seenUsers[u] {
+			seenUsers[u] = true
+			users = append(users, u)
+		}
+	}
+	h.ForwardAuth.AllowedUsers = users
+	if len(users) == 0 {
+		h.ForwardAuth.AllowedUsers = nil
+	}
+	h.Maintenance.Title = strings.TrimSpace(h.Maintenance.Title)
+	h.Maintenance.Message = strings.TrimSpace(strings.ReplaceAll(h.Maintenance.Message, "\r\n", "\n"))
+	h.Maintenance.BypassAccessListID = strings.TrimSpace(h.Maintenance.BypassAccessListID)
 	h.RateLimit.ExemptAccessListID = strings.TrimSpace(h.RateLimit.ExemptAccessListID)
 	countries := make([]string, 0, len(h.GeoBlock.AllowCountries))
 	seen := map[string]bool{}
@@ -425,18 +445,26 @@ func (h *ProxyHost) Validate() error {
 
 	if fa := h.ForwardAuth; fa.Enabled {
 		switch fa.Provider {
-		case ForwardAuthAuthelia, ForwardAuthAuthentik, ForwardAuthOAuth2Proxy, ForwardAuthCustom:
+		case ForwardAuthRelay, ForwardAuthAuthelia, ForwardAuthAuthentik, ForwardAuthOAuth2Proxy, ForwardAuthCustom:
 		default:
 			e.Add("forwardAuth.provider", "Pick a provider")
 		}
-		if msg := HostURLError(fa.VerifyURL); msg != "" {
-			e.Add("forwardAuth.verifyUrl", "%s", msg)
+		if fa.Provider != ForwardAuthRelay {
+			if msg := HostURLError(fa.VerifyURL); msg != "" {
+				e.Add("forwardAuth.verifyUrl", "%s", msg)
+			}
 		}
-		if fa.SignInURL != "" {
+		if fa.Provider != ForwardAuthRelay && fa.SignInURL != "" {
 			if msg := HostURLError(fa.SignInURL); msg != "" {
 				e.Add("forwardAuth.signInUrl", "%s", msg)
 			}
 		}
+	}
+	if len(h.Maintenance.Title) > 120 {
+		e.Add("maintenance.title", "Keep the title under 120 characters")
+	}
+	if len(h.Maintenance.Message) > 2000 {
+		e.Add("maintenance.message", "Keep the message under 2000 characters")
 	}
 	if rl := h.RateLimit; rl.Enabled {
 		if rl.RequestsPerSecond < 1 || rl.RequestsPerSecond > 100000 {

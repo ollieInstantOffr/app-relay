@@ -210,6 +210,7 @@ export default function HostDrawer({ open, hostId, isNew, initialTab, onClose }:
               {source?.system && <Badge tone="dark">system</Badge>}
               {source && source.source !== 'manual' && <Badge>{source.source}</Badge>}
               {draft && !draft.enabled && <Badge>disabled</Badge>}
+              {draft?.maintenance?.enabled && <Badge tone="warn">maintenance</Badge>}
             </div>
           ) : undefined
         }
