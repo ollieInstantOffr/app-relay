@@ -37,6 +37,7 @@ func Routes(app *core.App, r chi.Router) {
 	r.Get("/metrics/overview", h.metricsOverview)
 	r.Get("/metrics/hosts", h.metricsHosts)
 	r.Get("/metrics/streams", h.metricsStreams)
+	topologyRoutes(h, r)
 	r.Post("/blocklist", h.blocklistAdd)
 	r.Delete("/blocklist/{cidr}", h.blocklistRemove)
 }

@@ -133,6 +133,7 @@ export function useHostActions(): HostActions {
       ]
       if (canWrite) items.push({ label: 'Test upstream now', icon: 'reload', disabled: !!h.upstream.backendId && !h.upstream.host, onSelect: () => void probe(h) })
       items.push({ label: 'View logs for host', icon: 'logs', onSelect: () => navigate(`/logs/access?host=${encodeURIComponent(h.domains[0] ?? '')}`) })
+      items.push({ label: 'View traffic flow', icon: 'topology', onSelect: () => navigate(`/topology/hosts/${h.id}`) })
       if (canWrite) {
         items.push(
           'separator',

@@ -11,6 +11,7 @@ import { lbSections } from './lb'
 import { balancerSections } from './balancer'
 import { dockerSections } from './docker'
 import { opsSections } from './ops'
+import { topologySections } from './topology'
 import { adminSections } from './admin'
 import { referenceSections } from './reference'
 
@@ -30,6 +31,7 @@ export const DOC_SECTIONS: DocSection[] = [
   ...lbSections,
   ...balancerSections,
   ...dockerSections,
+  ...topologySections,
   ...opsSections,
   ...adminSections,
   ...referenceSections,

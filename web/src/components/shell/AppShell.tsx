@@ -23,6 +23,7 @@ export interface NavItem {
 
 export const NAV: NavItem[] = [
   { to: '/', label: 'Overview', icon: 'overview', shortcut: 'G O' },
+  { to: '/topology', label: 'Topology', icon: 'topology', shortcut: 'G F' },
   { to: '/hosts', label: 'Proxy hosts', icon: 'hosts', shortcut: 'G H' },
   { to: '/load-balancer', label: 'Load balancer', icon: 'load-balancer', shortcut: 'G L' },
   { to: '/certificates', label: 'Certificates', icon: 'certificates', shortcut: 'G C' },

@@ -13,6 +13,8 @@ import LoginPage from '../features/auth/LoginPage'
 import SetupWizard from '../features/auth/SetupWizard'
 import DocsPage from '../features/docs/DocsPage'
 import DNSPage from '../features/dns/DNSPage'
+import TopologyPage from '../features/topology/TopologyPage'
+import HostFlowPage from '../features/topology/HostFlowPage'
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -22,6 +24,8 @@ export const router = createBrowserRouter([
     element: <AppShell />,
     children: [
       { index: true, element: <OverviewPage /> },
+      { path: 'topology', element: <TopologyPage /> },
+      { path: 'topology/hosts/:id', element: <HostFlowPage /> },
       { path: 'hosts', element: <HostsPage /> },
       { path: 'hosts/:tab', element: <HostsPage /> },
       { path: 'load-balancer', element: <Navigate to="/load-balancer/backends" replace /> },
