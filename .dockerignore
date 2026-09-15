@@ -1,0 +1,17 @@
+.git
+.gitignore
+.claude
+.codegraph
+**/.DS_Store
+**/node_modules
+web/dist
+internal/webui/dist
+bin
+data
+design
+docs
+deploy
+*.log
+.env
+Dockerfile
+docker-compose*.yml

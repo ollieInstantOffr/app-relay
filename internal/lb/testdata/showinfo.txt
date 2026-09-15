@@ -1,0 +1,20 @@
+Name: HAProxy
+Version: 3.0.27-a2b09cd
+Release_date: 2026/08/27
+Nbthread: 10
+Nbproc: 1
+Process_num: 1
+Pid: 7
+Uptime: 0d 0h00m08s
+Uptime_sec: 8
+Memmax_MB: 0
+PoolAlloc_MB: 1
+PoolUsed_MB: 1
+PoolFailed: 0
+Ulimit-n: 1048576
+Maxsock: 1048576
+Maxconn: 524258
+Hard_maxconn: 524258
+CurrConns: 0
+CumConns: 55
+Cu

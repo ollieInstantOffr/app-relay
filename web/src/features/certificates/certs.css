@@ -1,0 +1,82 @@
+/* certs slice: certificates, access lists, streams, TLS settings */
+
+.cs-summary { padding: 16px 20px; display: flex; align-items: center; gap: 14px; }
+.cs-summary-icon { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex: none; background: var(--surface-2); }
+.cs-summary-icon.ok { background: var(--ok-bg); }
+.cs-summary-icon.warn { background: var(--warn-bg); }
+.cs-summary-icon.danger { background: var(--danger-bg); }
+.cs-summary-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-faint); }
+.cs-summary-icon.ok .cs-summary-dot { background: var(--ok); }
+.cs-summary-icon.warn .cs-summary-dot { background: var(--warn); }
+.cs-summary-icon.danger .cs-summary-dot { background: var(--danger); }
+.cs-summary-dot.ring { background: transparent; border: 2px solid var(--ink-faint); }
+.cs-summary-value { font-size: 20px; font-weight: 600; letter-spacing: -.01em; line-height: 1.2; }
+.cs-summary-label { font-size: 12px; color: var(--ink-subtle); }
+
+.cs-grid-head, .cs-grid-row { display: grid; align-items: center; column-gap: 12px; }
+.cs-grid-head { padding: 10px 20px; font-size: 11px; font-weight: 500; color: var(--ink-subtle); border-bottom: 1px solid var(--hairline); background: var(--surface-3); }
+.cs-grid-row { padding: 14px 20px; border-bottom: 1px solid var(--hairline-soft); font-size: 13px; min-height: 64px; }
+.cs-grid-row:last-child { border-bottom: 0; }
+.cs-grid-row.clickable:hover { background: var(--surface-3); }
+.cs-grid-row.warn { background: var(--warn-row); }
+.cs-grid-row.warn.clickable:hover { background: #fff6e6; }
+.cs-grid-row.dim { opacity: .55; }
+.cs-certs { grid-template-columns: 2fr 1.2fr 1.6fr 1fr 120px 40px; }
+.cs-streams { grid-template-columns: 120px 1.4fr 60px 1.6fr 1fr 1fr 40px; }
+.cs-streams.cs-grid-row { padding: 16px 20px; }
+
+.cs-expiry-bar { height: 4px; border-radius: 2px; background: #eeede9; overflow: hidden; display: block; margin-right: 24px; }
+.cs-expiry-bar > span { display: block; height: 100%; background: var(--ok); }
+.cs-expiry-bar.warn > span { background: var(--warn); }
+.cs-expiry-bar.danger > span { background: var(--danger); }
+.cs-expiry-bar.muted > span { background: #c9c8c4; }
+
+.cs-chip { padding: 5px 10px; border: 1px solid var(--hairline-mid); border-radius: 6px; font: 12px var(--font-mono); display: inline-flex; gap: 8px; align-items: center; background: var(--surface); color: var(--ink); white-space: nowrap; }
+button.cs-chip, a.cs-chip { cursor: pointer; }
+button.cs-chip:hover, a.cs-chip:hover { border-color: var(--hairline-strong); background: var(--surface-3); }
+.cs-chip .dot { width: 6px; height: 6px; }
+.cs-chip.danger { color: var(--danger-text); }
+
+.cs-port { font: 11px var(--font-mono); padding: 4px 8px; border-radius: 5px; background: var(--surface-2); color: var(--ink-faint); }
+.cs-port.used { background: var(--ink); color: #fff; }
+.cs-port.other { background: transparent; border: 1px dashed var(--hairline-strong); color: var(--ink-subtle); padding: 3px 7px; }
+
+.cs-proto { font: 11px var(--font-mono); padding: 3px 7px; border-radius: 5px; background: var(--surface-2); color: #555; width: fit-content; }
+.cs-listen { font: 600 16px var(--font-mono); letter-spacing: -.01em; }
+
+.cs-action { font: 11px var(--font-mono); padding: 3px 8px; border-radius: 5px; width: 52px; text-align: center; display: inline-block; }
+.cs-action.allow { background: var(--ok-bg); color: var(--ok-text); }
+.cs-action.deny { background: var(--danger-bg); color: var(--danger-text); }
+
+/* access lists */
+.cs-split { flex: 1; display: grid; grid-template-columns: 320px 1fr; min-height: 0; }
+.cs-list { border-right: 1px solid var(--hairline); background: var(--surface); padding: 12px; display: flex; flex-direction: column; gap: 4px; overflow: auto; }
+.cs-list-item { padding: 12px 14px; border-radius: 8px; display: flex; flex-direction: column; gap: 3px; cursor: pointer; text-align: left; border: 0; background: transparent; font: inherit; color: inherit; width: 100%; }
+.cs-list-item:hover { background: var(--surface-3); }
+.cs-list-item.active { background: var(--surface-2); }
+.cs-detail { padding: 28px 32px; display: flex; flex-direction: column; gap: 22px; overflow: auto; min-height: 0; }
+.cs-detail-title { font: 600 20px var(--font-mono); letter-spacing: -.01em; }
+.cs-rule { display: flex; align-items: center; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--hairline-soft); }
+.cs-rule.dragging { opacity: .4; }
+.cs-rule.drop-target { box-shadow: inset 0 2px 0 var(--ink); }
+.cs-rule .input { height: 32px; font-size: 13px; }
+.cs-rule-static { display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--hairline-soft); }
+.cs-dashed { font-size: 12px; border: 1px dashed rgba(0,0,0,.15); border-radius: 8px; padding: 14px; text-align: center; color: var(--ink-faint); }
+.cs-denial { display: grid; grid-template-columns: 70px 150px 1fr auto; gap: 16px; font: 12px var(--font-mono); color: var(--ink-muted); padding: 3px 0; }
+.cs-sticky-footer { position: sticky; bottom: 0; margin: auto -32px -28px; padding: 12px 32px; background: var(--surface); border-top: 1px solid var(--hairline); display: flex; align-items: center; gap: 8px; z-index: 2; }
+.cs-users th, .cs-users td { padding: 8px 10px; }
+
+.cs-provider-row { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid var(--hairline-soft); }
+.cs-provider-row:last-child { border-bottom: 0; }
+.cs-provider-row.failed { background: var(--danger-bg); }
+
+.cs-history { display: flex; flex-direction: column; }
+.cs-history-row { display: grid; grid-template-columns: 116px 1fr auto; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--hairline-soft); font-size: 12px; align-items: baseline; }
+.cs-history-row:last-child { border-bottom: 0; }
+
+.cs-chain { display: flex; flex-direction: column; gap: 6px; }
+.cs-chain-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.cs-chain-row .line { width: 14px; border-left: 1px solid var(--hairline-strong); border-bottom: 1px solid var(--hairline-strong); height: 10px; margin-top: -10px; }
+
+.cs-file-drop { position: relative; }
+.cs-file-drop .file-btn { position: absolute; top: 8px; right: 8px; }

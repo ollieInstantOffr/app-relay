@@ -1,0 +1,73 @@
+# Relay: reverse proxy (nginx) + load balancer (HAProxy) manager.
+#
+#   docker compose up -d --build
+#   open http://<host>:8181   (first run starts the setup wizard)
+#
+# All three containers use host networking: nginx binds 80/443 (+443/udp for
+# HTTP/3) directly on the host, HAProxy frontends created by the Expose wizard
+# bind 127.0.0.1:10080+ and are reached by nginx over loopback.
+# See deploy/README.md for ports, volumes and the Docker socket proxy option.
+
+name: relay
+
+services:
+  relay:
+    build:
+      context: .
+      target: relay
+    image: relay:latest
+    container_name: relay
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      RELAY_LISTEN: ":8181"
+      TZ: ${TZ:-UTC}
+    volumes:
+      - relay-data:/data
+      - relay-run:/run/relay
+      - relay-logs:/var/log/relay
+      # Docker discovery (read-only). Remove, or use a socket proxy, to disable.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - nginx
+      - haproxy
+
+  nginx:
+    build:
+      context: .
+      target: nginx
+    image: relay-nginx:latest
+    container_name: relay-nginx
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - relay-data:/data:ro
+      - relay-run:/run/relay
+      - relay-logs:/var/log/relay
+      - relay-nginx:/etc/relay/nginx
+
+  haproxy:
+    build:
+      context: .
+      target: haproxy
+    image: relay-haproxy:latest
+    container_name: relay-haproxy
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - relay-data:/data:ro
+      - relay-run:/run/relay
+      - relay-haproxy:/etc/relay/haproxy
+
+volumes:
+  relay-data:     # SQLite database, certificates, ACME webroot, backups
+  relay-run:      # agent sockets shared between the containers
+  relay-logs:     # nginx access/error logs, ingested by relay
+  relay-nginx:    # applied nginx releases (survive engine restarts)
+  relay-haproxy:  # applied haproxy releases

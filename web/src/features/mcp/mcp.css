@@ -1,0 +1,78 @@
+/* MCP slice: settings page (design 13), approvals panel (21), approval toasts (23). */
+
+/* The MCP settings page uses the design's two-column layout, wider than other sections. */
+.settings-page > .inner:has(> .mcp-settings) { max-width: 1180px; }
+.mcp-settings { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; align-items: start; }
+@media (max-width: 1200px) { .mcp-settings { grid-template-columns: minmax(0, 1fr); } }
+.mcp-main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.mcp-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.mcp-lede { font-size: 13px; line-height: 1.5; margin-top: 4px; }
+.mcp-enabled { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+
+.mcp-endpoint-grid { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 12px; }
+@media (max-width: 720px) { .mcp-endpoint-grid { grid-template-columns: 1fr; } }
+.mcp-url {
+  height: 38px; border: 1px solid var(--hairline-strong); border-radius: 8px; display: flex; align-items: center; gap: 8px;
+  padding: 0 4px 0 12px; font: 13px var(--font-mono); background: var(--bg); min-width: 0;
+}
+.mcp-url > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-url .btn { height: 28px; }
+.mcp-transports { display: flex; height: 38px; width: 100%; }
+.mcp-transports button { flex: 1; }
+.mcp-restrict { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--hairline-mid); border-radius: 8px; }
+.mcp-restrict .select { width: auto; min-width: 160px; }
+
+.mcp-token-row { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid var(--hairline-soft); }
+.mcp-token-row:last-child { border-bottom: 0; }
+.mcp-token-row.inactive { opacity: .6; }
+.mcp-token-name { font-size: 13px; font-weight: 500; }
+.mcp-token-meta { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-token-row .revoke { color: var(--danger-text); }
+
+.mcp-tools { display: grid; grid-template-columns: 1fr 1fr; column-gap: 24px; padding: 6px 18px 12px; }
+@media (max-width: 720px) { .mcp-tools { grid-template-columns: 1fr; } }
+.mcp-tool { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 13px; min-width: 0; }
+.mcp-tool-name { font: 12px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-tool.off .mcp-tool-name { color: var(--ink-faint); }
+.mcp-tool .perm-text { font-size: 11px; color: var(--ink-faint); }
+.mcp-perm {
+  appearance: none; border: 0; cursor: pointer; font: 11px var(--font-mono); padding: 2px 16px 2px 6px; border-radius: 4px;
+  background-repeat: no-repeat; background-position: right 5px center; background-size: 6px 4px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='4'%3E%3Cpath d='M0 0l3 4 3-4z' fill='%23888'/%3E%3C/svg%3E");
+}
+.mcp-perm.confirm { background-color: var(--warn-bg); color: var(--warn-text); }
+.mcp-perm.allow { background-color: var(--surface-2); color: var(--ink-muted); }
+.mcp-perm:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
+.mcp-tools-foot { display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--hairline-soft); flex-wrap: wrap; }
+.mcp-timeout { width: 72px; text-align: right; }
+
+.mcp-savebar { display: flex; align-items: center; gap: 8px; }
+
+.mcp-side-card { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.mcp-side-card .code.dark { font-size: 11.5px; line-height: 1.6; margin: 0; overflow-x: auto; }
+.mcp-copy-block .btn { width: 100%; justify-content: center; }
+.mcp-link { margin-left: auto; color: var(--ink-subtle); text-decoration: none; }
+.mcp-link:hover { color: var(--ink); text-decoration: underline; }
+.mcp-calls { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+.mcp-call { display: flex; gap: 10px; align-items: baseline; min-width: 0; }
+.mcp-call-time { width: 44px; flex: none; }
+.mcp-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* approvals panel */
+.approvals-panel { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.approvals-head { display: flex; flex-direction: column; gap: 2px; }
+.approval-card {
+  background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 10px; min-width: 0;
+}
+.approval-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; flex-wrap: wrap; }
+.approval-meta .tool { font: 600 12px var(--font-mono); }
+.approval-meta .expires { margin-left: auto; font: 11px var(--font-mono); color: var(--warn-text); white-space: nowrap; }
+.approval-summary { font-size: 13px; line-height: 1.55; color: var(--ink-muted); overflow-wrap: anywhere; }
+.approval-summary strong { color: var(--ink); font-weight: 600; }
+.approval-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.approvals-panel.compact .approval-card { padding: 12px 14px; }
+.approvals-history { display: flex; flex-direction: column; margin-top: 8px; }
+.approvals-history .card-title { margin-bottom: 6px; }
+.approval-history-row { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-top: 1px solid var(--hairline-soft); font-size: 12px; min-width: 0; }
+.approval-history-row .when { width: 76px; flex: none; }

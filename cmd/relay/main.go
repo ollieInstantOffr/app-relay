@@ -1,0 +1,154 @@
+// Command relay is the Relay reverse proxy + load balancer manager.
+//
+//	relay [serve]                         run the API, UI and MCP server
+//	relay agent --engine nginx|haproxy    supervise an engine (engine containers)
+//	relay users reset-password <name>     reset a user's password
+//	relay mcp-stdio --url URL --token T   MCP over stdio for local clients
+//	relay version
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"time"
+
+	"github.com/instantoffr/relay/internal/acme"
+	"github.com/instantoffr/relay/internal/agent"
+	"github.com/instantoffr/relay/internal/api"
+	"github.com/instantoffr/relay/internal/apply"
+	"github.com/instantoffr/relay/internal/auth"
+	"github.com/instantoffr/relay/internal/backup"
+	"github.com/instantoffr/relay/internal/core"
+	"github.com/instantoffr/relay/internal/docker"
+	"github.com/instantoffr/relay/internal/engines"
+	"github.com/instantoffr/relay/internal/events"
+	"github.com/instantoffr/relay/internal/health"
+	"github.com/instantoffr/relay/internal/lb"
+	"github.com/instantoffr/relay/internal/logs"
+	"github.com/instantoffr/relay/internal/mcp"
+	"github.com/instantoffr/relay/internal/notify"
+	"github.com/instantoffr/relay/internal/npmimport"
+	"github.com/instantoffr/relay/internal/store"
+	"github.com/instantoffr/relay/internal/webui"
+)
+
+var version = "0.1.0"
+
+func main() {
+	level := slog.LevelInfo
+	if os.Getenv("RELAY_DEBUG") == "1" {
+		level = slog.LevelDebug
+	}
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	args := os.Args[1:]
+	cmd := "serve"
+	if len(args) > 0 {
+		cmd, args = args[0], args[1:]
+	}
+
+	var err error
+	switch cmd {
+	case "serve":
+		err = serve(ctx, log)
+	case "agent":
+		fs := flag.NewFlagSet("agent", flag.ExitOnError)
+		engine := fs.String("engine", "", "nginx | haproxy")
+		runDir := fs.String("run-dir", envOr("RELAY_RUN_DIR", "/run/relay"), "socket directory")
+		logDir := fs.String("log-dir", envOr("RELAY_LOG_DIR", "/var/log/relay"), "log directory")
+		dataDir := fs.String("data-dir", envOr("RELAY_DATA_DIR", "/data"), "data directory")
+		fs.Parse(args)
+		err = agent.Run(ctx, agent.Options{Engine: *engine, RunDir: *runDir, LogDir: *logDir, DataDir: *dataDir, Log: log.With("engine", *engine)})
+	case "users":
+		if len(args) != 2 || args[0] != "reset-password" {
+			err = errors.New("usage: relay users reset-password <username>")
+			break
+		}
+		cfg := core.ConfigFromEnv(version)
+		var st *store.Store
+		if st, err = store.Open(filepath.Join(cfg.DataDir, "relay.db")); err == nil {
+			err = auth.ResetPasswordCLI(ctx, st, args[1], os.Stdout)
+			st.Close()
+		}
+	case "mcp-stdio":
+		fs := flag.NewFlagSet("mcp-stdio", flag.ExitOnError)
+		url := fs.String("url", envOr("RELAY_URL", "http://127.0.0.1:8181"), "Relay base URL")
+		token := fs.String("token", os.Getenv("RELAY_TOKEN"), "MCP API token")
+		fs.Parse(args)
+		err = mcp.RunStdio(ctx, mcp.StdioOptions{URL: *url, Token: *token})
+	case "version", "--version", "-v":
+		fmt.Println("relay", version)
+	default:
+		err = fmt.Errorf("unknown command %q", cmd)
+	}
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, http.ErrServerClosed) {
+		fmt.Fprintln(os.Stderr, "relay:", err)
+		os.Exit(1)
+	}
+}
+
+func envOr(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
+}
+
+func serve(ctx context.Context, log *slog.Logger) error {
+	cfg := core.ConfigFromEnv(version)
+	engines.InstallAgentBinary(log) // publish the agent binary for the engine containers
+	for _, d := range []string{cfg.DataDir, filepath.Join(cfg.DataDir, "certs"), filepath.Join(cfg.DataDir, "acme"), filepath.Join(cfg.DataDir, "backups"), cfg.RunDir, cfg.LogDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return err
+		}
+	}
+	st, err := store.Open(filepath.Join(cfg.DataDir, "relay.db"))
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	app := core.New(cfg, st, events.New(), log)
+	app.Auth = auth.New(app)
+	app.Engine = apply.New(app)
+	app.LB = lb.New(app)
+	app.Certs = acme.New(app)
+	app.Logs = logs.New(app)
+	app.Health = health.New(app)
+	app.Docker = docker.New(app)
+	app.Notify = notify.New(app)
+	app.Backup = backup.New(app)
+	app.Importer = npmimport.New(app)
+	app.MCP = mcp.New(app)
+	app.Engines = engines.New(app)
+
+	for _, svc := range []core.Service{app.Auth, app.Notify, app.Certs, app.Engine, app.LB, app.Logs, app.Health, app.Docker, app.Backup, app.MCP, app.Engines} {
+		if err := svc.Start(ctx); err != nil {
+			return fmt.Errorf("start %T: %w", svc, err)
+		}
+	}
+
+	srv := &http.Server{
+		Addr:              cfg.Listen,
+		Handler:           api.New(app, webui.FS()).Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		srv.Shutdown(shutdown)
+	}()
+	log.Info("relay listening", "addr", cfg.Listen, "version", version)
+	return srv.ListenAndServe()
+}

@@ -1,0 +1,1143 @@
+body{margin:0;background:#e9e8e4;font-family:Geist,system-ui,sans-serif;color:#141414;-webkit-font-smoothing:antialiased}a{color:#141414}a:hover{color:#555}*{box-sizing:border-box}
+Relay — reverse proxy manager, UI mockups
+Assumptions:
+homelab self-hoster, light mode, icon rail + card grid, slide-over drawer for add/edit. "Relay" is a placeholder name. Clean/neutral direction: near-black accent, one signal green for health, amber/red only for warnings.
+Round 2:
+HAProxy load balancing lives under a new rail item "Load balancer" (backends → servers, algorithms, health checks, sticky sessions; haproxy.cfg is generated and hot-reloaded, never hand-edited). Login is username + password; a 3-step wizard creates the first admin. MCP server sits in Settings with tokens, tool permissions and an audit trail.
+Round 3:
+"Expose online" wizard (14) turns a backend into a public proxy host in 4 steps — Relay creates a localhost-only HAProxy frontend and an nginx host pointing at it, so the proxy stays the single public entry. All 9 settings pages are now drawn (08, 13, 15a–c, 16a–d).
+Round 4:
+config safety (17: versions, diff, rollback, pending-changes bar, auto-rollback toast) · host Locations + Advanced tabs (18: forward-auth, rate limit, body size, nginx snippet) · HAProxy Frontends & Stats (19) · Redirects + default host (20) · Audit log with MCP approvals inbox (21) · empty/error/offline states (22) · component sheet: toasts, dialogs, menus, ⌘K palette, tooltips, field states (23).
+Round 5:
+brand + icon set (24) applied to every rail · expose wizard steps 3–4 (25) · first-run wizard steps 2–3 (26) · hosts table view with bulk actions (27).
+Round 6:
+remaining drawers/dialogs (28–30): access list with basic-auth users, stream editor, add user, one-time token reveal, log detail with timing + block-IP, certificate detail (chain, SANs, history, used-by), Docker bulk suggestions, HAProxy frontend rule builder, shortcuts sheet, session-expired re-auth, viewer not-allowed, host SSL tab with per-host HTTP/3. Handoff files:
+brand/icons.svg
+,
+brand/tokens.md
+.
+System:
+Geist + Geist Mono · 56px icon rail · 1440×900 artboards · cards with 1px hairline borders, 10px radius, no shadows · status conveyed by a single dot + mono label.
+01 · Dashboard
+
+===== 01 Dashboard =====
+Overview
+nginx 1.27.2 · uptime 41d
+Search hosts, certs, logs
+⌘K
++ New host
+Proxy hosts
+18
+17 healthy
+Requests · 24h
+1.24M
++8.2%
+Certificates
+14
+2 expiring <14d
+5xx from upstreams
+0.04%
+512 req
+Traffic
+1h
+24h
+7d
+00:00
+06:00
+12:00
+18:00
+now
+p50 latency
+38 ms
+p95 latency
+212 ms
+Bandwidth
+86.3 GB
+Activity
+View all
+Certificate renewed for
+*.home.lan
+2 min ago · Let's Encrypt · DNS-01
+Upstream unreachable
+10.0.0.42:8096
+18 min ago · jellyfin.home.lan · 502
+Host created
+grafana.home.lan
+1 h ago · by admin
+Cert expires in 9 days
+vault.home.lan
+3 h ago · auto-renew off
+Config reloaded · 0 warnings
+3 h ago · nginx -s reload · 140 ms
+Access list
+lan-only
+attached to 3 hosts
+Yesterday · by admin
+Host health
+home
+grafana
+jellyfin
+nextcloud
+vault
+pihole
+gitea
+uptime
+photos
++9 more
+02 · Proxy hosts
+
+===== 02 Proxy hosts =====
+Proxy hosts
+18
+Filter by domain or upstream
++ New host
+All
+Healthy · 17
+Errors · 1
+No SSL · 2
+Disabled · 1
+Grid
+Table
+Sort: Recently updated
+home.lan
+→ http://10.0.0.10:3000
+···
+TLS · LE
+websockets
+lan-only
+42k req
+grafana.home.lan
+→ http://10.0.0.21:3000
+···
+TLS · LE
+lan-only
+6.1k req
+jellyfin.home.lan
+→ http://10.0.0.42:8096
+···
+502 · upstream connection refused · 18 min
+Retry
+TLS · LE
+websockets
+128k req
+cloud.home.lan
+→ https://10.0.0.30:443
+···
+TLS · LE
+HSTS
+10 GB body
+311k req
+vault.home.lan
+→ http://10.0.0.15:8000
+···
+TLS · 9d left
+basic auth
+1.2k req
+pihole.home.lan
+→ http://10.0.0.2:80/admin
+···
+HTTP only
+lan-only
+9.8k req
+git.home.lan
+→ http://10.0.0.18:3000
+···
+TLS · LE
+block exploits
+3.4k req
+old-wiki.home.lan
+→ http://10.0.0.50:8080
+···
+Disabled · no traffic
+HTTP only
++
+Add proxy host
+03 · Add / edit host (slide-over drawer)
+
+===== 03 Add host drawer =====
+Proxy hosts
+18
+New proxy host
+Changes apply on save · config validated first
+×
+Details
+SSL
+Locations
+Advanced
+Domain names
+grafana.home.lan
+×
+add another…
+Wildcards allowed · press Enter to add
+Forward to
+http
+▾
+10.0.0.21
+3000
+Upstream reachable · 200 OK · 12 ms
+Discovered containers
+grafana:3000
+loki:3100
+prometheus:9090
+Websockets
+Upgrade headers
+Block exploits
+Common attack paths
+Cache assets
+Static files, 30d
+HTTP/2
+Requires TLS
+Access list
+lan-only
+· 192.168.0.0/16, 10.0.0.0/8
+▾
+Generated config preview
+server { server_name grafana.home.lan; listen 443 ssl http2; location / { proxy_pass http://10.0.0.21:3000; } }
+Config valid
+Cancel
+Save & reload
+04 · SSL certificates
+
+===== 04 SSL certificates =====
+Certificates
+14
+Upload custom
++ Request certificate
+11
+Valid & auto-renewing
+2
+Expiring within 14 days
+1
+Custom (manual)
+Certificate
+Provider
+Expiry
+Used by
+Auto-renew
+*.home.lan
+Wildcard · issued 2d ago
+Let's Encrypt · DNS-01
+88 days
+9 hosts
+···
+cloud.home.lan
+Issued 31d ago
+Let's Encrypt · HTTP-01
+59 days
+1 host
+···
+vault.home.lan
+Renewal failed · DNS challenge timed out
+Let's Encrypt · DNS-01
+9 days
+1 host
+Retry
+···
+photos.home.lan
+Issued 78d ago
+Let's Encrypt · HTTP-01
+12 days
+1 host
+···
+git.home.lan
+Issued 12d ago
+Let's Encrypt · HTTP-01
+78 days
+1 host
+···
+internal-ca.pem
+Custom upload · step-ca
+Custom
+402 days
+2 hosts
+Manual
+···
+DNS providers
+Credentials for DNS-01 wildcard challenges
+cloudflare
+route53 · auth failed
++ Add provider
+05 · Access lists
+
+===== 05 Access lists =====
+Access lists
+4
++ New list
+lan-only
+7 hosts
+Allow 2 CIDRs · deny all
+family
+3 hosts
+Basic auth · 4 users
+admin-vpn
+2 hosts
+Allow 1 CIDR + auth · 1 user
+public
+5 hosts
+No restrictions · rate-limited
+lan-only
+Only local network clients. Everyone else gets a 403.
+Test an IP
+Delete
+IP rules
+Evaluated top to bottom
+⋮⋮
+allow
+192.168.0.0/16
+Home LAN
+⋮⋮
+allow
+10.0.0.0/8
+Docker / VPN
+⋮⋮
+deny
+all
+Default
++ Add rule
+Basic authentication
+Off — clients matching an allow rule pass through without a password.
+Turn on to add users
+Attached hosts
+7
+home.lan
+grafana.home.lan
+pihole.home.lan
+proxmox.home.lan
+router.home.lan
+unifi.home.lan
+nas.home.lan
+Recent denials · 24h
+14:02:11
+185.220.101.4
+GET /admin → grafana.home.lan
+403
+13:48:57
+45.155.205.233
+GET /.env → home.lan
+403
+12:30:04
+103.99.0.12
+POST /login → nas.home.lan
+403
+06 · Streams (TCP/UDP)
+
+===== 06 Streams =====
+Streams
+5
++ New stream
+Raw port forwarding at layer 4 — for anything that isn't HTTP: game servers, databases, SSH, DNS. No TLS termination, no path routing.
+Listen
+Name
+Proto
+Forward to
+Connections
+Throughput
+:25565
+Minecraft
+TCP
+10.0.0.60:25565
+6 active
+2.1 MB/s
+···
+:51820
+WireGuard
+UDP
+10.0.0.1:51820
+3 peers
+480 KB/s
+···
+:5432
+Postgres
+TCP
+10.0.0.31:5432
+12 active
+96 KB/s
+···
+:2222
+Gitea SSH
+TCP
+10.0.0.18:22
+0
+—
+···
+:53
+DNS (disabled)
+UDP
+10.0.0.2:53
+—
+—
+···
+Port usage
+Ports bound by Relay on this machine. Grey = free, black = in use.
+80
+443
+2222
+5432
+25565
+51820
+53
+8080
+8443
+Tip
+Streams bypass access lists and TLS. If you need to expose a database, prefer a VPN stream (WireGuard) and keep the database stream LAN-bound.
+07 · Logs / traffic
+
+===== 07 Logs =====
+Logs
+Access
+Error
+Audit
+Live · tailing
+Export
+filter
+host:jellyfin.home.lan
+status:>=500
+| path, ip, method, ua…
+Last 1h ▾
+13:05
+13:20
+13:35
+13:50
+14:05
+Time
+Status
+Host
+Request
+Client
+Upstream
+Size
+14:03:41
+502
+jellyfin.home.lan
+GET /web/index.html
+192.168.1.24
+refused
+157 B
+14:03:40
+200
+cloud.home.lan
+PROPFIND /remote.php/dav/files/…
+192.168.1.30
+41 ms
+2.3 KB
+14:03:40
+200
+grafana.home.lan
+GET /api/ds/query
+192.168.1.12
+118 ms
+18.9 KB
+14:03:39
+502
+jellyfin.home.lan
+GET /System/Info/Public
+10.0.0.77
+refused
+157 B
+14:03:38
+403
+home.lan
+GET /.git/config
+45.155.205.233
+—
+162 B
+14:03:37
+304
+home.lan
+GET /assets/app.3f1c.js
+192.168.1.24
+3 ms
+0 B
+14:03:37
+200
+pihole.home.lan
+GET /admin/api.php?summary
+192.168.1.12
+9 ms
+1.1 KB
+14:03:36
+101
+home.lan
+GET /ws · websocket upgrade
+192.168.1.24
+2 ms
+—
+14:03:35
+200
+git.home.lan
+POST /user/repo.git/git-upload-pack
+192.168.1.30
+640 ms
+4.2 MB
+14:03:35
+200
+photos.home.lan
+GET /api/asset/thumbnail/7d2a…
+192.168.1.40
+22 ms
+84 KB
+08 · Settings / users
+
+===== 08 Settings =====
+Settings
+General
+Users & access
+Docker discovery
+Default TLS
+Notifications
+Backup & restore
+About
+Users & access
+Who can sign in to Relay and what they can change.
+Users
++ Invite
+Jonas (you)
+jonas@home.lan · last active now
+admin
+2FA on
+···
+Mira
+mira@home.lan · 3 days ago
+editor
+2FA off
+···
+API
+homeassistant-token
+API key · read-only · used 4 min ago
+viewer
+···
+Sign-in
+Require 2FA for admins
+TOTP or passkey
+Restrict admin UI to LAN
+Applies access list
+lan-only
+to this dashboard
+Session length
+Sign out inactive sessions
+7 days
+▾
+Reset admin password
+Signs out all sessions
+Reset
+09 · Load balancer (HAProxy) — overview
+
+===== 09 Load balancer =====
+Load balancer
+Backends
+Frontends
+Stats
+haproxy 3.0.4 · running · reloaded 2h ago
+View haproxy.cfg
++ New backend
+Backends
+4
+all up
+Servers
+11
+1 down · 1 drain
+Sessions / s
+342
+peak 1.1k
+Queue
+0
+no waiting requests
+web-app
+HTTP · roundrobin · sticky cookie · 3 servers
+:443 → app.home.lan
+···
+10.0.0.71:8080
+w 100
+36%
+12 ms
+10.0.0.72:8080
+w 100
+34%
+11 ms
+10.0.0.73:8080
+w 100
+30%
+14 ms
+check GET /health · 2s
+TLS re-encrypt off
+210 sess/s
+api
+HTTP · leastconn · 3 servers · degraded
+:443 → api.home.lan
+···
+10.0.0.81:9000
+w 100
+58%
+40 ms
+10.0.0.82:9000
+DOWN
+L7 timeout · 3/3 failed · 6 min
+10.0.0.83:9000
+w 100
+42%
+38 ms
+check GET /healthz · 5s
+retries 3
+96 sess/s
+postgres-ro
+TCP · leastconn · 2 servers + 1 backup
+:5433
+···
+10.0.0.31:5432
+w 100
+55%
+6 conn
+10.0.0.32:5432
+w 100
+45%
+5 conn
+10.0.0.33:5432
+backup
+standby · not receiving traffic
+pgsql-check · 3s
+11 conn
+minio
+HTTP · source hash · 2 servers
+:443 → s3.home.lan
+···
+10.0.0.91:9000
+w 100
+62%
+18 ms
+10.0.0.92:9000
+drain
+maintenance · finishing 4 sessions
+check GET /minio/health/live
+36 sess/s
+10 · Edit backend (drawer) — generates haproxy.cfg, nothing typed by hand
+
+===== 10 Edit backend drawer =====
+Load balancer
+Edit backend
+api
+Saved changes are hot-reloaded into HAProxy without dropping connections
+×
+Servers
+Balancing
+Health checks
+Frontend
+Timeouts
+Config
+Mode
+HTTP (L7)
+TCP (L4)
+Algorithm
+leastconn
+· fewest active connections
+▾
+Servers
+Drag to reorder · weights 1–256
+Address
+Port
+Weight
+Role
+Check
+⋮⋮
+10.0.0.81
+9000
+100
+active
+▾
+×
+⋮⋮
+10.0.0.82
+9000
+100
+active
+▾
+×
+⋮⋮
+10.0.0.83
+9000
+100
+active
+▾
+×
++ Add server
+or pick from discovered containers:
+api-4:9000
+10.0.0.82 is failing health checks (L7 timeout, 6 min). Requests are being routed to the other two.
+Set to drain
+Sticky sessions
+Insert cookie
+SRVID
+Forward client IP
+X-Forwarded-For / PROXY protocol
+Generated haproxy.cfg (this backend)
+Copy
+backend api mode http balance leastconn option httpchk GET /healthz http-check expect status 200 default-server inter 5s fall 3 rise 2 server api-1 10.0.0.81:9000 check weight 100 server api-2 10.0.0.82:9000 check weight 100 server api-3 10.0.0.83:9000 check weight 100
+haproxy -c passed
+Cancel
+Save & hot-reload
+11 · Login · 12 · First-run wizard (create the first user)
+
+===== 11 Login =====
+Relay
+Sign in
+proxy.home.lan
+Username
+jonas
+Password
+Forgot?
+••••••••••
+Show
+Stay signed in on this device
+Sign in
+Relay 0.4.1 · nginx + haproxy healthy
+
+===== 12 First-run wizard =====
+Relay
+1
+Admin account
+2
+Network
+3
+Done
+Create the first admin
+No accounts exist yet. This user gets full control; you can invite others later in Settings.
+Username
+jonas
+Password
+••••••••••••••
+Strong · 14 characters · add a symbol for very strong
+Confirm password
+••••••••••••••
+Set up 2FA now
+Recommended · scan a QR code on the next step
+Step 1 of 3
+Create account →
+Step 2 detects listening ports (80/443), your LAN CIDR for the default
+lan-only
+access list, and Docker if present.
+13 · Settings → MCP server
+
+===== 13 MCP server settings =====
+Settings
+General
+Users & access
+Docker discovery
+Default TLS
+HAProxy engine
+MCP server
+Notifications
+Backup & restore
+About
+MCP server
+Let AI assistants manage Relay through the Model Context Protocol — create hosts, inspect logs, drain servers — under the permissions you set here.
+Enabled
+Endpoint
+URL
+https://proxy.home.lan/mcp
+Copy
+Transport
+HTTP
+stdio
+Restrict to access list
+Only these clients can reach the endpoint
+admin-vpn
+▾
+API tokens
++ Generate token
+Claude Desktop
+rl_mcp_••••••••••••7f2a · last used 3 min ago
+read + write
+Revoke
+Cursor
+rl_mcp_••••••••••••c19e · last used 2 days ago
+read-only
+Revoke
+home-assistant
+rl_mcp_••••••••••••0b44 · expired
+read-only
+Delete
+Exposed tools
+Write tools require confirmation by default
+list_hosts
+read
+create_host
+confirm
+query_logs
+read
+update_host
+confirm
+get_backend_status
+read
+drain_server
+confirm
+list_certificates
+read
+delete_host
+disabled
+request_certificate
+confirm
+manage_users
+disabled
+Connect a client
+Paste this into your assistant's MCP config.
+{ "mcpServers": { "relay": { "url": "https://proxy.home.lan/mcp", "headers": { "Authorization": "Bearer rl_mcp_…" } } } }
+Copy config
+Recent tool calls
+Audit log
+14:02
+query_logs
+· Claude Desktop
+ok
+13:58
+drain_server
+· Claude Desktop
+confirmed
+13:41
+get_backend_status
+· Cursor
+ok
+Yest.
+delete_host
+· Cursor
+denied
+14 · Expose backend online — wizard (from a backend's ··· menu or the "Expose" button)
+
+===== 14 Expose wizard =====
+Load balancer
+Expose
+web-app
+online
+Creates a proxy host on the reverse proxy that points at this load balancer. One save, both configs.
+×
+Backend
+2
+Domain & TLS
+3
+Access
+4
+Review
+Public domain
+app.example.com
+DNS → 203.0.113.7 (this server)
+Certificate
+Request new · Let's Encrypt
+HTTP-01 · auto-renews · ready in ~30s
+Use existing
+*.example.com · 71 days left
+None (HTTP only)
+Not recommended for anything public
+Force HTTPS
+Websockets
+What gets created
+Internet
+https://app.example.com
+↓
+Reverse proxy
+new host
+nginx · TLS · lan-only? no
+↓
+Load balancer
+new frontend
+haproxy · 127.0.0.1:10080
+↓
+Backend · web-app
+3 servers · roundrobin
+The LB frontend binds to localhost only; the proxy is the sole public entry.
+Step 2 of 4
+← Back
+Continue →
+15 · Settings — General · Docker discovery · Default TLS
+
+===== 15a Settings General =====
+Settings
+General
+Users & access
+Docker discovery
+Default TLS
+HAProxy engine
+MCP server
+Notifications
+Backup & restore
+About
+General
+Instance identity, listening ports and defaults for new hosts.
+Instance
+Instance name
+Home rack
+Admin UI domain
+proxy.home.lan
+Timezone
+Europe/Berlin
+▾
+Public IP (detected)
+203.0.113.7
+Listening ports
+HTTP
+Redirects to HTTPS when Force HTTPS is on
+80
+HTTPS
+HTTP/2 and HTTP/3 (QUIC) enabled
+443
+Admin UI
+Served through the proxy itself at the domain above
+8181
+Defaults for new hosts
+Force HTTPS
+Block common exploits
+Websockets
+Attach access list
+lan-only
+Save changes
+
+===== 15b Settings Docker =====
+Settings
+General
+Users & access
+Docker discovery
+Default TLS
+HAProxy engine
+MCP server
+Notifications
+Backup & restore
+About
+Docker discovery
+Watch the Docker socket and suggest containers as upstreams. Optionally auto-create hosts from labels.
+Enabled
+Connection
+Socket / host
+unix:///var/run/docker.sock
+connected · 27.1 · 23 containers
+Auto-create hosts from labels
+Containers with
+relay.host=…
+get a proxy host automatically
+Remove hosts when container is removed
+Only for hosts that were auto-created
+Label reference
+relay.host=grafana.home.lan relay.port=3000 relay.tls=auto # letsencrypt | auto | off relay.access=lan-only relay.backend=web-app # join an HAProxy backend instead
+Discovered, not yet proxied
+4
+loki
+· 172.18.0.9:3100
+Create host
+prometheus
+· 172.18.0.7:9090
+Create host
+api-4
+· 172.18.0.14:9000
+Add to backend ▾
+
+===== 15c Settings Default TLS =====
+Settings
+General
+Users & access
+Docker discovery
+Default TLS
+HAProxy engine
+MCP server
+Notifications
+Backup & restore
+About
+Default TLS
+ACME account, challenge preferences and the cipher policy applied to every host.
+ACME account
+Provider
+Let's Encrypt (production)
+▾
+Contact email
+jonas@example.com
+Preferred challenge
+DNS-01
+HTTP-01
+TLS-ALPN
+Renew when
+30 days before expiry
+▾
+DNS providers
++ Add provider
+Cloudflare
+API token ••••8c1f · zones: example.com, home.lan
+Test
+···
+Route 53
+InvalidClientTokenId · credentials rejected 3 h ago
+Fix credentials
+···
+Protocol policy
+Cipher profile
+Mozilla "Intermediate" · TLS 1.2 + 1.3
+Modern
+Intermediate
+Old
+HSTS on all TLS hosts
+max-age 6 months · includeSubDomains
+OCSP stapling
+16 · Settings — HAProxy engine · Notifications · Backup & restore · About
+
+===== 16a Settings HAProxy engine =====
+Settings
+General
+Users & access
+Docker discovery
+Default TLS
+HAProxy engine
+MCP server
+Notifications
+Backup & restore
+About
+HAProxy engine
+Global defaults for the load balancer. Per-backend settings override these.
+Running
+Version
+3.0.4 · LTS
+Last reload
+2h ago · 38 ms · 0 dropped
+Config
+valid · 214 lines
+Default timeouts & limits
+Connect
+5s
+Client
+50s
+Server
+50s
+Max connections
+20000
+Health check interval
+2s
+Rise / fall
+2 / 3
+Reload & observability
+Seamless reloads
+Hand off listening sockets to the new process · no dropped connections
+Stats endpoint
+Feeds the Stats tab · protected by
+admin-vpn
+127.0.0.1:8404
+Prometheus metrics
+/metrics
+on the stats port
+View full haproxy.cfg
+Validate
+Reload now
+Save changes
+
+===== 16b Settings Notifications =====
+Settings
+General
+Users & access
+Docker discovery
+Default TLS
+HAProxy engine
+MCP server
+Notifications
+Backup & restore
+About
+Notifications
+Where to send alerts, and which events are worth waking you up for.
+Channels
++ Add channel
+ntfy
+https://ntfy.home.lan/relay
+Send test
+···
+Email (SMTP)
+smtp.fastmail.com:465 → jonas@example.com
+Send test
+···
+Webhook
+Not configured · Discord, Slack, Home Assistant…
+Set up
+Event
+ntfy
+Email
+Webhook
+Upstream or LB server goes down
+Certificate renewal failed
+Certificate expires in < 14 days
+Config reload failed
+New sign-in from unknown IP
+MCP write tool executed
+Weekly summary
+Quiet hours
+Batch non-critical alerts · down/failed events always go through
+23:00 – 07:00
+
+===== 16c Settings Backup =====
+Settings
+General
+Users & access
+Docker discovery
+Default TLS
+HAProxy engine
+MCP server
+Notifications
+Backup & restore
+About
+Backup & restore
+Hosts, backends, access lists, certificates and users in one encrypted archive.
+Scheduled backups
+Daily at 03:00 · keep 14
+Next run in 12 h · last run succeeded (2.1 MB)
+Edit schedule
+Destination
+s3://homelab-backups/relay/ · MinIO
+reachable
+···
+Encryption
+age · passphrase set · includes private keys
+Change passphrase
+Snapshots
+Back up now
+Created
+Size
+Contents
+Trigger
+2026-09-14 03:00
+2.1 MB
+18 hosts · 4 backends · 14 certs
+Scheduled
+Restore
+Download
+2026-09-13 15:42
+2.1 MB
+18 hosts · 4 backends · 14 certs
+Before upgrade 0.4.1
+Restore
+Download
+2026-09-13 03:00
+2.0 MB
+17 hosts · 4 backends · 14 certs
+Scheduled
+Restore
+Download
+2026-09-12 03:00
+2.0 MB
+17 hosts · 3 backends · 13 certs
+Scheduled
+Restore
+Download
+Restore from file
+Drop a
+.relay.age
+archive or browse
+Import from Nginx Proxy Manager
+Point at an NPM data folder or SQLite DB. Hosts, certs and access lists are converted; nothing is changed until you confirm.
+Start import →
+
+===== 16d Settings About =====
+Settings
+General
+Users & access
+Docker discovery
+Default TLS
+HAProxy engine
+MCP server
+Notifications
+Backup & restore
+About
+Relay
+0.4.1
+Reverse proxy + load balancer manager · installed 41 days ago
+Update to 0.5.0
+Components
+nginx

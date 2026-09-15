@@ -1,0 +1,10 @@
+node_modules/
+web/node_modules/
+internal/webui/dist/*
+!internal/webui/dist/.keep
+/bin/
+/data/
+.DS_Store
+*.log
+.env
+.claude/worktrees/
