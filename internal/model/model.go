@@ -372,17 +372,20 @@ type HostDefaults struct {
 }
 
 type GeneralSettings struct {
-	InstanceName string       `json:"instanceName"`
-	AdminDomain  string       `json:"adminDomain"`
-	Timezone     string       `json:"timezone"`
-	PublicIP     string       `json:"publicIp"` // detected, read-only
-	HTTPPort     int          `json:"httpPort"`
-	HTTPSPort    int          `json:"httpsPort"`
-	AdminPort    int          `json:"adminPort"`
-	HTTP3        bool         `json:"http3"`
-	LANCIDR      string       `json:"lanCidr"`
-	Defaults     HostDefaults `json:"defaults"`
-	SetupDone    bool         `json:"setupDone"`
+	InstanceName string `json:"instanceName"`
+	AdminDomain  string `json:"adminDomain"`
+	Timezone     string `json:"timezone"`
+	PublicIP     string `json:"publicIp"` // detected, read-only
+	HTTPPort     int    `json:"httpPort"`
+	HTTPSPort    int    `json:"httpsPort"`
+	AdminPort    int    `json:"adminPort"`
+	HTTP3        bool   `json:"http3"`
+	// ProxyEngine serves the HTTP/HTTPS ports and streams: "nginx" (default)
+	// or "edge" (Relay Edge). Switching is a pending change.
+	ProxyEngine string       `json:"proxyEngine"`
+	LANCIDR     string       `json:"lanCidr"`
+	Defaults    HostDefaults `json:"defaults"`
+	SetupDone   bool         `json:"setupDone"`
 }
 
 type SecuritySettings struct {

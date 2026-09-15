@@ -7,12 +7,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
 )
 
-// engine abstracts the nginx / haproxy specifics.
+// engine abstracts the nginx / haproxy / edge specifics.
 type engine interface {
 	mainFile() string
 	binary() string
@@ -25,6 +26,31 @@ type engine interface {
 	detect() (version string, modules []string, dynamic map[string]string)
 	checkFiles(files Files) error
 	prepare() // create runtime directories before start/validate
+	// alwaysOn engines should run whenever they are configured: a failed
+	// start restores and restarts the previous release, and /v1/stop does
+	// not persist (the container restart brings them back). HAProxy only
+	// runs while backends exist.
+	alwaysOn() bool
+	// proxy engines serve the HTTP/HTTPS ports and streams; only the one
+	// selected in /run/relay/proxy-engine starts on a fresh config root.
+	proxy() bool
+}
+
+// engineFactories is the engine registry (agent --engine <name>).
+var engineFactories = map[string]func(a *Agent) engine{
+	EngineNginx:   func(a *Agent) engine { return &nginxEngine{a: a} },
+	EngineHAProxy: func(a *Agent) engine { return &haproxyEngine{a: a} },
+	EngineEdge:    func(a *Agent) engine { return &edgeEngine{a: a} },
+}
+
+// EngineNames lists the registered engines, sorted.
+func EngineNames() []string {
+	names := make([]string, 0, len(engineFactories))
+	for n := range engineFactories {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
 
 type nginxEngine struct{ a *Agent }
@@ -33,6 +59,8 @@ func (n *nginxEngine) mainFile() string           { return "nginx.conf" }
 func (n *nginxEngine) binary() string             { return "nginx" }
 func (n *nginxEngine) stopSignal() syscall.Signal { return syscall.SIGQUIT }
 func (n *nginxEngine) stableWait() time.Duration  { return 1200 * time.Millisecond }
+func (n *nginxEngine) alwaysOn() bool             { return true }
+func (n *nginxEngine) proxy() bool                { return true }
 func (n *nginxEngine) currentConf() string {
 	return filepath.Join(n.a.rel.root, "current", "nginx.conf")
 }

@@ -12,7 +12,7 @@ import (
 type ErrorRecord struct {
 	ID      int64     `json:"id"`
 	TS      time.Time `json:"ts"`
-	Source  string    `json:"source"` // nginx | haproxy | relay | acme
+	Source  string    `json:"source"` // nginx | edge (Relay Edge) | haproxy | relay | acme
 	Level   string    `json:"level"`  // emerg | alert | crit | error | warn | notice | info | debug
 	Message string    `json:"message"`
 }

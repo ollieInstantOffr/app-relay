@@ -9,12 +9,16 @@ import (
 
 // VersionRow is one config_versions row (engine slice).
 type VersionRow struct {
-	ID             int64
-	CreatedAt      time.Time
-	Actor          string
-	Summary        string
-	Status         string // live | superseded | rolled_back | failed | draft
-	Snapshot       string // JSON model.Snapshot (only when loaded with blobs)
+	ID        int64
+	CreatedAt time.Time
+	Actor     string
+	Summary   string
+	Status    string // live | superseded | rolled_back | failed | draft
+	Snapshot  string // JSON model.Snapshot (only when loaded with blobs)
+	// ProxyEngine is the proxy engine the version was rendered for: nginx | edge.
+	ProxyEngine string
+	// NginxFiles / NginxHash hold the proxy engine's files (columns nginx_files
+	// and nginx_hash, whichever engine it is).
 	NginxFiles     string // JSON map path → content (only with blobs)
 	HAProxyCfg     string // (only with blobs)
 	Changes        string // JSON []core.PendingItem
@@ -31,7 +35,7 @@ type VersionRow struct {
 }
 
 const versionCols = `id, created_at, actor, summary, status, changes, error, validate_ms, reload_ms, rolled_back_to,
-	nginx_hash, haproxy_hash, haproxy_running, failed_engine, failed_stage, output`
+	nginx_hash, haproxy_hash, haproxy_running, failed_engine, failed_stage, output, proxy_engine`
 
 func scanVersion(sc interface{ Scan(...any) error }, blobs bool) (*VersionRow, error) {
 	var v VersionRow
@@ -39,7 +43,7 @@ func scanVersion(sc interface{ Scan(...any) error }, blobs bool) (*VersionRow, e
 	var rb sql.NullInt64
 	var running int
 	dest := []any{&v.ID, &at, &v.Actor, &v.Summary, &v.Status, &v.Changes, &v.Error, &v.ValidateMs, &v.ReloadMs, &rb,
-		&v.NginxHash, &v.HAProxyHash, &running, &v.FailedEngine, &v.FailedStage, &v.Output}
+		&v.NginxHash, &v.HAProxyHash, &running, &v.FailedEngine, &v.FailedStage, &v.Output, &v.ProxyEngine}
 	if blobs {
 		dest = append(dest, &v.Snapshot, &v.NginxFiles, &v.HAProxyCfg)
 	}
@@ -76,16 +80,19 @@ func (s *Store) InsertVersion(ctx context.Context, v *VersionRow) error {
 	if v.Changes == "" {
 		v.Changes = "[]"
 	}
+	if v.ProxyEngine == "" {
+		v.ProxyEngine = "nginx"
+	}
 	running := 0
 	if v.HAProxyRunning {
 		running = 1
 	}
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO config_versions
 		(id, created_at, actor, summary, status, snapshot, nginx_files, haproxy_cfg, changes, error, validate_ms, reload_ms, rolled_back_to,
-		 nginx_hash, haproxy_hash, haproxy_running, failed_engine, failed_stage, output)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 nginx_hash, haproxy_hash, haproxy_running, failed_engine, failed_stage, output, proxy_engine)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		v.ID, FormatTime(v.CreatedAt), v.Actor, v.Summary, v.Status, v.Snapshot, v.NginxFiles, v.HAProxyCfg, v.Changes, v.Error,
-		v.ValidateMs, v.ReloadMs, v.RolledBackTo, v.NginxHash, v.HAProxyHash, running, v.FailedEngine, v.FailedStage, v.Output)
+		v.ValidateMs, v.ReloadMs, v.RolledBackTo, v.NginxHash, v.HAProxyHash, running, v.FailedEngine, v.FailedStage, v.Output, v.ProxyEngine)
 	if err != nil && isUniqueErr(err) {
 		return ErrConflict
 	}

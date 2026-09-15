@@ -21,6 +21,8 @@ func (h *haproxyEngine) binary() string             { return "haproxy" }
 func (h *haproxyEngine) stopSignal() syscall.Signal { return syscall.SIGUSR1 } // soft stop
 func (h *haproxyEngine) stableWait() time.Duration  { return 1500 * time.Millisecond }
 func (h *haproxyEngine) bootstrap() Files           { return nil }
+func (h *haproxyEngine) alwaysOn() bool             { return false }
+func (h *haproxyEngine) proxy() bool                { return false }
 func (h *haproxyEngine) masterSocket() string       { return HAProxyMasterSocket(h.a.o.RunDir) }
 
 func (h *haproxyEngine) prepare() { os.MkdirAll(h.a.o.RunDir, 0o755) }

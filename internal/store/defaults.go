@@ -14,6 +14,7 @@ func DefaultGeneral() model.GeneralSettings {
 		HTTPSPort:    443,
 		AdminPort:    8181,
 		HTTP3:        false,
+		ProxyEngine:  "nginx",
 		LANCIDR:      "192.168.0.0/16",
 		Defaults: model.HostDefaults{
 			ForceHTTPS:    true,

@@ -21,13 +21,15 @@ import (
 )
 
 type Options struct {
-	Engine  string // nginx | haproxy
-	RunDir  string // socket directory
+	Engine  string // nginx | haproxy | edge
+	RunDir  string // socket directory (also holds the proxy-engine selection file)
 	LogDir  string
 	DataDir string
 	Log     *slog.Logger
 	// ConfigRoot defaults to $RELAY_CONFIG_ROOT or /etc/relay/<engine>.
 	ConfigRoot string
+	// Version is the relay binary version (reported by the edge engine).
+	Version string
 }
 
 // Agent supervises one engine and serves the protocol in protocol.go.
@@ -60,8 +62,9 @@ func Run(ctx context.Context, o Options) error {
 	// Treat them like SIGTERM: stop the engine gracefully, then exit.
 	ctx, stopSignals := signal.NotifyContext(ctx, syscall.SIGQUIT, syscall.SIGUSR1)
 	defer stopSignals()
-	if o.Engine != EngineNginx && o.Engine != EngineHAProxy {
-		return fmt.Errorf("agent: --engine must be %s or %s", EngineNginx, EngineHAProxy)
+	factory, ok := engineFactories[o.Engine]
+	if !ok {
+		return fmt.Errorf("agent: --engine must be one of %s", strings.Join(EngineNames(), " | "))
 	}
 	if o.Log == nil {
 		o.Log = slog.Default()
@@ -82,14 +85,7 @@ func Run(ctx context.Context, o Options) error {
 	bg, stopBG := context.WithCancel(context.Background())
 	defer stopBG()
 
-	a := &Agent{o: o, log: o.Log, logs: newRingLog(2000), reaper: newReaper(), rel: &releases{root: o.ConfigRoot, keep: 10}}
-	switch o.Engine {
-	case EngineNginx:
-		a.eng = &nginxEngine{a: a}
-	case EngineHAProxy:
-		a.eng = &haproxyEngine{a: a}
-	}
-	a.sup = &supervisor{ctx: ctx, log: o.Log, reaper: a.reaper, logs: a.logs, command: a.eng.command, stopSignal: a.eng.stopSignal(), beforeStart: a.eng.prepare}
+	a := newAgent(ctx, o, factory)
 	go a.reaper.loop(bg)
 
 	if err := a.rel.init(); err != nil {
@@ -136,8 +132,17 @@ func Run(ctx context.Context, o Options) error {
 	return nil
 }
 
-// boot activates the bootstrap config (nginx) when nothing was applied yet
-// and starts the engine when appropriate.
+func newAgent(ctx context.Context, o Options, factory func(*Agent) engine) *Agent {
+	a := &Agent{o: o, log: o.Log, logs: newRingLog(2000), reaper: newReaper(), rel: &releases{root: o.ConfigRoot, keep: 10}}
+	a.eng = factory(a)
+	a.sup = &supervisor{ctx: ctx, log: o.Log, reaper: a.reaper, logs: a.logs, command: a.eng.command, stopSignal: a.eng.stopSignal(), beforeStart: a.eng.prepare}
+	return a
+}
+
+// boot activates the bootstrap config (nginx, edge) when nothing was applied
+// yet and starts the engine when appropriate. On a fresh config root a proxy
+// engine that isn't the selected one (/run/relay/proxy-engine) keeps its
+// bootstrap release stopped so it doesn't take the ports.
 func (a *Agent) boot() {
 	a.sup.op.Lock()
 	defer a.sup.op.Unlock()
@@ -154,6 +159,13 @@ func (a *Agent) boot() {
 				return
 			}
 			cur = BootstrapHash
+			if a.eng.proxy() {
+				selected := ReadProxyEngine(a.o.RunDir)
+				a.rel.setMarker(stoppedMarker, selected != a.o.Engine)
+				if selected != a.o.Engine {
+					a.log.Info("proxy engine not selected, bootstrap config kept stopped", "selected", selected)
+				}
+			}
 		}
 	}
 	if cur == "" || a.rel.marker(stoppedMarker) {
@@ -291,6 +303,7 @@ func (a *Agent) apply(req ApplyRequest) ApplyResponse {
 		resp.OK, resp.Stage, resp.Running = true, "stop", false
 		return resp
 	}
+	wasStopped := a.rel.marker(stoppedMarker)
 	a.rel.setMarker(stoppedMarker, false)
 
 	wasWanted := a.sup.wanted()
@@ -317,11 +330,11 @@ func (a *Agent) apply(req ApplyRequest) ApplyResponse {
 		resp.ReloadMs = time.Since(t0).Milliseconds()
 		if !ok {
 			a.rel.revert(hash, prev)
-			if prev != "" && (wasWanted || a.o.Engine == EngineNginx) {
+			if prev != "" && (wasWanted || (a.eng.alwaysOn() && !wasStopped)) {
 				a.startAndWait()
 			} else if prev == "" || !wasWanted {
 				a.sup.stop(5 * time.Second)
-				if !wasWanted && a.o.Engine == EngineHAProxy {
+				if !wasWanted && (!a.eng.alwaysOn() || wasStopped) {
 					a.rel.setMarker(stoppedMarker, true)
 				}
 			}
@@ -434,7 +447,7 @@ func (a *Agent) stop() ActionResponse {
 	a.sup.op.Lock()
 	defer a.sup.op.Unlock()
 	a.sup.stop(20 * time.Second)
-	if a.o.Engine == EngineHAProxy {
+	if !a.eng.alwaysOn() {
 		a.rel.setMarker(stoppedMarker, true)
 	}
 	return ActionResponse{OK: true}

@@ -1,5 +1,5 @@
 // Package agent is the control plane between the relay app and the nginx /
-// haproxy containers. Each engine container runs `relay agent --engine X` as
+// haproxy / edge containers. Each engine container runs `relay agent --engine X` as
 // PID 1: it supervises the engine process and serves this protocol as HTTP
 // over a unix socket in the shared /run/relay volume.
 //
@@ -12,7 +12,20 @@ import "time"
 const (
 	EngineNginx   = "nginx"
 	EngineHAProxy = "haproxy"
+	EngineEdge    = "edge" // Relay Edge, the built-in reverse proxy (relay edge run)
 )
+
+// IsProxyEngine reports whether engine serves the HTTP/HTTPS ports and
+// streams (exactly one of them is selected at a time).
+func IsProxyEngine(engine string) bool { return engine == EngineNginx || engine == EngineEdge }
+
+// NormalizeProxyEngine maps "" and unknown values to nginx.
+func NormalizeProxyEngine(engine string) string {
+	if engine == EngineEdge {
+		return EngineEdge
+	}
+	return EngineNginx
+}
 
 // SocketPath returns the agent socket for an engine inside runDir.
 func SocketPath(runDir, engine string) string { return runDir + "/" + engine + ".sock" }
@@ -20,6 +33,7 @@ func SocketPath(runDir, engine string) string { return runDir + "/" + engine + "
 // Files maps a path relative to the engine's config root to file content.
 // nginx: "nginx.conf", "conf.d/hosts/<id>.conf", "htpasswd/<id>", …
 // haproxy: "haproxy.cfg".
+// edge: "edge.json", "htpasswd/<id>".
 type Files map[string]string
 
 // Endpoints (all JSON):
