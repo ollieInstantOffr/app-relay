@@ -4,6 +4,7 @@ package opsapi
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -251,15 +252,19 @@ func Routes(app *core.App, r chi.Router) {
 			httpx.Fail(w, r, unavailable("Backups"))
 			return
 		}
-		p, row, err := backupSvc.Path(r.Context(), chi.URLParam(r, "id"))
+		rc, size, row, err := backupSvc.Open(r.Context(), chi.URLParam(r, "id"))
 		if err != nil {
 			httpx.Fail(w, r, err)
 			return
 		}
+		defer rc.Close()
 		app.Audit(r.Context(), core.AuditEntry{Action: "backup.download", Target: row.File, Result: "ok"})
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(p)))
-		http.ServeFile(w, r, p)
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(row.File)))
+		if size > 0 {
+			w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+		}
+		_, _ = io.Copy(w, rc)
 	}))
 
 	r.Delete("/backups/{id}", httpx.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
@@ -323,6 +328,73 @@ func Routes(app *core.App, r chi.Router) {
 			return
 		}
 		res, err := backupSvc.Restore(r.Context(), f, r.FormValue("passphrase"))
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, res)
+	}))
+
+	r.Post("/backups/{id}/upload", httpx.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
+		if backupSvc == nil {
+			httpx.Fail(w, r, unavailable("Backups"))
+			return
+		}
+		row, err := backupSvc.Upload(r.Context(), chi.URLParam(r, "id"))
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		app.Audit(r.Context(), core.AuditEntry{Action: "backup.upload", Target: row.File, Detail: row.RemoteKey, Result: "ok"})
+		httpx.WriteJSON(w, http.StatusOK, row)
+	}))
+
+	// Off-site (S3) destination.
+	r.Post("/backups/s3/test", httpx.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
+		if backupSvc == nil {
+			httpx.Fail(w, r, unavailable("Backups"))
+			return
+		}
+		var body model.BackupS3Settings
+		if err := httpx.Decode(r, &body); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		res, err := backupSvc.TestS3(r.Context(), body)
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, res)
+	}))
+
+	r.Get("/backups/remote", httpx.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
+		if backupSvc == nil {
+			httpx.Fail(w, r, unavailable("Backups"))
+			return
+		}
+		items, err := backupSvc.RemoteList(r.Context())
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	}))
+
+	r.Post("/backups/remote/restore", httpx.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
+		if backupSvc == nil {
+			httpx.Fail(w, r, unavailable("Backups"))
+			return
+		}
+		var body struct {
+			Key        string `json:"key"`
+			Passphrase string `json:"passphrase"`
+		}
+		if err := httpx.Decode(r, &body); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		res, err := backupSvc.RestoreRemote(r.Context(), body.Key, body.Passphrase)
 		if err != nil {
 			httpx.Fail(w, r, err)
 			return

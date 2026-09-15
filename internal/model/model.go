@@ -529,6 +529,8 @@ const (
 	EventUnknownSignIn    = "unknown_sign_in"
 	EventMCPWriteExecuted = "mcp_write_executed"
 	EventWeeklySummary    = "weekly_summary"
+	// EventBackupFailed fires when a scheduled backup or its copy to S3 fails.
+	EventBackupFailed = "backup_failed"
 	// EventEngineUpdateAvailable fires once per new nginx/HAProxy release or new
 	// Relay version on the update branch (engine slice).
 	EventEngineUpdateAvailable = "engine_update_available"
@@ -553,6 +555,23 @@ type BackupSettings struct {
 	Passphrase         string `json:"passphrase,omitempty"` // write-only via API
 	PassphraseSet      bool   `json:"passphraseSet"`
 	IncludePrivateKeys bool   `json:"includePrivateKeys"`
+
+	// S3 copies every backup to S3 or S3-compatible storage.
+	S3 BackupS3Settings `json:"s3"`
+}
+
+// BackupS3Settings is an off-site backup destination: AWS S3 or an
+// S3-compatible service (Cloudflare R2, Backblaze B2, Wasabi, MinIO…).
+type BackupS3Settings struct {
+	Enabled         bool   `json:"enabled"`
+	Endpoint        string `json:"endpoint"` // empty = AWS S3
+	Region          string `json:"region"`
+	Bucket          string `json:"bucket"`
+	Prefix          string `json:"prefix"` // folder in the bucket, e.g. "relay/"
+	AccessKeyID     string `json:"accessKeyId"`
+	SecretAccessKey string `json:"secretAccessKey,omitempty"` // write-only via API
+	SecretSet       bool   `json:"secretSet"`
+	PathStyle       bool   `json:"pathStyle"` // https://endpoint/bucket/key instead of https://bucket.endpoint/key
 }
 
 // BlockEntry is a globally denied client IP/CIDR (Logs → "Block IP").

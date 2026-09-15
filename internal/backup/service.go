@@ -1,4 +1,5 @@
-// Package backup implements encrypted local backups and restore (slice: ops).
+// Package backup implements encrypted backups (local, with optional copies to
+// S3-compatible storage) and restore (slice: ops).
 package backup
 
 import (
@@ -114,6 +115,8 @@ func RegisterSettingsHook() {
 			b := *(v.(*model.BackupSettings))
 			b.PassphraseSet = b.Passphrase != ""
 			b.Passphrase = ""
+			b.S3.SecretSet = b.S3.SecretAccessKey != ""
+			b.S3.SecretAccessKey = ""
 			return b
 		},
 		BeforeSave: func(r *http.Request, prev, next any) error {
@@ -133,13 +136,25 @@ func RegisterSettingsHook() {
 			if n.Keep < 1 || n.Keep > 365 {
 				errs.Add("keep", "keep between 1 and 365 backups")
 			}
+			if n.S3.SecretAccessKey == "" {
+				n.S3.SecretAccessKey = p.S3.SecretAccessKey
+			}
+			n.S3 = model.NormalizeBackupS3(n.S3)
+			if n.S3.Enabled {
+				for k, v := range model.ValidateBackupS3(n.S3) {
+					errs[k] = v
+				}
+			}
 			n.PassphraseSet = n.Passphrase != ""
+			n.S3.SecretSet = n.S3.SecretAccessKey != ""
 			return errs.Err()
 		},
 		AfterSave: func(r *http.Request, prev, next any) {
 			n := next.(*model.BackupSettings)
 			n.PassphraseSet = n.Passphrase != ""
 			n.Passphrase = "" // never echo it back
+			n.S3.SecretSet = n.S3.SecretAccessKey != ""
+			n.S3.SecretAccessKey = ""
 		},
 	}
 }
@@ -161,6 +176,7 @@ type Status struct {
 	LastRun     *store.BackupRow `json:"lastRun,omitempty"`
 	Warning     string           `json:"warning,omitempty"`
 	Destination Destination      `json:"destination"`
+	S3          S3Status         `json:"s3"`
 	Timezone    string           `json:"timezone"`
 }
 
@@ -186,6 +202,7 @@ func (s *Service) Status(ctx context.Context) Status {
 		os.Remove(f.Name())
 	}
 	rows, err := s.app.Store.ListBackups(ctx)
+	st.S3 = s3Status(set.S3, rows)
 	if err == nil {
 		for i := range rows {
 			if rows[i].Trigger == TriggerScheduled && rows[i].Status != "running" {
@@ -273,8 +290,18 @@ func (s *Service) create(ctx context.Context, trigger, passphrase string) (*stor
 	row.Size = info.Size()
 	row.Contents = m.Counts
 	row.Status = "ok"
+	if set.S3.Enabled {
+		row.RemoteStatus = RemoteUploading
+	}
 	if err := s.app.Store.UpdateBackup(ctx, row); err != nil {
 		return nil, err
+	}
+	if set.S3.Enabled {
+		s.app.Bus.Publish(events.BackupChanged, map[string]any{"id": id, "status": RemoteUploading})
+		s.upload(ctx, set.S3, &row, full)
+		if err := s.app.Store.UpdateBackup(context.WithoutCancel(ctx), row); err != nil {
+			return nil, err
+		}
 	}
 	s.prune(ctx)
 	s.app.Bus.Publish(events.BackupChanged, map[string]any{"id": id, "status": "ok"})
@@ -316,6 +343,7 @@ func (s *Service) remove(ctx context.Context, r store.BackupRow) error {
 			return err
 		}
 	}
+	s.removeRemote(ctx, r)
 	return s.app.Store.DeleteBackup(ctx, r.ID)
 }
 
@@ -363,16 +391,12 @@ type RestoreResult struct {
 
 // RestoreByID restores a stored backup (passphrase defaults to the stored one).
 func (s *Service) RestoreByID(ctx context.Context, id, passphrase string) (*RestoreResult, error) {
-	p, _, err := s.Path(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	f, err := os.Open(p)
+	f, _, _, err := s.Open(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	return s.Restore(ctx, f, passphrase)
+	return s.Restore(ctx, io.LimitReader(f, maxRemoteSize), passphrase)
 }
 
 // Restore decrypts src, takes a before-restore backup of the current state,
@@ -501,6 +525,7 @@ func (s *Service) tick(ctx context.Context) {
 	if err != nil {
 		s.app.Log.Error("scheduled backup", "err", err)
 		s.app.Activity(ctx, "backup.failed", "error", "Scheduled backup failed", "", err.Error())
+		s.notifyFailure(ctx, "Scheduled backup failed", err.Error())
 		return
 	}
 	s.app.Log.Info("scheduled backup written", "file", row.File, "size", row.Size)

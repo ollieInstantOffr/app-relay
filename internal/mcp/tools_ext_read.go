@@ -85,7 +85,7 @@ func (s *Service) registerExtReadTools() {
 		Description: "Read a settings document: general (ports, HTTP/3, proxy engine, host defaults), tls (ACME, HSTS, cipher profile), default_host, haproxy, docker, notifications, backup, engines (update checks) or blocklist. Secrets are redacted; security and MCP settings are not available over MCP."},
 		map[string][]any{"key": mcpSettingsKeys}, s.toolGetSettings)
 	addRead(s, toolInfo{Name: "list_backups", Title: "List backups",
-		Description: "Backups on this instance: file, size, trigger (manual, scheduled, before-upgrade) and time."},
+		Description: "Backups on this instance: file, size, trigger (manual, scheduled, before-upgrade), time and whether it was copied to S3 (remoteStatus)."},
 		nil, s.apiReadTool("/backups", "backups", true))
 	addRead(s, toolInfo{Name: "get_ports", Title: "Get port usage",
 		Description: "Which ports the configuration uses and who owns them (reverse proxy HTTP/HTTPS/HTTP3 and streams, HAProxy frontends and stats, the admin UI), with conflicts against ports already in use on the host."},

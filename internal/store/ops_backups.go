@@ -18,19 +18,24 @@ type BackupRow struct {
 	File      string         `json:"file"`
 	Status    string         `json:"status"` // ok | failed | running
 	Error     string         `json:"error,omitempty"`
+
+	// Off-site copy (S3).
+	RemoteStatus string `json:"remoteStatus,omitempty"` // "" | uploading | uploaded | failed
+	RemoteKey    string `json:"remoteKey,omitempty"`
+	RemoteError  string `json:"remoteError,omitempty"`
 }
 
 func (s *Store) InsertBackup(ctx context.Context, b BackupRow) error {
 	contents, _ := json.Marshal(nonNilCounts(b.Contents))
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO backups (id, created_at, size, contents, trigger, file, status, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		b.ID, FormatTime(b.CreatedAt), b.Size, string(contents), b.Trigger, b.File, b.Status, b.Error)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO backups (id, created_at, size, contents, trigger, file, status, error, remote_status, remote_key, remote_error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		b.ID, FormatTime(b.CreatedAt), b.Size, string(contents), b.Trigger, b.File, b.Status, b.Error, b.RemoteStatus, b.RemoteKey, b.RemoteError)
 	return err
 }
 
 func (s *Store) UpdateBackup(ctx context.Context, b BackupRow) error {
 	contents, _ := json.Marshal(nonNilCounts(b.Contents))
-	res, err := s.DB.ExecContext(ctx, `UPDATE backups SET size = ?, contents = ?, file = ?, status = ?, error = ? WHERE id = ?`,
-		b.Size, string(contents), b.File, b.Status, b.Error, b.ID)
+	res, err := s.DB.ExecContext(ctx, `UPDATE backups SET size = ?, contents = ?, file = ?, status = ?, error = ?, remote_status = ?, remote_key = ?, remote_error = ? WHERE id = ?`,
+		b.Size, string(contents), b.File, b.Status, b.Error, b.RemoteStatus, b.RemoteKey, b.RemoteError, b.ID)
 	if err != nil {
 		return err
 	}
@@ -47,12 +52,12 @@ func nonNilCounts(m map[string]int) map[string]int {
 	return m
 }
 
-const backupCols = `id, created_at, size, contents, trigger, file, status, error`
+const backupCols = `id, created_at, size, contents, trigger, file, status, error, remote_status, remote_key, remote_error`
 
 func scanBackup(sc interface{ Scan(...any) error }) (BackupRow, error) {
 	var b BackupRow
 	var at, contents string
-	if err := sc.Scan(&b.ID, &at, &b.Size, &contents, &b.Trigger, &b.File, &b.Status, &b.Error); err != nil {
+	if err := sc.Scan(&b.ID, &at, &b.Size, &contents, &b.Trigger, &b.File, &b.Status, &b.Error, &b.RemoteStatus, &b.RemoteKey, &b.RemoteError); err != nil {
 		return b, err
 	}
 	b.CreatedAt = ParseTime(at)

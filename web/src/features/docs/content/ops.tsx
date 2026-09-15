@@ -213,7 +213,28 @@ function Backups() {
       </Steps>
 
       <H2>Copy backups off the machine</H2>
-      <P>Backups are stored in the <C>relay-data</C> volume. A backup on the same disk won’t help if that disk dies, so copy them elsewhere:</P>
+      <P>Backups are stored in the <C>relay-data</C> volume. A backup on the same disk won’t help if that disk dies, so keep a copy somewhere else.</P>
+      <H3>Automatically, to S3</H3>
+      <P>
+        Relay can copy every backup to a bucket at AWS S3 or any S3-compatible storage: Cloudflare R2, Backblaze B2, Wasabi, MinIO and others.
+      </P>
+      <Steps>
+        <Step title="Create a bucket and a key">
+          Make a private bucket and an access key that can only reach it (read, write, delete and list objects).
+        </Step>
+        <Step title="Connect it">
+          <UI>Settings → Backup &amp; restore → Copy to S3 → Set up</UI>. Pick your provider, fill in the bucket and key, and click <UI>Test connection</UI>.
+        </Step>
+        <Step title="Save">
+          <UI>Save and turn on</UI>. From now on each backup is written locally, then copied to the bucket. Snapshots show an <strong>S3</strong> badge once copied.
+        </Step>
+      </Steps>
+      <Tip>
+        The copies use the same retention as local backups, and deleting a snapshot deletes both. Archives are encrypted before they leave the machine, so the storage provider can’t read them.
+        If a copy fails, Relay keeps the local backup, shows the error and sends the <strong>Backup or copy to S3 failed</strong> notification. Retry from the snapshot’s menu.
+      </Tip>
+      <H3>By hand</H3>
+      <P>Or copy the archives yourself:</P>
       <Example
         lang="bash"
         title="Copy archives to the host, then sync them anywhere"
@@ -233,6 +254,9 @@ docker compose start relay`}
         <Step title="Install Relay">On the new machine, follow <See id="installation">Installation</See> and finish the setup wizard.</Step>
         <Step title="Restore from file">
           <UI>Settings → Backup &amp; restore → Restore from file</UI>, drop the archive and enter its passphrase. Or pick one from the snapshot list and choose <UI>Restore</UI>.
+        </Step>
+        <Step title="Or restore from S3">
+          Set up the same bucket under <UI>Copy to S3</UI>, click <UI>Browse bucket</UI> and choose <UI>Restore</UI> next to the backup you want.
         </Step>
         <Step title="Apply">Review the pending changes and apply.</Step>
       </Steps>
@@ -438,7 +462,7 @@ export const opsSections: DocSection[] = [
     title: 'Backup & restore',
     icon: 'download',
     summary: 'Encrypted, scheduled backups of everything, and how to restore on a new machine.',
-    keywords: 'backup restore encrypted age passphrase schedule snapshot migrate disaster recovery volume',
+    keywords: 'backup restore encrypted age passphrase schedule snapshot migrate disaster recovery volume s3 r2 b2 minio off-site bucket',
     app: [{ to: '/settings/backup', label: 'Backup settings' }],
     Body: Backups,
   },

@@ -18,6 +18,7 @@ const EVENTS: { key: NotificationEvent; label: string; critical?: boolean }[] = 
   { key: 'cert_renew_failed', label: 'Certificate renewal failed', critical: true },
   { key: 'cert_expiring', label: 'Certificate expires in < 14 days' },
   { key: 'reload_failed', label: 'Config reload failed', critical: true },
+  { key: 'backup_failed', label: 'Backup or copy to S3 failed' },
   { key: 'unknown_sign_in', label: 'New sign-in from unknown IP' },
   { key: 'mcp_write_executed', label: 'MCP write tool executed' },
   { key: 'weekly_summary', label: 'Weekly summary' },

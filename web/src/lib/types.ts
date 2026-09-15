@@ -313,7 +313,7 @@ export interface NotificationChannel {
 }
 export type NotificationEvent =
   | 'upstream_down' | 'cert_renew_failed' | 'cert_expiring' | 'reload_failed'
-  | 'unknown_sign_in' | 'mcp_write_executed' | 'weekly_summary' | 'engine_update_available'
+  | 'unknown_sign_in' | 'mcp_write_executed' | 'weekly_summary' | 'engine_update_available' | 'backup_failed'
 export interface NotificationSettings {
   channels: NotificationChannel[]
   routes: Partial<Record<NotificationEvent, string[]>>
@@ -326,6 +326,21 @@ export interface BackupSettings {
   passphrase?: string
   passphraseSet: boolean
   includePrivateKeys: boolean
+  s3: BackupS3Settings
+}
+/** Off-site copies of backups: AWS S3 or S3-compatible storage. */
+export interface BackupS3Settings {
+  enabled: boolean
+  /** Empty for AWS S3. */
+  endpoint: string
+  region: string
+  bucket: string
+  prefix: string
+  accessKeyId: string
+  /** Write-only; empty keeps the saved key. */
+  secretAccessKey?: string
+  secretSet: boolean
+  pathStyle: boolean
 }
 export type ErrorPageKey = '403' | '404' | '429' | '500' | '502' | '503' | '504' | 'maintenance'
 export interface ErrorPage {

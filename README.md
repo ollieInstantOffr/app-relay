@@ -70,7 +70,7 @@ Every apply is saved in **Config history**, so you can always see who changed wh
 ### 📊 Day-to-day
 - 📈 Dashboard, access, error and audit logs
 - 🚧 Maintenance mode and custom error pages
-- 🔔 Notifications, 💾 encrypted backups, 👥 users with 2FA
+- 🔔 Notifications, 💾 encrypted backups (local + S3), 👥 users with 2FA
 - ⬆️ One-click upgrades, 📚 built-in docs
 
 </td>
@@ -223,6 +223,8 @@ cd relay && git pull && make up
 
 Everything important lives in the `relay-data` Docker volume.
 Use **Settings → Backup & restore** for encrypted backups, on a schedule or whenever you like. And every change you apply is kept in **Config history** too. 🕰️
+
+☁️ Want a copy off the machine? Turn on **Copy to S3** and every backup also goes to your own bucket: AWS S3, Cloudflare R2, Backblaze B2, MinIO or any S3-compatible storage. Setting up a new server? **Browse bucket** restores straight from it.
 
 ---
 

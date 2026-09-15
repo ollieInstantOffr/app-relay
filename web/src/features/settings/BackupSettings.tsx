@@ -7,11 +7,12 @@ import { useRole, useSaveSettings, useSettings } from '../../lib/queries'
 import type { BackupSettings as BackupSettingsT } from '../../lib/types'
 import { bytes, dateTime } from '../../lib/format'
 import {
-  Button, Callout, Card, Dialog, Field, IconButton, Input, Menu, NoMatches, Pagination, PasswordInput, SearchInput, SectionHeader, Select, Skeleton, Spinner,
+  Badge, Button, Callout, Card, Dialog, Field, IconButton, Input, Menu, NoMatches, Pagination, PasswordInput, SearchInput, SectionHeader, Select, Skeleton, Spinner,
   TableToolbar, Toggle, Tooltip, matchesSearch, useFitGrid, usePagination, useToast, ConfirmDialog,
 } from '../../components/ui'
 import NpmImportWizard from '../docker/NpmImportWizard'
-import { applyNowAction, opsKeys, until, useBackups, type BackupRow, type RestoreResult } from '../docker/ops'
+import { applyNowAction, opsKeys, until, useBackups, type BackupRow, type RemoteBackup, type RestoreResult } from '../docker/ops'
+import { BucketDialog, S3SetupDialog, s3Location } from './BackupS3'
 import '../docker/ops.css'
 
 const TRIGGER_LABEL: Record<string, string> = {
@@ -29,6 +30,13 @@ const SNAPSHOT_STATUS_OPTIONS = [
 // Space under the snapshot list: pager (41) + card border (1) + settings page bottom padding (28).
 const FIT_RESERVE = 70
 const TOOLBAR_STYLE = { padding: '10px 18px', borderBottom: '1px solid var(--hairline-soft)' } as const
+
+function RemoteBadge({ b }: { b: BackupRow }) {
+  if (b.remoteStatus === 'uploaded') return <Badge tone="ok" title={`Copied to ${b.remoteKey}`}>S3</Badge>
+  if (b.remoteStatus === 'uploading') return <span className="row gap-6 faint"><Spinner /> S3</span>
+  if (b.remoteStatus === 'failed') return <Badge tone="danger" title={b.remoteError}>S3 failed</Badge>
+  return null
+}
 
 function contents(c: Record<string, number>): string {
   const p = (n: number | undefined, one: string, many: string) => `${n ?? 0} ${n === 1 ? one : many}`
@@ -49,7 +57,9 @@ export default function BackupSettings() {
   const [passOpen, setPassOpen] = useState(false)
   const [pass, setPass] = useState({ a: '', b: '' })
   const [creating, setCreating] = useState(false)
-  const [restore, setRestore] = useState<{ backup?: BackupRow; file?: File } | null>(null)
+  const [restore, setRestore] = useState<{ backup?: BackupRow; file?: File; remote?: RemoteBackup } | null>(null)
+  const [s3Open, setS3Open] = useState(false)
+  const [bucketOpen, setBucketOpen] = useState(false)
   const [restorePass, setRestorePass] = useState('')
   const [restoring, setRestoring] = useState(false)
   const [restoreError, setRestoreError] = useState('')
@@ -129,6 +139,8 @@ export default function BackupSettings() {
       let res: RestoreResult
       if (restore.backup) {
         res = await api.post<RestoreResult>(`/api/backups/${restore.backup.id}/restore`, restorePass ? { passphrase: restorePass } : {})
+      } else if (restore.remote) {
+        res = await api.post<RestoreResult>('/api/backups/remote/restore', { key: restore.remote.key, passphrase: restorePass })
       } else {
         const form = new FormData()
         form.append('file', restore.file!)
@@ -152,6 +164,17 @@ export default function BackupSettings() {
       setRestoreError(errorMessage(err))
     } finally {
       setRestoring(false)
+    }
+  }
+
+  const copyToS3 = async (b: BackupRow) => {
+    try {
+      const row = await api.post<BackupRow>(`/api/backups/${b.id}/upload`)
+      toast.success('Copied to S3', row.remoteKey)
+    } catch (err) {
+      toast.error(err, 'Copy to S3 failed')
+    } finally {
+      qc.invalidateQueries({ queryKey: opsKeys.backups })
     }
   }
 
@@ -181,6 +204,21 @@ export default function BackupSettings() {
         .join(' · ')
 
   const dest = status?.destination
+  const s3 = status?.s3
+  const s3Configured = s3?.configured ?? (!!s.s3?.bucket && s.s3.secretSet)
+  const s3Failed = !!s.s3?.enabled && !!s3?.lastError
+  const s3Sub = !s3Configured
+    ? 'Keep a copy off this machine: AWS S3, Cloudflare R2, Backblaze B2, MinIO…'
+    : [
+        s3Location(s3 ?? s.s3),
+        !s.s3.enabled
+          ? 'off'
+          : s3?.lastError
+            ? `last copy failed: ${s3.lastError}`
+            : s3?.lastUploadAt
+              ? `last copy ${dateTime(s3.lastUploadAt)}`
+              : 'no copies yet',
+      ].join(' · ')
   const encryption = s.passphraseSet
     ? `age · passphrase set · ${s.includePrivateKeys ? 'includes private keys' : 'without private keys'}`
     : 'age · no passphrase set'
@@ -211,7 +249,7 @@ export default function BackupSettings() {
         </div>
         <div className="toggle-row" style={{ gap: 12 }}>
           <div className="grow">
-            <div className="toggle-title">Destination</div>
+            <div className="toggle-title">Local disk</div>
             <div className="toggle-desc mono" style={{ color: 'var(--ink-faint)', marginTop: 2 }}>{dest?.path ?? '/data/backups'} · local disk</div>
           </div>
           {dest &&
@@ -226,6 +264,20 @@ export default function BackupSettings() {
                 not writable
               </span>
             ))}
+        </div>
+        <div className="toggle-row" style={{ gap: 12 }}>
+          <div className="grow" style={{ minWidth: 0 }}>
+            <div className="toggle-title">Copy to S3</div>
+            <div className="toggle-desc truncate" title={s3Sub} style={{ color: s3Failed ? 'var(--danger-text)' : 'var(--ink-faint)', marginTop: 2 }}>{s3Sub}</div>
+          </div>
+          {isAdmin && s3Configured && <Button size="sm" variant="ghost" onClick={() => setBucketOpen(true)}>Browse bucket</Button>}
+          {isAdmin && <Button size="sm" onClick={() => setS3Open(true)}>{s3Configured ? 'Edit' : 'Set up'}</Button>}
+          <Toggle
+            checked={!!s.s3?.enabled}
+            disabled={!isAdmin || !s3Configured}
+            label="Copy backups to S3"
+            onChange={(v) => update({ s3: { ...s.s3, enabled: v } }, v ? 'Copies to S3 turned on' : 'Copies to S3 turned off')}
+          />
         </div>
         <div className="toggle-row" style={{ gap: 12 }}>
           <div className="grow">
@@ -297,7 +349,7 @@ export default function BackupSettings() {
                 ) : b.status === 'failed' ? (
                   <span className="danger-text truncate" title={b.error}>Failed · {b.error}</span>
                 ) : (
-                  contents(b.contents)
+                  <span className="row gap-6">{contents(b.contents)}<RemoteBadge b={b} /></span>
                 )}
               </span>
               <span className="faint">{TRIGGER_LABEL[b.trigger] ?? b.trigger}</span>
@@ -311,7 +363,12 @@ export default function BackupSettings() {
                 {isAdmin && b.status !== 'running' && (
                   <Menu
                     trigger={<IconButton icon="more" bare label="Backup actions" />}
-                    items={[{ label: 'Delete', icon: 'trash', danger: true, onSelect: () => setDeleting(b) }]}
+                    items={[
+                      ...(b.status === 'ok' && s.s3?.enabled && b.remoteStatus !== 'uploaded' && b.remoteStatus !== 'uploading'
+                        ? [{ label: b.remoteStatus === 'failed' ? 'Retry copy to S3' : 'Copy to S3', icon: 'reload' as const, onSelect: () => copyToS3(b) }]
+                        : []),
+                      { label: 'Delete', icon: 'trash', danger: true, onSelect: () => setDeleting(b) },
+                    ]}
                   />
                 )}
               </span>
@@ -427,7 +484,13 @@ export default function BackupSettings() {
         onClose={() => !restoring && setRestore(null)}
         icon="rollback"
         iconTone="warn"
-        title={restore?.backup ? `Restore backup from ${dateTime(restore.backup.createdAt)}?` : `Restore ${restore?.file?.name ?? 'backup'}?`}
+        title={
+          restore?.backup
+            ? `Restore backup from ${dateTime(restore.backup.createdAt)}?`
+            : restore?.remote
+              ? `Restore backup from ${dateTime(restore.remote.lastModified)}?`
+              : `Restore ${restore?.file?.name ?? 'backup'}?`
+        }
         description="Relay first saves the current state as a “before restore” backup, then replaces hosts, backends, certificates, users and settings. The restored configuration becomes pending until you apply it."
         width={520}
         footer={
@@ -439,9 +502,10 @@ export default function BackupSettings() {
       >
         <div className="col gap-12">
           {restore?.backup && <div className="small muted">{contents(restore.backup.contents)} · {bytes(restore.backup.size)} · {TRIGGER_LABEL[restore.backup.trigger] ?? restore.backup.trigger}</div>}
+          {restore?.remote && <div className="small muted mono">{restore.remote.key} · {bytes(restore.remote.size)} · from S3</div>}
           <Field
             label="Passphrase"
-            hint={restore?.backup && s.passphraseSet ? 'Leave empty to use the current passphrase' : 'The passphrase this archive was encrypted with'}
+            hint={(restore?.backup || restore?.remote) && s.passphraseSet ? 'Leave empty to use the current passphrase' : 'The passphrase this archive was encrypted with'}
             error={restoreError || undefined}
           >
             <PasswordInput autoFocus value={restorePass} invalid={!!restoreError} onChange={(e) => setRestorePass(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && doRestore()} />
@@ -454,7 +518,11 @@ export default function BackupSettings() {
         onClose={() => setDeleting(null)}
         danger
         title="Delete backup?"
-        message={deleting ? `${deleting.file} will be removed from ${dest?.path ?? 'the backup folder'}. This cannot be undone.` : undefined}
+        message={
+          deleting
+            ? `${deleting.file} will be removed from ${dest?.path ?? 'the backup folder'}${deleting.remoteStatus === 'uploaded' && s.s3?.enabled ? ' and from the S3 bucket' : ''}. This cannot be undone.`
+            : undefined
+        }
         confirmLabel="Delete backup"
         onConfirm={async () => {
           if (!deleting) return
@@ -465,6 +533,17 @@ export default function BackupSettings() {
           } catch (err) {
             toast.error(err, 'Could not delete backup')
           }
+        }}
+      />
+
+      <S3SetupDialog open={s3Open} onClose={() => { setS3Open(false); qc.invalidateQueries({ queryKey: opsKeys.backups }) }} settings={s} />
+      <BucketDialog
+        open={bucketOpen}
+        onClose={() => setBucketOpen(false)}
+        location={s3Location(s3 ?? s.s3)}
+        onRestore={(remote) => {
+          setBucketOpen(false)
+          setRestore({ remote })
         }}
       />
 

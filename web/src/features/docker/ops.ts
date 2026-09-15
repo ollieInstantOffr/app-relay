@@ -120,6 +120,33 @@ export interface BackupRow {
   file: string
   status: 'ok' | 'failed' | 'running'
   error?: string
+  remoteStatus?: '' | 'uploading' | 'uploaded' | 'failed'
+  remoteKey?: string
+  remoteError?: string
+}
+
+export interface BackupS3Status {
+  enabled: boolean
+  configured: boolean
+  bucket?: string
+  prefix?: string
+  endpoint?: string
+  lastUploadAt?: string
+  lastError?: string
+}
+
+export interface RemoteBackup {
+  key: string
+  name: string
+  size: number
+  lastModified: string
+  backupId?: string
+}
+
+export interface S3TestResult {
+  ok: boolean
+  canList: boolean
+  message: string
 }
 
 export interface BackupStatus {
@@ -130,6 +157,7 @@ export interface BackupStatus {
   lastRun?: BackupRow
   warning?: string
   destination: { kind: 'local'; path: string; freeBytes?: number; writable: boolean }
+  s3?: BackupS3Status
   timezone: string
 }
 
@@ -150,7 +178,7 @@ export function useBackups() {
   return useQuery({
     queryKey: opsKeys.backups,
     queryFn: () => api.get<BackupsResponse>('/api/backups'),
-    refetchInterval: (q) => (q.state.data?.items.some((b) => b.status === 'running') ? 1500 : 60_000),
+    refetchInterval: (q) => (q.state.data?.items.some((b) => b.status === 'running' || b.remoteStatus === 'uploading') ? 1500 : 60_000),
   })
 }
 
