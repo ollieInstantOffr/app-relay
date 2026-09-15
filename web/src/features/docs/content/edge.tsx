@@ -53,7 +53,6 @@ function RelayEdge() {
       </P>
       <List>
         <li><strong>Custom nginx snippets</strong> stay saved on each host. Relay Edge skips them (the generated config notes which hosts have one) and nginx applies them again after switching back.</li>
-        <li><strong>Geo-blocking by country</strong> stays saved too; neither the official nginx image nor Relay Edge enforces it.</li>
         <li><strong>Config history</strong> keeps versions from both engines, so you can compare or roll back across a switch.</li>
       </List>
 
@@ -78,9 +77,6 @@ function RelayEdge() {
           <strong>Custom nginx snippets.</strong> They stay saved and apply again with nginx, but Relay Edge doesn’t run them. Use the host options instead,
           or stay on nginx for hosts that need raw directives. <See id="protection">Host options →</See>
         </li>
-        <li>
-          <strong>Geo-blocking by country.</strong> Country rules are saved but skipped, just like with the official nginx image (which has no GeoIP2 module).
-        </li>
       </List>
 
       <H2>Comparison</H2>
@@ -93,7 +89,7 @@ function RelayEdge() {
           ['Reloads', 'Graceful; old workers finish open requests', 'Seamless swap; open connections stay'],
           ['Upstream connections', 'New connection per request', 'Keep-alive pool'],
           ['Custom snippets', 'Yes', 'No'],
-          ['Geo-blocking by country', 'Not in the official image', 'No'],
+          ['Geo-blocking by country', 'Yes', 'Yes'],
           ['Metrics', <><C>stub_status</C> on 127.0.0.1:18080</>, <><C>/metrics</C> (Prometheus) and <C>/stub_status</C> on 127.0.0.1:18081</>],
           ['Config in Config history', <C>nginx.conf</C>, <><C>edge/edge.json</C> (+ <C>edge/htpasswd/…</C>)</>],
         ]}

@@ -33,6 +33,7 @@ type Server struct {
 	opts    Options
 	errlog  *errorLog
 	certs   *certStore
+	geo     *geoStore
 	cache   *assetCache
 	metrics *metrics
 
@@ -106,7 +107,10 @@ func (s *Server) Reload(cfg *Config, baseDir, hash string) error {
 // apply does the work of Start and Reload; s.mu must be held.
 func (s *Server) apply(cfg *Config, baseDir, hash string) error {
 	prev := s.table.Load()
-	rt, err := compile(cfg, baseDir, compileEnv{certs: s.certs, prev: prev, metrics: s.metrics, bindHost: s.opts.BindHost})
+	if s.geo == nil {
+		s.geo = newGeoStore()
+	}
+	rt, err := compile(cfg, baseDir, compileEnv{certs: s.certs, geo: s.geo, prev: prev, metrics: s.metrics, bindHost: s.opts.BindHost})
 	if err != nil {
 		return err
 	}

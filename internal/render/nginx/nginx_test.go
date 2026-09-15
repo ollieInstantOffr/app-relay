@@ -20,8 +20,9 @@ func timep(t time.Time) *time.Time { return &t }
 
 func testEnv() render.Env {
 	env := render.DefaultEnv("/data", "/run/relay", "/var/log/relay")
-	env.GeoIPCountry = "/data/geoip/GeoLite2-Country.mmdb"
-	env.Modules = map[string]bool{"stream": true, "http_v3": true, "geoip2": true, "auth_request": true, "ipv6": true}
+	env.GeoIPCountry = "/data/geoip/dbip-country-lite.mmdb"
+	env.GeoCountryFile = "/data/geoip/nginx/countries-test.conf"
+	env.Modules = map[string]bool{"stream": true, "http_v3": true, "auth_request": true, "ipv6": true}
 	return env
 }
 
@@ -121,7 +122,7 @@ func renderRich(t *testing.T) agent.Files {
 	return files
 }
 
-// TestDumpForNginxT writes a rendered config (without geoip2, which needs a
+// TestDumpForNginxT writes a rendered config (without the geo include, which needs a
 // database file) to $RELAY_NGINX_RENDER_DIR so it can be checked with
 // `nginx -t` inside the engine image.
 func TestDumpForNginxT(t *testing.T) {
@@ -130,7 +131,7 @@ func TestDumpForNginxT(t *testing.T) {
 		t.Skip("RELAY_NGINX_RENDER_DIR not set")
 	}
 	env := testEnv()
-	delete(env.Modules, "geoip2")
+	env.GeoCountryFile = "" // the include only exists on a Relay host
 	files, err := Render(richSnapshot(), env)
 	if err != nil {
 		t.Fatal(err)
@@ -213,7 +214,7 @@ func TestRenderGlobal(t *testing.T) {
 	f := renderRich(t)["conf.d/00-global.conf"]
 	mustContain(t, "00-global", f,
 		"geo $relay_blocked {", "203.0.113.88 1;", "198.51.100.0/24 1;", "# skipped invalid entry not-an-ip",
-		"geoip2 /data/geoip/GeoLite2-Country.mmdb {", "$relay_geo_country country iso_code;",
+		"geo $relay_geo_country {", `default "--";`, `10.0.0.0/8 "";`, `fc00::/7 "";`, "include /data/geoip/nginx/countries-test.conf;",
 		"geo $relay_rl_exempt_hostcloud {", "192.168.0.0/16 1;", "map $relay_rl_exempt_hostcloud $relay_rl_key_hostcloud {",
 		"limit_req_zone $relay_rl_key_hostcloud zone=relay_rl_hostcloud:10m rate=30r/s;",
 		"map $relay_geo_country $relay_geo_allow_hostcloud {", "DE 1;", "US 1;", `"" 1;`,
@@ -385,14 +386,14 @@ func TestRenderForwardAuthNeedsModule(t *testing.T) {
 	}
 }
 
-func TestRenderGeoSkippedWithoutModule(t *testing.T) {
+func TestRenderGeoSkippedWithoutDatabase(t *testing.T) {
 	env := testEnv()
-	delete(env.Modules, "geoip2")
+	env.GeoCountryFile = ""
 	files, err := Render(richSnapshot(), env)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustContain(t, "global", files["conf.d/00-global.conf"], "# Geo-blocking is configured on 1 host(s) but skipped: the nginx geoip2 module is not available")
+	mustContain(t, "global", files["conf.d/00-global.conf"], "# Geo-blocking is configured on 1 host(s) but skipped: the country database isn't downloaded yet")
 	mustContain(t, "cloud", files["conf.d/hosts/cloud.home.lan.conf"], "# geo-block skipped")
 	mustNotContain(t, "cloud", files["conf.d/hosts/cloud.home.lan.conf"], "relay_geo_allow")
 }

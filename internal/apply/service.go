@@ -14,7 +14,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -145,10 +144,6 @@ func (s *Service) envFor(ctx context.Context, engine string) render.Env {
 	if gen, err := store.LoadSettings[model.GeneralSettings](ctx, s.app.Store, model.SettingsGeneral); err == nil && gen.AdminPort > 0 {
 		env.AdminUpstream = fmt.Sprintf("127.0.0.1:%d", gen.AdminPort)
 	}
-	geo := filepath.Join(cfg.DataDir, "geoip", "GeoLite2-Country.mmdb")
-	if st, err := os.Stat(geo); err == nil && st.Size() > 0 {
-		env.GeoIPCountry = geo
-	}
 	s.mu.Lock()
 	mods := s.modules[engine]
 	paths := s.modulePaths[engine]
@@ -236,6 +231,7 @@ type rendered struct {
 func (s *Service) renderAll(ctx context.Context, snap *model.Snapshot) (*rendered, error) {
 	engine := snapshotEngine(snap)
 	env := s.envFor(ctx, engine)
+	s.geoEnv(ctx, &env, snap)
 	if err := ensureDefaultCert(env); err != nil {
 		s.log.Warn("default certificate", "err", err)
 	}

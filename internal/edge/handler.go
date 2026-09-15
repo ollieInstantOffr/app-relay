@@ -159,6 +159,10 @@ func (s *Server) serveGroup(rs *reqState, vs *vserver) {
 func (s *Server) serveHost(rs *reqState, h *hostRT) {
 	r := rs.r
 	w := &rs.fw
+	if h.countries != nil && (rs.rt.geo == nil || !rs.rt.geo.allowed(h.countries, rs.clientIP)) {
+		writePage(w, http.StatusForbidden)
+		return
+	}
 	if h.blockExploits && isExploit(rs.requestURI(), rs.rawQuery, r.Header.Get("User-Agent")) {
 		writePage(w, http.StatusForbidden)
 		return

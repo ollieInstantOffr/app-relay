@@ -353,9 +353,14 @@ Exempt     LAN only    (your own network is never limited)`}
 
       <H2>Geo-blocking</H2>
       <P>
-        Allow or block visitors by country using two-letter codes (<C>NO</C>, <C>SE</C>, <C>DE</C>). Press <Kbd>⏎</Kbd> after each code.
+        Allow only visitors from selected countries using two-letter codes (<C>NO</C>, <C>SE</C>, <C>DE</C>). Press <Kbd>⏎</Kbd> after each code.
+        Everyone else gets <C>403</C>. Local and private addresses (your LAN, VPN and <C>127.0.0.1</C>) always get in. Works with nginx and Relay Edge.
       </P>
-      <Note>The official nginx image has no GeoIP2 module and Relay Edge doesn’t support country rules, so they are saved but not enforced. <UI>Settings → Updates</UI> shows the current status.</Note>
+      <P>
+        The first time you apply with geo-blocking on, Relay downloads the free <strong>DB-IP</strong> country database (about 4 MB) and updates it every month.
+        Until it’s downloaded, geo-blocking is skipped and the Geo-block section shows why. Prefer MaxMind? Put your <C>GeoLite2-Country.mmdb</C> in <C>/data/geoip</C> and Relay uses it instead.
+      </P>
+      <Note>IP geolocation by <a href="https://db-ip.com" target="_blank" rel="noreferrer">DB-IP</a>, licensed under CC BY 4.0.</Note>
 
       <H2>Maintenance mode</H2>
       <P>

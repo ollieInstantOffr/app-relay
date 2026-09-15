@@ -48,7 +48,7 @@ type EngineUpdateInfo struct {
 	UpgradeBlocker  string                    `json:"upgradeBlocker,omitempty"`
 	ChangesURL      string                    `json:"changesUrl"`
 	Modules         []string                  `json:"modules"`
-	MissingModules  []string                  `json:"missingModules"` // features the renderer skips (geoip2 …)
+	MissingModules  []string                  `json:"missingModules"` // features the renderer skips
 }
 
 type EngineUpdates struct {

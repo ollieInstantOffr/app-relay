@@ -342,7 +342,7 @@ func (r *renderer) mainConf(streamServers bool) string {
 	// Only modules the agent reported as dynamic need load_module; the
 	// official nginx image compiles stream, http_v3 and auth_request in.
 	loaded := false
-	for _, m := range []string{"stream", "geoip2"} {
+	for _, m := range []string{"stream"} {
 		if path := r.env.ModulePaths[m]; path != "" && r.mod(m) {
 			w.l("load_module %s;", path)
 			loaded = true
@@ -536,9 +536,13 @@ func (r *renderer) globalConf(hosts []*model.ProxyHost) string {
 	if len(geoHosts) > 0 {
 		w.l("")
 		if r.geoAvailable() {
-			w.open("geoip2 %s", q(r.env.GeoIPCountry))
-			w.l("auto_reload 60m;")
-			w.l("$relay_geo_country country iso_code;")
+			w.l("# Client country for geo-blocking. Local and private addresses are always allowed.")
+			w.open("geo $relay_geo_country")
+			w.l("default \"--\";")
+			for _, p := range model.LocalNetworks {
+				w.l("%s \"\";", p)
+			}
+			w.l("include %s;", q(r.env.GeoCountryFile))
 			w.close()
 		} else {
 			w.l("# Geo-blocking is configured on %d host(s) but skipped: %s", len(geoHosts), r.geoUnavailableReason())
@@ -614,13 +618,10 @@ func sortedByID(hosts []*model.ProxyHost) []*model.ProxyHost {
 	return out
 }
 
-func (r *renderer) geoAvailable() bool { return r.mod("geoip2") && r.env.GeoIPCountry != "" }
+func (r *renderer) geoAvailable() bool { return r.env.GeoCountryFile != "" }
 
 func (r *renderer) geoUnavailableReason() string {
-	if !r.mod("geoip2") {
-		return "the nginx geoip2 module is not available"
-	}
-	return "no GeoLite2-Country database found"
+	return "the country database isn't downloaded yet"
 }
 
 func validCIDR(s string) bool {

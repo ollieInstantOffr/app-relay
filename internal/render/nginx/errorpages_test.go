@@ -130,7 +130,7 @@ func TestDumpErrorPagesForNginxT(t *testing.T) {
 		t.Skip("RELAY_NGINX_RENDER_DIR not set")
 	}
 	env := testEnv()
-	delete(env.Modules, "geoip2")
+	env.GeoCountryFile = "" // the include only exists on a Relay host
 	env.Modules["auth_request"] = true
 	files, err := Render(render.PrepareSnapshot(errorPagesSnapshot(), env), env)
 	if err != nil {

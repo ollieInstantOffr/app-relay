@@ -158,6 +158,9 @@ func (r *renderer) config() *edgecfg.Config {
 		cfg.Hosts = append(cfg.Hosts, r.host(h, false))
 	}
 	cfg.Default = r.defaultServer()
+	if r.env.GeoIPCountry != "" && len(model.GeoCountries(r.snap.Hosts)) > 0 {
+		cfg.GeoIPDatabase = r.env.GeoIPCountry
+	}
 	cfg.Redirects = r.redirects()
 	cfg.Streams = r.streams()
 	cfg.AccessLists = r.accessLists()
@@ -204,8 +207,8 @@ func (r *renderer) checkHost(h *model.ProxyHost) {
 	if strings.TrimSpace(h.CustomNginx) != "" {
 		r.note("host %s: custom nginx snippet kept but not run by Relay Edge (it applies again with nginx)", hostLabel(h))
 	}
-	if h.GeoBlock.Enabled && len(h.GeoBlock.AllowCountries) > 0 {
-		r.note("host %s: geo-blocking by country is not supported by Relay Edge and is skipped", hostLabel(h))
+	if h.GeoBlock.Enabled && len(model.NormalizeCountries(h.GeoBlock.AllowCountries)) > 0 && r.env.GeoIPCountry == "" {
+		r.note("host %s: geo-blocking skipped: the country database isn't downloaded yet", hostLabel(h))
 	}
 }
 

@@ -6,16 +6,19 @@ import "path/filepath"
 // Env describes the runtime paths as seen from inside the engine containers.
 // /data is mounted read-only into the nginx container.
 type Env struct {
-	DataDir       string // /data
-	CertDir       string // /data/certs
-	ACMEWebroot   string // /data/acme (HTTP-01 challenge files)
-	LogDir        string // /var/log/relay
-	RunDir        string // /run/relay
-	GeoIPCountry  string // /data/geoip/GeoLite2-Country.mmdb ("" when absent)
-	AdminUpstream string // 127.0.0.1:8181
+	DataDir      string // /data
+	CertDir      string // /data/certs
+	ACMEWebroot  string // /data/acme (HTTP-01 challenge files)
+	LogDir       string // /var/log/relay
+	RunDir       string // /run/relay
+	GeoIPCountry string // country database (mmdb) for Relay Edge ("" when absent)
+	// GeoCountryFile is the nginx geo include ("<network> <CC>;") with the
+	// networks of every country a geo-blocked host allows ("" when absent).
+	GeoCountryFile string
+	AdminUpstream  string // 127.0.0.1:8181
 	// ConfDir is the active nginx release as nginx sees it (error page files).
 	ConfDir string          // /etc/relay/nginx/current
-	Modules map[string]bool // nginx modules reported by the agent: http_v3, stream, geoip2, auth_request
+	Modules map[string]bool // nginx modules reported by the agent: http_v3, stream, auth_request
 	// ModulePaths lists modules that need load_module (dynamic) → .so path.
 	// Empty for the official nginx image, where everything used is static.
 	ModulePaths map[string]string

@@ -157,8 +157,8 @@ export default function ProxyEngineSettings() {
         />
         <Row
           title="Geo-blocking by country"
-          desc={`${geoHosts.length === 0 ? 'No host uses it' : `${geoHosts.length} host${geoHosts.length === 1 ? '' : 's'}`} · saved, but neither engine enforces it (the official nginx image has no GeoIP2 module)`}
-          badge={<Badge>skipped</Badge>}
+          desc={`${geoHosts.length === 0 ? 'No host uses it' : `${geoHosts.length} host${geoHosts.length === 1 ? '' : 's'}`} · enforced by both engines, using a free country database Relay keeps up to date`}
+          badge={<Badge tone="ok">both</Badge>}
         />
         <Row
           title="PROXY protocol on UDP streams"

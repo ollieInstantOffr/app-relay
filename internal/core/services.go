@@ -331,3 +331,16 @@ type MCP interface {
 	// Handler serves the MCP streamable-HTTP endpoint at /mcp (auth included).
 	Handler() http.Handler
 }
+
+// ---------------------------------------------------------------- geo-blocking (internal/geoip)
+
+// GeoIP keeps the IP → country database used for geo-blocking.
+type GeoIP interface {
+	Service
+	// Database is the country database path ("" when there is none yet).
+	Database() string
+	// Ensure downloads the database when there is none.
+	Ensure(ctx context.Context) error
+	// CountryFile returns the nginx geo include with the networks of countries.
+	CountryFile(ctx context.Context, countries []string) (string, error)
+}

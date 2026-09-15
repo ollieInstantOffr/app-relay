@@ -51,7 +51,7 @@ Every apply is saved in **Config history**, so you can always see who changed wh
 - 🚪 **Relay login**: a built-in login page for any app, with 2FA
 - 🔑 Single sign-on with Authelia, Authentik or oauth2-proxy
 - 📋 Access lists (IP rules and passwords)
-- 🚦 Rate limiting, exploit blocking, IP blocklist
+- 🚦 Rate limiting, geo-blocking by country, exploit blocking, IP blocklist
 
 </td>
 <td valign="top" width="50%">
@@ -106,7 +106,6 @@ Relay can run your traffic through two engines. You choose in **Settings → Pro
 <details>
 <summary>📝 Good to know about Relay Edge</summary>
 
-- Geo-blocking by country isn't enforced by either engine yet.
 - PROXY protocol on **UDP** streams isn't sent (TCP streams work).
 - Only one engine runs at a time; Relay stops the other one and its container.
 

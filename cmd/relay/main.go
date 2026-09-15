@@ -34,6 +34,7 @@ import (
 	"github.com/instantoffr/relay/internal/edge"
 	"github.com/instantoffr/relay/internal/engines"
 	"github.com/instantoffr/relay/internal/events"
+	"github.com/instantoffr/relay/internal/geoip"
 	"github.com/instantoffr/relay/internal/health"
 	"github.com/instantoffr/relay/internal/lb"
 	"github.com/instantoffr/relay/internal/logs"
@@ -173,8 +174,9 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	app.Engines = eng
 	app.Containers = eng
 	app.PublicDNS = publicdns.New(app)
+	app.GeoIP = geoip.New(app)
 
-	for _, svc := range []core.Service{app.Auth, app.Notify, app.Certs, app.Engine, app.LB, app.Logs, app.Health, app.Docker, app.Backup, app.MCP, app.Engines, app.PublicDNS} {
+	for _, svc := range []core.Service{app.Auth, app.Notify, app.Certs, app.Engine, app.LB, app.Logs, app.Health, app.Docker, app.Backup, app.MCP, app.Engines, app.PublicDNS, app.GeoIP} {
 		if err := svc.Start(ctx); err != nil {
 			return fmt.Errorf("start %T: %w", svc, err)
 		}

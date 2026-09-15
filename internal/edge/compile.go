@@ -73,6 +73,7 @@ type runtime struct {
 	http       serverSet
 	https      serverSet
 	blocklist  *prefixMap[struct{}]
+	geo        *geoStore // nil without geoipDatabase
 	acmeRoot   string
 	pages      map[int][]byte // custom error pages
 	httpsPort  int
@@ -119,6 +120,7 @@ type hostRT struct {
 	id            string
 	blockExploits bool
 	maxBody       int64
+	countries     map[string]bool // geo-blocking: allowed countries (nil = off)
 	limiter       *hostLimiter
 	fa            *forwardAuthRT
 	maint         *maintenanceRT
@@ -185,6 +187,7 @@ type groupRT struct {
 
 type compileEnv struct {
 	certs    *certStore
+	geo      *geoStore
 	prev     *runtime
 	metrics  *metrics
 	bindHost string // HTTP/HTTPS/QUIC interface ("" = all)
@@ -216,6 +219,9 @@ func compile(cfg *Config, baseDir string, env compileEnv) (*runtime, error) {
 			return nil, err
 		}
 		env.certs = cs
+	}
+	if env.geo == nil {
+		env.geo = newGeoStore()
 	}
 	c := &compiler{cfg: cfg, baseDir: baseDir, env: env, lists: map[string]*accessRT{}, rt: &runtime{
 		cfg:        cfg,
@@ -282,6 +288,13 @@ func (c *compiler) globals() {
 			continue
 		}
 		c.rt.blocklist.add(p, struct{}{})
+	}
+	if cfg.GeoIPDatabase != "" {
+		if err := c.env.geo.load(c.path(cfg.GeoIPDatabase)); err != nil {
+			c.fail("%v", err)
+		} else {
+			c.rt.geo = c.env.geo
+		}
 	}
 }
 
@@ -431,6 +444,19 @@ var headerNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 func (c *compiler) host(h *Host, where string) *hostRT {
 	hr := &hostRT{id: h.ID, blockExploits: h.BlockExploits, maxBody: h.MaxBodyBytes}
+	if len(h.AllowCountries) > 0 {
+		if c.cfg.GeoIPDatabase == "" {
+			c.fail("%s: allowCountries needs geoipDatabase", where)
+		}
+		hr.countries = map[string]bool{}
+		for _, cc := range h.AllowCountries {
+			if len(cc) != 2 || strings.ToUpper(cc) != cc {
+				c.fail("%s: allowCountries: %q is not an upper-case two-letter country code", where, cc)
+				continue
+			}
+			hr.countries[cc] = true
+		}
+	}
 	if h.MaxBodyBytes < 0 {
 		c.fail("%s: maxBodyBytes must not be negative", where)
 	}

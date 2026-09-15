@@ -20,7 +20,8 @@
   position: absolute; left: 10px; width: 20px; height: 20px; border-radius: 5px; border: 1px solid rgba(0, 0, 0, .12);
   pointer-events: none;
 }
-.ep-color-swatch.empty {
+/* Not ".empty": that global class is the padded empty-state block. */
+.ep-color-swatch-empty {
   background: repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 3px, var(--surface) 3px, var(--surface) 6px);
 }
 .ep-presets { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }

@@ -80,6 +80,8 @@ type App struct {
 	Engines  Engines // engine image version checks & upgrades (core/engines_ext.go)
 	// PublicDNS manages records at the user's DNS provider (internal/publicdns).
 	PublicDNS Service
+	// GeoIP keeps the country database for geo-blocking (internal/geoip).
+	GeoIP GeoIP
 	// Containers starts and stops engine containers (nil without Docker support).
 	Containers EngineContainers
 

@@ -144,6 +144,9 @@ func (r *renderer) host(h *model.ProxyHost, asDefault bool) edgecfg.Host {
 		out.SendTimeoutSec = h.ProxySendTimeout
 	}
 	out.RateLimit = r.rateLimit(h)
+	if h.GeoBlock.Enabled && r.env.GeoIPCountry != "" {
+		out.AllowCountries = model.NormalizeCountries(h.GeoBlock.AllowCountries)
+	}
 	if h.Maintenance.Enabled {
 		m := &edgecfg.Maintenance{Page: render.ErrorPageHTML(r.snap.ErrorPages.WithDefaults(), "maintenance", &h.Maintenance)}
 		if al := r.lists[h.Maintenance.BypassAccessListID]; al != nil {

@@ -355,9 +355,6 @@ func (s *Service) Updates(ctx context.Context) (*core.EngineUpdates, error) {
 			}
 		}
 		info.ChangesURL = changesURL(engine, firstNonEmpty(versionOf(info.Latest), current))
-		if engine == "nginx" && !info.Inactive && st.Reachable && !hasModule(info.Modules, "geoip2") {
-			info.MissingModules = append(info.MissingModules, "geoip2")
-		}
 		if info.Image != "" && desired != "" && info.Official && info.Image != desired {
 			dv, _ := parseVersion(tagOf(desired))
 			info.Drift = &core.EngineDrift{RunningImage: info.Image, RunningVersion: firstNonEmpty(info.ImageVersion, info.Version), DesiredImage: desired, DesiredVersion: dv.String()}

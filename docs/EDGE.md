@@ -130,12 +130,12 @@ Improvements over nginx (intentional differences):
 - The sign-in `rd` parameter is URL-encoded.
 - Basic-auth verifications are cached for 60 s.
 - `/metrics` Prometheus endpoint on the status listener.
+- Geo-blocking by country (`geoipDatabase` + per-host `allowCountries`); the
+  database is re-read when the file changes, so monthly updates need no reload.
 
 Not supported:
 - Custom nginx snippets (`customNginx`): kept on the host and skipped with a
   note in the rendered config; they apply again after switching back to nginx.
-- Geo-blocking by country (same as the official nginx image: skipped with a
-  warning in the rendered config).
 
 ## 5. Settings, API and UI
 

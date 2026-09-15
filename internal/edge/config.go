@@ -38,6 +38,9 @@ type Config struct {
 	Blocklist []string `json:"blocklist"`
 	// AccessLists by id, referenced from locations.
 	AccessLists map[string]AccessList `json:"accessLists"`
+	// GeoIPDatabase is a MaxMind DB country database (mmdb) for hosts with
+	// AllowCountries. It is re-read when the file changes.
+	GeoIPDatabase string `json:"geoipDatabase,omitempty"`
 	// ErrorPages replace the plain pages of errors the engine generates
 	// (status code → HTML). Responses from upstreams pass through.
 	ErrorPages map[string]string `json:"errorPages,omitempty"`
@@ -95,6 +98,9 @@ type Host struct {
 
 	BlockExploits bool `json:"blockExploits,omitempty"`
 	NoIndex       bool `json:"noIndex,omitempty"`
+	// AllowCountries (upper-case ISO codes) answers other public addresses
+	// with 403. Local and private addresses are always allowed.
+	AllowCountries []string `json:"allowCountries,omitempty"`
 	// MaxBodyBytes limits request bodies (413). 0 = unlimited.
 	MaxBodyBytes int64 `json:"maxBodyBytes"`
 	// ReadTimeoutSec / SendTimeoutSec are the upstream idle read/send timeouts (0 = 60).

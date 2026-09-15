@@ -179,7 +179,7 @@ func TestGeoBlockNote(t *testing.T) {
 			n++
 		}
 	}
-	if n != 1 || !hasNote(cfg, "host cloud.home.lan: geo-blocking by country is not supported by Relay Edge and is skipped") {
+	if n != 1 || !hasNote(cfg, "host cloud.home.lan: geo-blocking skipped: the country database isn't downloaded yet") {
 		t.Errorf("notes = %q", cfg.Notes)
 	}
 }

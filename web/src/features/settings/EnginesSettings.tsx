@@ -317,7 +317,7 @@ function EngineCard({ info, settings, isAdmin, busy, onChannel, onUpgrade }: {
         <div className="eng-callout">
           <Callout tone="info">
             The official image has no <span className="mono">{info.missingModules.join(', ')}</span> module
-            {info.missingModules.includes('geoip2') ? ' — country-based geo-blocking is skipped when rendering nginx.conf.' : '.'}
+            .
           </Callout>
         </div>
       )}

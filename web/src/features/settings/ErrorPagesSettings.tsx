@@ -37,7 +37,7 @@ function ColorInput({ value, onChange, disabled, error }: { value: string; onCha
   return (
     <>
       <div className="ep-color">
-        <span className={cx('ep-color-swatch', !valid && 'empty')} style={valid ? { background: value } : undefined} />
+        <span className={cx('ep-color-swatch', !valid && 'ep-color-swatch-empty')} style={valid ? { background: value } : undefined} />
         <Input
           mono
           value={value}

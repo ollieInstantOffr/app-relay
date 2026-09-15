@@ -8,6 +8,7 @@ import { roleBadge } from '../../auth/authApi'
 import { ErrorPagePreviewFrame } from '../../settings/ErrorPagePreview'
 import { ERROR_PAGE_INFO, normalizeErrorPages, useErrorPagePreview } from '../../settings/errorPagesApi'
 import { ConfigPreviewPanel } from '../ConfigPreview'
+import GeoIPInfo from './GeoIPInfo'
 import type { HostFormCtx } from '../HostDrawer'
 import { accessSummary, formatSize, parseSize, urlError, type SizeUnit } from '../lib'
 
@@ -419,13 +420,13 @@ export function AdvancedTab({ ctx }: { ctx: HostFormCtx }) {
 
       <Section
         title="Geo-block"
-        badge={edge ? <Badge>not enforced</Badge> : undefined}
-        desc={edge ? 'Allow only selected countries · not enforced by Relay Edge: rules are saved but skipped' : 'Allow only selected countries · needs the GeoIP country database'}
+        desc="Allow only visitors from selected countries · everyone else gets 403"
         checked={gb.enabled}
         disabled={readOnly}
         onToggle={(enabled) => update({ geoBlock: { ...gb, enabled } })}
       >
         {gb.enabled && (
+          <div className="col gap-10">
           <Field error={countryErr} hint="Two-letter ISO country codes · press Enter to add">
             <ChipsInput
               values={gb.allowCountries}
@@ -435,6 +436,8 @@ export function AdvancedTab({ ctx }: { ctx: HostFormCtx }) {
               onChange={(v) => update({ geoBlock: { ...gb, allowCountries: [...new Set(v.map((x) => x.toUpperCase()))] } })}
             />
           </Field>
+          <GeoIPInfo />
+          </div>
         )}
       </Section>
 
