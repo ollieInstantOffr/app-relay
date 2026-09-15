@@ -279,7 +279,7 @@ export default function CertificatesPage() {
                       { header: c.name },
                       { label: 'Details', icon: 'info', onSelect: () => setParam('cert', c.id) },
                       ...(isACME(c)
-                        ? [{ label: failed ? 'Retry' : 'Force renew', icon: 'reload' as const, disabled: !canWrite || busy, onSelect: () => retry(c) }]
+                        ? [{ label: failed || (c.status === 'pending' && !c.notAfter) ? 'Retry' : 'Force renew', icon: 'reload' as const, disabled: !canWrite || !!c.renewing || retrying === c.id, onSelect: () => retry(c) }]
                         : [{ label: 'Upload replacement', icon: 'upload' as const, disabled: !canWrite, onSelect: () => setReplace(c) }]),
                       { label: 'Download full chain', icon: 'download', disabled: !c.notAfter, onSelect: () => triggerDownload(downloadUrl(c.id, 'fullchain')) },
                       'separator',

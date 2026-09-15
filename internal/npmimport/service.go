@@ -322,6 +322,7 @@ func (s *Service) Commit(r *http.Request, token string, overwrite bool) (*Commit
 
 	// Certificates.
 	certIDs := map[int]string{}
+	var startCerts []string
 	certDir := filepath.Join(s.app.Config.DataDir, "certs")
 	for _, it := range p.Certs {
 		next := it.Cert
@@ -371,7 +372,22 @@ func (s *Service) Commit(r *http.Request, token string, overwrite bool) (*Commit
 		certIDs[it.NPMID] = next.ID
 		s.app.Audit(ctx, core.AuditEntry{Action: "certificate." + verb(action), Target: next.Name, Detail: detail, Result: "saved"})
 		s.app.Changed(ctx, model.KindCertificate, next.ID, next.Name, action)
+		if next.Status == model.CertStatusPending && model.IsACMEProvider(next.Provider) {
+			startCerts = append(startCerts, next.ID)
+		}
 	}
+	// Let's Encrypt certificates without files are requested again right away
+	// (in the background) instead of waiting for the scheduler.
+	defer func() {
+		if s.app.Certs == nil {
+			return
+		}
+		for _, id := range startCerts {
+			if err := s.app.Certs.Renew(ctx, id); err != nil {
+				s.app.Log.Warn("npm import: start certificate request", "id", id, "err", err)
+			}
+		}
+	}()
 
 	// Proxy hosts.
 	plannedLists := map[int]bool{}

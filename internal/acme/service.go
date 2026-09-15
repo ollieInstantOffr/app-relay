@@ -160,7 +160,15 @@ func (s *Service) Request(ctx context.Context, req core.CertRequest) (*model.Cer
 	}
 	for _, c := range existing {
 		if c.Status == model.CertStatusPending && sameDomains(c.Domains, domains) {
-			return nil, httpx.Errorf(http.StatusConflict, "in_progress", "A certificate for "+domains[0]+" is already being requested")
+			if s.isInflight(c.ID) || !model.IsACMEProvider(c.Provider) {
+				return nil, httpx.Errorf(http.StatusConflict, "in_progress", "A certificate for "+domains[0]+" is already being requested")
+			}
+			// Pending but nobody is issuing it (e.g. imported from Nginx Proxy
+			// Manager): start that certificate instead of refusing.
+			if err := s.launch(ctx, c.ID, launchOpts{renewal: c.NotAfter != nil}); err != nil && !errors.Is(err, errInProgress) {
+				return nil, err
+			}
+			return &c, nil
 		}
 	}
 	cert := &model.Certificate{
@@ -472,6 +480,10 @@ func (s *Service) resumePending(ctx context.Context) {
 func (s *Service) scheduler(ctx context.Context) {
 	timer := time.NewTimer(2 * time.Minute)
 	defer timer.Stop()
+	// Pending certificates created outside Request (imports, restores) start
+	// within a minute instead of waiting for the hourly check.
+	pending := time.NewTicker(pendingSweepEvery)
+	defer pending.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -479,9 +491,13 @@ func (s *Service) scheduler(ctx context.Context) {
 		case <-timer.C:
 			s.checkAll(core.WithActor(ctx, core.SystemActor))
 			timer.Reset(time.Hour)
+		case <-pending.C:
+			s.resumePending(ctx)
 		}
 	}
 }
+
+const pendingSweepEvery = time.Minute
 
 // retryDelay is the backoff after n consecutive failed renewals.
 func retryDelay(n int) time.Duration {
