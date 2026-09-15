@@ -351,6 +351,22 @@ export interface ErrorPagePreviewRequest {
 }
 export interface ErrorPagePreview { html: string }
 
+/** Settings → Public DNS. GET/PUT /api/settings/public_dns (admin to change; applies immediately, not a pending change). */
+export interface PublicDNSSettings {
+  enabled: boolean
+  /** DNS providers whose zones Relay manages (types from GET /api/dns/provider-types). */
+  providerIds: string[]
+  /** After each successful apply, create missing records for enabled proxy hosts. */
+  autoCreate: boolean
+  recordType: 'A' | 'CNAME'
+  /** A: IPv4 ("" = Relay's detected public IP). CNAME: hostname (required). */
+  target: string
+  /** Seconds; GoDaddy minimum 600. */
+  ttl: number
+  /** Zones Relay never changes automatically. */
+  excludedZones: string[]
+}
+
 export interface BlockEntry { cidr: string; note: string; createdAt: string; createdBy: string }
 export interface BlocklistSettings { entries: BlockEntry[] }
 
@@ -367,6 +383,7 @@ export interface SettingsMap {
   blocklist: BlocklistSettings
   engines: EnginesSettings
   error_pages: ErrorPagesSettings
+  public_dns: PublicDNSSettings
 }
 export type SettingsKey = keyof SettingsMap
 
@@ -690,3 +707,70 @@ export interface ApiToken {
 
 /** SSE /api/events */
 export interface BusEvent<T = unknown> { topic: string; at: string; data: T }
+
+// ---------------------------------------------------------------- public DNS (slice dns)
+/** A provider selected in Settings → Public DNS, with its zones fetched live. */
+export interface DNSStatusProvider {
+  id: string
+  name: string
+  type: string
+  supported: boolean
+  zones: string[]
+  /** e.g. GoDaddy "Access denied" */
+  error?: string
+}
+export interface DNSZone { name: string; providerId: string; providerName: string; providerType: string }
+/** GET /api/dns/status */
+export interface DNSStatus {
+  enabled: boolean
+  publicIp: string
+  /** Effective target for automatic records. */
+  target: string
+  providers: DNSStatusProvider[]
+  zones: DNSZone[]
+}
+export interface DNSRecord {
+  id: string
+  type: string
+  /** Relative to the zone: "@", "www", "*.dev" */
+  name: string
+  fqdn: string
+  data: string
+  ttl: number
+  priority?: number
+  /** Cloudflare only */
+  proxied?: boolean
+  /** Proxy host ids served by this record. */
+  hosts?: string[]
+  /** e.g. apex NS, SOA, SRV */
+  readOnly?: boolean
+}
+/** POST/PUT /api/dns/zones/{zone}/records */
+export interface DNSRecordInput {
+  type: string
+  name: string
+  data: string
+  /** 0 = provider default */
+  ttl: number
+  priority?: number
+  proxied?: boolean
+}
+/** GET /api/dns/zones/{zone}/records */
+export interface DNSRecordList { zone: string; providerType: string; records: DNSRecord[] }
+export type DNSCheckStatus = 'unmanaged' | 'excluded' | 'exists' | 'wildcard' | 'missing' | 'conflict' | 'error' | 'created'
+/** POST /api/dns/check and POST /api/dns/sync → { results } */
+export interface DNSDomainCheck {
+  domain: string
+  zone?: string
+  providerId?: string
+  providerType?: string
+  status: DNSCheckStatus
+  message?: string
+  /** Existing A/AAAA/CNAME at that name (or the covering wildcard). */
+  records: DNSRecord[]
+  /** Records that point to Relay's target. */
+  relayRecords: DNSRecord[]
+  /** What Relay would create (status missing). */
+  planned?: DNSRecordInput
+}
+export interface DNSCheckResponse { results: DNSDomainCheck[] }

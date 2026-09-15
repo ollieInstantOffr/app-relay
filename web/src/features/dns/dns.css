@@ -1,0 +1,62 @@
+/* Owner: slice dns — Public DNS page, settings and host drawer status */
+
+/* ---------------------------------------------------------------- page toolbar */
+.dns-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dns-zone-select { width: 320px; max-width: 100%; }
+.dns-type-select { width: 140px; }
+.dns-filter { position: relative; width: 240px; flex: none; }
+.dns-filter .input { height: 32px; padding-left: 32px; padding-right: 28px; background: var(--bg); }
+.dns-filter .input:focus { background: var(--surface); }
+.dns-filter > svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--ink-faint); pointer-events: none; }
+.dns-filter-clear {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; border: 0; border-radius: 5px;
+  background: transparent; color: var(--ink-faint); cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.dns-filter-clear:hover { background: var(--surface-2); color: var(--ink); }
+
+/* ---------------------------------------------------------------- records table */
+.dns-table td { vertical-align: middle; }
+.dns-table .dns-col-type { width: 76px; }
+.dns-table .dns-col-ttl { width: 80px; white-space: nowrap; }
+.dns-table .dns-col-actions { width: 76px; text-align: right; }
+.dns-name { font-family: var(--font-mono); white-space: nowrap; }
+.dns-value { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 420px; }
+.dns-value-text { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dns-hosts { display: flex; gap: 4px; flex-wrap: wrap; }
+.dns-host-chip {
+  display: inline-block; font: 11px var(--font-mono); background: var(--surface-2); padding: 2px 7px; border-radius: 5px; color: var(--ink-muted);
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dns-host-chip:hover { background: var(--hairline-mid); color: var(--ink); }
+.dns-row-actions { display: inline-flex; gap: 2px; justify-content: flex-end; }
+
+/* ---------------------------------------------------------------- settings */
+.dns-provider-row { display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-top: 1px solid var(--hairline-soft); cursor: pointer; }
+.dns-provider-row:hover { background: var(--surface-3); }
+.dns-provider-row.readonly { cursor: default; }
+.dns-provider-row.readonly:hover { background: transparent; }
+.dns-zone-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dns-zone-chip {
+  display: inline-flex; align-items: center; gap: 6px; font: 12px var(--font-mono); border: 1px solid var(--hairline-mid); background: var(--surface);
+  padding: 4px 9px; border-radius: 6px; cursor: pointer; color: var(--ink-muted);
+}
+.dns-zone-chip:hover:not(:disabled) { border-color: var(--hairline-strong); color: var(--ink); }
+.dns-zone-chip.active { background: var(--ink); border-color: var(--ink); color: #fff; }
+.dns-zone-chip:disabled { cursor: not-allowed; opacity: .6; }
+
+/* ---------------------------------------------------------------- check lists (host drawer, sync results) */
+.dns-check-list { display: flex; flex-direction: column; border: 1px solid var(--hairline); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.dns-check-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--hairline-soft); font-size: 12px; min-width: 0; min-height: 40px; }
+.dns-check-row:last-child { border-bottom: 0; }
+.dns-check-row .badge { flex: none; }
+.dns-check-domain { font-family: var(--font-mono); flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dns-check-text { color: var(--ink-subtle); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.dns-check-text.danger { color: var(--danger-text); }
+.dns-check-scroll { max-height: 380px; overflow: auto; }
+
+/* ---------------------------------------------------------------- record dialog */
+.dns-name-input { position: relative; display: flex; align-items: center; }
+.dns-name-input .dns-name-suffix {
+  position: absolute; right: 12px; font: 13px var(--font-mono); color: var(--ink-faint); pointer-events: none; max-width: 55%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}

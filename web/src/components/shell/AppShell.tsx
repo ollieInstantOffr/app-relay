@@ -12,6 +12,7 @@ import EngineBanners from '../../features/history/EngineBanners'
 import SessionExpiredDialog from '../../features/auth/SessionExpiredDialog'
 import ApprovalToasts from '../../features/mcp/ApprovalToasts'
 import { hasEngineNotice, useEngineUpdates } from '../../features/settings/enginesApi'
+import { usePublicDNS } from '../../features/dns/dnsApi'
 
 export interface NavItem {
   to: string
@@ -27,9 +28,16 @@ export const NAV: NavItem[] = [
   { to: '/certificates', label: 'Certificates', icon: 'certificates', shortcut: 'G C' },
   { to: '/access', label: 'Access lists', icon: 'access', shortcut: 'G A' },
   { to: '/streams', label: 'Streams', icon: 'streams', shortcut: 'G T' },
+  { to: '/dns', label: 'Public DNS', icon: 'expose', shortcut: 'G N' },
   { to: '/logs', label: 'Logs', icon: 'logs', shortcut: 'G G' },
   { to: '/history', label: 'Config history', icon: 'history', shortcut: 'G V' },
 ]
+
+/** NAV without pages for integrations that are turned off (Public DNS). */
+export function useVisibleNav(): NavItem[] {
+  const dns = usePublicDNS().enabled
+  return useMemo(() => NAV.filter((n) => n.to !== '/dns' || dns), [dns])
+}
 
 /** Redirects to /setup or /login when needed. */
 export function RequireSession({ children }: { children: React.ReactNode }) {
@@ -78,6 +86,7 @@ function Rail({ pendingCount, username, role }: { pendingCount: number; username
   const engines = useEngines().data
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const nav = useVisibleNav()
 
   const engineNotice = hasEngineNotice(useEngineUpdates(role === 'admin').data)
   const badges = useMemo(() => {
@@ -101,7 +110,7 @@ function Rail({ pendingCount, username, role }: { pendingCount: number; username
       <NavLink to="/" className="rail-logo" aria-label="Relay">
         <LogoMark size={28} />
       </NavLink>
-      {NAV.map((item) => (
+      {nav.map((item) => (
         <Tooltip key={item.to} content={item.label} shortcut={item.shortcut} side="right">
           <NavLink to={item.to} end={item.to === '/'} className={({ isActive }) => cx('rail-item', isActive && 'active')} aria-label={item.label}>
             <Icon name={item.icon} size={18} />

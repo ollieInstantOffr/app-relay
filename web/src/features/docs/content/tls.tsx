@@ -60,6 +60,8 @@ PORKBUN_API_KEY        pk1_…
 PORKBUN_SECRET_API_KEY sk1_…`}
       />
 
+      <Tip title="Same provider, public records too">A GoDaddy or Cloudflare provider can also manage your domain’s public records and create them for new hosts. <See id="public-dns">Public DNS →</See></Tip>
+
       <H2>Renewal</H2>
       <P>
         Certificates renew automatically well before they expire. Set how early under <UI>Settings → Default TLS → Renew when</UI>. If a renewal fails, the

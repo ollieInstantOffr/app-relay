@@ -8,6 +8,8 @@ import { keys, useEntities, useRole, useSaveEntity } from '../../lib/queries'
 import { pluralize, upstreamUrl } from '../../lib/format'
 import type { HealthStatus, ProxyHost } from '../../lib/types'
 import { applyNowAction, hostToDraft, openableDomain, probeMessage, useInvalidateHosts, type HostTab, type HostUsage } from './lib'
+import { checkDNS, deleteDNSRecord, dnsKeys, usePublicDNS } from '../dns/dnsApi'
+import type { DNSRecord } from '../../lib/types'
 
 export interface HostActions {
   edit: (h: ProxyHost, tab?: HostTab) => void
@@ -188,11 +190,14 @@ export function DeleteHostDialog({ host, onClose }: { host: ProxyHost | null; on
     retry: false,
   })
   const [deleteCert, setDeleteCert] = useState(false)
+  const [deleteDNS, setDeleteDNS] = useState(false)
   const [typed, setTyped] = useState('')
   const [busy, setBusy] = useState(false)
+  const publicDNS = usePublicDNS().enabled
 
   useEffect(() => {
     setDeleteCert(false)
+    setDeleteDNS(false)
     setTyped('')
     setBusy(false)
   }, [host?.id])
@@ -221,6 +226,7 @@ export function DeleteHostDialog({ host, onClose }: { host: ProxyHost | null; on
     if (withCert) qc.invalidateQueries({ queryKey: keys.entities('certificates') })
     onClose()
     const snapshot = host
+    if (deleteDNS && publicDNS) void removeDNSRecords(snapshot)
     toast.show({
       kind: 'undo',
       title: 'Host deleted',
@@ -250,6 +256,50 @@ export function DeleteHostDialog({ host, onClose }: { host: ProxyHost | null; on
         },
       ],
     })
+  }
+
+  /** Deletes records that point to Relay for the host's domains. Never conflicts, shared wildcards or records other hosts use. */
+  const removeDNSRecords = async (h: ProxyHost) => {
+    const domains = h.domains.filter(Boolean)
+    if (!domains.length) return
+    try {
+      const results = await checkDNS(domains)
+      const seen = new Set<string>()
+      const targets: { zone: string; rec: DNSRecord }[] = []
+      for (const r of results) {
+        if (!r.zone || r.status === 'conflict') continue
+        for (const rec of r.relayRecords ?? []) {
+          const key = `${r.zone}/${rec.id}`
+          if (seen.has(key)) continue
+          if (rec.fqdn.startsWith('*.') && rec.fqdn !== r.domain) continue
+          if (rec.hosts?.some((id) => id !== h.id)) continue
+          seen.add(key)
+          targets.push({ zone: r.zone, rec })
+        }
+      }
+      if (!targets.length) {
+        toast.show({ kind: 'info', title: 'No DNS records to delete', message: 'None of its records pointed to Relay.' })
+        return
+      }
+      const done: string[] = []
+      const failed: string[] = []
+      for (const t of targets) {
+        try {
+          await deleteDNSRecord(t.zone, t.rec.id)
+          done.push(`${t.rec.type} ${t.rec.fqdn}`)
+        } catch (err) {
+          failed.push(`${t.rec.fqdn}: ${errorMessage(err)}`)
+        }
+      }
+      qc.invalidateQueries({ queryKey: dnsKeys.all })
+      if (failed.length) {
+        toast.show({ kind: 'error', title: done.length ? `Deleted ${pluralize(done.length, 'DNS record')}, ${failed.length} failed` : 'Could not delete DNS records', message: failed.join(' · ') })
+      } else {
+        toast.success(`Deleted ${pluralize(done.length, 'DNS record')}`, done.join(' · '))
+      }
+    } catch (err) {
+      toast.error(err, 'Could not delete DNS records')
+    }
   }
 
   return (
@@ -292,6 +342,17 @@ export function DeleteHostDialog({ host, onClose }: { host: ProxyHost | null; on
           label={
             <span>
               Its certificate <span className="mono">{certName}</span> is used by nothing else. Delete it too
+            </span>
+          }
+        />
+      )}
+      {publicDNS && (
+        <Checkbox
+          checked={deleteDNS}
+          onChange={setDeleteDNS}
+          label={
+            <span>
+              Also delete its DNS records <span className="muted">· only records that point to Relay, removed right away</span>
             </span>
           }
         />

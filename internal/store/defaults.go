@@ -116,6 +116,9 @@ var MCPTools = map[string]string{
 	"list_backups":       model.ToolRead,
 	"get_activity":       model.ToolRead,
 	"get_ports":          model.ToolRead,
+	"list_dns_zones":     model.ToolRead,
+	"list_dns_records":   model.ToolRead,
+	"check_dns":          model.ToolRead,
 
 	// Write tools: configuration and operations (deletes, unblocking and rollbacks start disabled).
 	"update_host_config":       model.ToolConfirm,
@@ -142,11 +145,15 @@ var MCPTools = map[string]string{
 	"create_backup":            model.ToolConfirm,
 	"block_ip":                 model.ToolConfirm,
 	"check_for_updates":        model.ToolAllow,
+	"create_dns_record":        model.ToolConfirm,
+	"update_dns_record":        model.ToolConfirm,
+	"sync_dns":                 model.ToolConfirm,
 	"delete_redirect":          model.ToolDisabled,
 	"delete_access_list":       model.ToolDisabled,
 	"delete_stream":            model.ToolDisabled,
 	"delete_backend":           model.ToolDisabled,
 	"delete_frontend":          model.ToolDisabled,
+	"delete_dns_record":        model.ToolDisabled,
 	"delete_certificate":       model.ToolDisabled,
 	"unblock_ip":               model.ToolDisabled,
 	"rollback_version":         model.ToolDisabled,
@@ -216,6 +223,9 @@ func SettingsDefaults(key string) any {
 		return &model.BlocklistSettings{Entries: []model.BlockEntry{}}
 	case model.SettingsErrorPages:
 		v := DefaultErrorPages()
+		return &v
+	case model.SettingsPublicDNS:
+		v := model.DefaultPublicDNS()
 		return &v
 	case model.SettingsEngines:
 		v := DefaultEngines()

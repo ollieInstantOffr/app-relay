@@ -6,6 +6,7 @@ import { edgeSections } from './edge'
 import { loginSections } from './login'
 import { errorPageSections } from './errorpages'
 import { tlsSections } from './tls'
+import { dnsSections } from './dns'
 import { lbSections } from './lb'
 import { dockerSections } from './docker'
 import { opsSections } from './ops'
@@ -24,6 +25,7 @@ export const DOC_SECTIONS: DocSection[] = [
   ...errorPageSections,
   ...edgeSections,
   ...tlsSections,
+  ...dnsSections,
   ...lbSections,
   ...dockerSections,
   ...opsSections,

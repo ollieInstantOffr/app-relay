@@ -12,6 +12,7 @@ import HistoryPage from '../features/history/HistoryPage'
 import LoginPage from '../features/auth/LoginPage'
 import SetupWizard from '../features/auth/SetupWizard'
 import DocsPage from '../features/docs/DocsPage'
+import DNSPage from '../features/dns/DNSPage'
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -28,6 +29,7 @@ export const router = createBrowserRouter([
       { path: 'certificates', element: <CertificatesPage /> },
       { path: 'access', element: <AccessListsPage /> },
       { path: 'streams', element: <StreamsPage /> },
+      { path: 'dns', element: <DNSPage /> },
       { path: 'logs', element: <Navigate to="/logs/access" replace /> },
       { path: 'logs/:tab', element: <LogsPage /> },
       { path: 'history', element: <HistoryPage /> },

@@ -5,6 +5,7 @@ import { TopBar } from './TopBar'
 import GeneralSettings from '../../features/settings/GeneralSettings'
 import UsersSettings from '../../features/settings/UsersSettings'
 import DockerSettings from '../../features/settings/DockerSettings'
+import PublicDNSSettings from '../../features/settings/PublicDNSSettings'
 import TLSSettings from '../../features/settings/TLSSettings'
 import ErrorPagesSettings from '../../features/settings/ErrorPagesSettings'
 import ProxyEngineSettings from '../../features/settings/ProxyEngineSettings'
@@ -41,6 +42,7 @@ export const SETTINGS_GROUPS: { label: string; sections: SettingsSection[] }[] =
     label: 'Integrations',
     sections: [
       { id: 'docker', label: 'Docker discovery', icon: 'docker', component: DockerSettings },
+      { id: 'public-dns', label: 'Public DNS', icon: 'expose', component: PublicDNSSettings },
       { id: 'mcp', label: 'MCP server', icon: 'mcp', component: MCPSettings },
     ],
   },

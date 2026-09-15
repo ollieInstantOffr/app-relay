@@ -13,7 +13,7 @@ function ProxyHosts() {
       <Steps>
         <Step title="Create the DNS record">
           At your DNS provider add <C>app.example.com A 203.0.113.10</C> (your public IP). For LAN-only apps, add the record in your local DNS
-          (Pi-hole, AdGuard, router) pointing at Relay’s LAN IP instead.
+          (Pi-hole, AdGuard, router) pointing at Relay’s LAN IP instead. With <See id="public-dns">Public DNS</See> connected, Relay creates the public record for you.
         </Step>
         <Step title="Open a new host">
           <UI>Proxy hosts → New host</UI>, or press <Kbd>N</Kbd> from anywhere.

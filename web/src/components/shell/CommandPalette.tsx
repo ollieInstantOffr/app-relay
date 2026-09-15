@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Dialog, Icon, Kbd, cx, type IconName } from '../ui'
 import { useEntities } from '../../lib/queries'
 import { upstreamUrl } from '../../lib/format'
-import { NAV } from './AppShell'
+import { useVisibleNav } from './AppShell'
 
 interface Item {
   id: string
@@ -23,6 +23,7 @@ export function CommandPalette() {
   const backends = useEntities('backends', { enabled: open }).data ?? []
   const certs = useEntities('certificates', { enabled: open }).data ?? []
   const listRef = useRef<HTMLDivElement>(null)
+  const visibleNav = useVisibleNav()
 
   useEffect(() => {
     const onOpen = () => setOpen(true)
@@ -85,12 +86,12 @@ export function CommandPalette() {
       },
     ]
     out.push(...actions.filter((a) => match(a.label)))
-    const nav: Item[] = [...NAV, { to: '/settings', label: 'Settings', icon: 'settings' as IconName, shortcut: 'G S' }].map((n) => ({
+    const nav: Item[] = [...visibleNav, { to: '/settings', label: 'Settings', icon: 'settings' as IconName, shortcut: 'G S' }].map((n) => ({
       id: 'n' + n.to, group: 'Navigate' as const, label: `Go to ${n.label}`, icon: n.icon, meta: n.shortcut, run: go(n.to),
     }))
     out.push(...nav.filter((n) => match(n.label)))
     return out.slice(0, 60)
-  }, [q, hosts, backends, certs, navigate])
+  }, [q, hosts, backends, certs, navigate, visibleNav])
 
   useEffect(() => setActive(0), [q])
   useEffect(() => {

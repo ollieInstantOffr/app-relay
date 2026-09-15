@@ -39,6 +39,7 @@ function invalidateFor(qc: QueryClient, ev: BusEvent) {
       qc.invalidateQueries({ queryKey: keys.versions })
       qc.invalidateQueries({ queryKey: keys.engines })
       qc.invalidateQueries({ queryKey: ['entities'] })
+      qc.invalidateQueries({ queryKey: ['dns'] })
       break
     case Topics.HealthChanged:
       qc.invalidateQueries({ queryKey: keys.health })

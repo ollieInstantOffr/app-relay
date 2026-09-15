@@ -6,7 +6,8 @@ import type { Container, Upstream } from '../../../lib/types'
 import { ConfigPreviewPanel } from '../ConfigPreview'
 import { DomainsInput } from '../DomainsInput'
 import type { HostFormCtx } from '../HostDrawer'
-import { accessSummary, portError, probeMessage, upstreamHostError, useDomainChecks, useProbe } from '../lib'
+import { accessSummary, domainError, portError, probeMessage, upstreamHostError, useDomainChecks, useProbe } from '../lib'
+import { HostDNSStatus } from '../../dns/HostDNSStatus'
 
 const URL_PASTE = /^(https?):\/\/(\[[^\]]+\]|[^/:?#\s]+)(?::(\d+))?(\/[^\s]*)?$/i
 
@@ -87,6 +88,8 @@ export function DetailsTab({ ctx }: { ctx: HostFormCtx }) {
           hint={draft.system ? "Relay's admin UI domain · change it in Settings → General" : 'Wildcards allowed · press Enter to add'}
         />
       </Field>
+
+      {!draft.system && <HostDNSStatus domains={draft.domains.filter((d) => !domainError(d))} readOnly={readOnly} />}
 
       <div className="field">
         <label className="field-label">Forward to</label>

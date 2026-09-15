@@ -171,6 +171,7 @@ function Mcp() {
           ['list_access_lists · get_access_list', 'Access lists with their rules and usernames (never passwords).'],
           ['list_backends · get_backend_status · list_frontends', 'Load balancer backends, live server status and frontends.'],
           ['list_certificates · list_dns_providers', 'Certificates with expiry and errors, DNS providers for DNS-01.'],
+          ['list_dns_zones · list_dns_records · check_dns', 'Public DNS domains and records, and whether a host’s domains point to Relay.'],
           ['get_default_host · get_settings', 'What unknown domains get, and settings (secrets redacted; not security or MCP).'],
           ['get_pending_changes · get_config_diff', 'What is saved but not live yet, and the exact rendered config diff.'],
           ['list_versions', 'Config history: who applied what, when, on which engine.'],
@@ -194,6 +195,7 @@ function Mcp() {
           ['drain_server · block_ip', 'Take a server out of rotation; block an address everywhere.', 'confirm'],
           ['apply_changes · discard_changes', 'Apply all pending changes (validated, health-checked, rolled back on failure), or throw them away.', 'confirm'],
           ['engine_action · upgrade_engine · upgrade_relay · create_backup', 'Start/stop/reload engines, upgrade nginx, HAProxy or Relay, and back up.', 'confirm'],
+          ['create_dns_record · update_dns_record · sync_dns', 'Change public DNS records and create missing records for hosts.', 'confirm'],
           ['check_for_updates', 'Look for new versions now.', 'allow'],
           ['delete_* · unblock_ip · rollback_version', 'Deleting, unblocking and rolling back.', 'off'],
         ]}

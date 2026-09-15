@@ -40,6 +40,7 @@ import (
 	"github.com/instantoffr/relay/internal/mcp"
 	"github.com/instantoffr/relay/internal/notify"
 	"github.com/instantoffr/relay/internal/npmimport"
+	"github.com/instantoffr/relay/internal/publicdns"
 	"github.com/instantoffr/relay/internal/store"
 	"github.com/instantoffr/relay/internal/webui"
 )
@@ -171,8 +172,9 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	eng := engines.New(app)
 	app.Engines = eng
 	app.Containers = eng
+	app.PublicDNS = publicdns.New(app)
 
-	for _, svc := range []core.Service{app.Auth, app.Notify, app.Certs, app.Engine, app.LB, app.Logs, app.Health, app.Docker, app.Backup, app.MCP, app.Engines} {
+	for _, svc := range []core.Service{app.Auth, app.Notify, app.Certs, app.Engine, app.LB, app.Logs, app.Health, app.Docker, app.Backup, app.MCP, app.Engines, app.PublicDNS} {
 		if err := svc.Start(ctx); err != nil {
 			return fmt.Errorf("start %T: %w", svc, err)
 		}

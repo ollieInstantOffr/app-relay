@@ -57,7 +57,12 @@ const WRITE_TOOLS = new Set([
   'delete_certificate',
   'unblock_ip',
   'rollback_version',
+  'create_dns_record',
+  'update_dns_record',
+  'delete_dns_record',
+  'sync_dns',
 ])
+// Everything else is a read tool (e.g. list_dns_zones, list_dns_records, check_dns).
 
 export default function MCPSettings() {
   const { isAdmin, role } = useRole()
