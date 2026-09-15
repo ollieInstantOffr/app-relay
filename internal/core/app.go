@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/instantoffr/relay/internal/agent"
 	"github.com/instantoffr/relay/internal/events"
@@ -62,6 +64,7 @@ type App struct {
 
 	Nginx   *agent.Client
 	HAProxy *agent.Client
+	Edge    *agent.Client // Relay Edge (the proxy engine alternative to nginx)
 
 	Auth     Auth
 	Engine   Engine
@@ -77,6 +80,11 @@ type App struct {
 	Engines  Engines // engine image version checks & upgrades (core/engines_ext.go)
 
 	AdminListener AdminListener // serves the admin UI/API; set by main
+
+	proxyMu     sync.Mutex
+	proxyEngine string // cached ProxyEngine result
+	proxyAt     time.Time
+	proxyFile   string // last value written to the proxy-engine file
 }
 
 // AdminListener serves the admin UI/API and moves it to another port at
@@ -99,6 +107,7 @@ func New(cfg Config, st *store.Store, bus *events.Bus, log *slog.Logger) *App {
 		Log:     log,
 		Nginx:   agent.NewClient(agent.EngineNginx, agent.SocketPath(cfg.RunDir, agent.EngineNginx)),
 		HAProxy: agent.NewClient(agent.EngineHAProxy, agent.SocketPath(cfg.RunDir, agent.EngineHAProxy)),
+		Edge:    agent.NewClient(agent.EngineEdge, agent.SocketPath(cfg.RunDir, agent.EngineEdge)),
 	}
 }
 

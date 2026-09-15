@@ -19,7 +19,7 @@ const (
 	ErrorLogLine     = "log.error"
 	AuditAppended    = "audit.appended"
 	ApprovalChanged  = "approval.changed" // Data: {id, status}
-	EngineChanged    = "engine.changed"   // Data: {engine: nginx|haproxy, running}
+	EngineChanged    = "engine.changed"   // Data: {engine: nginx|haproxy|edge, running, reachable}
 	DockerChanged    = "docker.changed"
 	BackupChanged    = "backup.changed"
 	ActivityAppended = "activity.appended"

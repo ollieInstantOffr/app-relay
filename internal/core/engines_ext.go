@@ -25,7 +25,10 @@ type EngineDrift struct {
 }
 
 type EngineUpdateInfo struct {
-	Engine          string                    `json:"engine"`  // nginx | haproxy
+	Engine string `json:"engine"` // nginx | haproxy
+	// Inactive: nginx while Relay Edge is the selected proxy engine (the
+	// container may be stopped or absent; nothing is an error).
+	Inactive        bool                      `json:"inactive,omitempty"`
 	Channel         string                    `json:"channel"` // stable | mainline | lts | latest
 	Version         string                    `json:"version"` // reported by the running agent
 	Reachable       bool                      `json:"reachable"`
@@ -47,13 +50,16 @@ type EngineUpdateInfo struct {
 }
 
 type EngineUpdates struct {
-	Nginx       EngineUpdateInfo `json:"nginx"`
-	HAProxy     EngineUpdateInfo `json:"haproxy"`
-	AutoCheck   bool             `json:"autoCheck"`
-	CheckedAt   *time.Time       `json:"checkedAt,omitempty"`
-	NextCheckAt *time.Time       `json:"nextCheckAt,omitempty"`
-	CheckError  string           `json:"checkError,omitempty"`
-	DockerError string           `json:"dockerError,omitempty"`
+	Nginx   EngineUpdateInfo `json:"nginx"`
+	HAProxy EngineUpdateInfo `json:"haproxy"`
+	// ProxyEngine is the active proxy engine (nginx | edge). Relay Edge ships
+	// with the relay binary and has no image to upgrade.
+	ProxyEngine string     `json:"proxyEngine"`
+	AutoCheck   bool       `json:"autoCheck"`
+	CheckedAt   *time.Time `json:"checkedAt,omitempty"`
+	NextCheckAt *time.Time `json:"nextCheckAt,omitempty"`
+	CheckError  string     `json:"checkError,omitempty"`
+	DockerError string     `json:"dockerError,omitempty"`
 	// ComposeProject is the compose project Relay searches for engine containers.
 	ComposeProject string `json:"composeProject,omitempty"`
 	// Relay is the application's own update state.

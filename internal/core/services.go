@@ -72,6 +72,9 @@ type EngineState struct {
 type EnginesStatus struct {
 	Nginx   EngineState `json:"nginx"`
 	HAProxy EngineState `json:"haproxy"`
+	Edge    EngineState `json:"edge"`
+	// Proxy is the active proxy engine: nginx | edge.
+	Proxy string `json:"proxy"`
 }
 
 type Engine interface {
