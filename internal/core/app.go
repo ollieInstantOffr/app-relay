@@ -78,8 +78,13 @@ type App struct {
 	Importer Importer
 	MCP      MCP
 	Engines  Engines // engine image version checks & upgrades (core/engines_ext.go)
+	// Containers starts and stops engine containers (nil without Docker support).
+	Containers EngineContainers
 
 	AdminListener AdminListener // serves the admin UI/API; set by main
+	// API is the REST API router (set by main). MCP tools call it in-process
+	// so their writes run through the same validation and hooks as the UI.
+	API http.Handler
 
 	proxyMu     sync.Mutex
 	proxyEngine string // cached ProxyEngine result

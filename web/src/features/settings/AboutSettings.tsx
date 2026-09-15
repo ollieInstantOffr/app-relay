@@ -10,6 +10,7 @@ import '../auth/auth.css'
 
 function engineStatus(state: EngineState | undefined, loading: boolean): { tone: 'ok' | 'warn' | 'danger' | 'muted'; label: string; detail: string } {
   if (!state) return { tone: 'muted', label: loading ? 'checking…' : 'unknown', detail: '' }
+  if (!state.reachable && state.standby) return { tone: 'muted', label: 'standby', detail: 'container stopped · not needed right now' }
   if (!state.reachable) return { tone: 'danger', label: 'agent unreachable', detail: state.error ?? '' }
   if (state.running) {
     const detail = state.lastReloadAt ? `reloaded ${ago(state.lastReloadAt)}` : state.startedAt ? `started ${ago(state.startedAt)}` : ''
@@ -57,7 +58,7 @@ export default function AboutSettings() {
         {rows.map(({ name, label, state, proxy: isProxy }) => {
           const active = isProxy && !!engines.data && proxy === name
           // The standby proxy engine is stopped on purpose; don't report that as a problem.
-          const st = isProxy && engines.data && !active && state?.reachable && !state.running
+          const st = isProxy && engines.data && !active && (state?.standby || (state?.reachable && !state.running))
             ? { tone: 'muted' as const, label: 'standby', detail: 'stopped · not the proxy engine · Settings → Proxy engine' }
             : engineStatus(state, engines.isLoading)
           return (

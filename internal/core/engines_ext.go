@@ -28,7 +28,9 @@ type EngineUpdateInfo struct {
 	Engine string `json:"engine"` // nginx | haproxy
 	// Inactive: nginx while Relay Edge is the selected proxy engine (the
 	// container may be stopped or absent; nothing is an error).
-	Inactive        bool                      `json:"inactive,omitempty"`
+	Inactive bool `json:"inactive,omitempty"`
+	// Standby: Relay stopped the container because the engine isn't needed.
+	Standby         bool                      `json:"standby,omitempty"`
 	Channel         string                    `json:"channel"` // stable | mainline | lts | latest
 	Version         string                    `json:"version"` // reported by the running agent
 	Reachable       bool                      `json:"reachable"`

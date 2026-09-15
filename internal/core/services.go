@@ -67,6 +67,12 @@ type EngineState struct {
 	agent.Status
 	Reachable bool   `json:"reachable"`
 	Error     string `json:"error,omitempty"`
+	// Container is the engine container's state when the agent is
+	// unreachable: running | stopped | missing ("" = not checked).
+	Container string `json:"container,omitempty"`
+	// Standby: the container is stopped on purpose because the engine isn't
+	// needed (not the selected proxy engine, or HAProxy stopped or idle).
+	Standby bool `json:"standby,omitempty"`
 }
 
 type EnginesStatus struct {
@@ -75,6 +81,16 @@ type EnginesStatus struct {
 	Edge    EngineState `json:"edge"`
 	// Proxy is the active proxy engine: nginx | edge.
 	Proxy string `json:"proxy"`
+}
+
+// EngineContainers starts and stops engine containers (internal/engines).
+type EngineContainers interface {
+	// ContainerState is "running", "stopped", "missing" or "" (Docker unavailable).
+	ContainerState(ctx context.Context, engine string) string
+	// StartContainer starts a stopped engine container and waits for its agent.
+	StartContainer(ctx context.Context, engine string) error
+	// StopContainer stops an engine container; reason goes to the activity feed.
+	StopContainer(ctx context.Context, engine, reason string) error
 }
 
 type Engine interface {

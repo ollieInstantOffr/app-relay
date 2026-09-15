@@ -9,6 +9,11 @@ import (
 // withActor resolves the session cookie / bearer token (if any) into ctx.
 func (s *Server) withActor(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// In-process calls (MCP tools) already carry their authenticated actor.
+		if core.IsInternalCall(r.Context()) && !core.ActorFrom(r.Context()).IsZero() {
+			next.ServeHTTP(w, r)
+			return
+		}
 		ip := core.ClientIP(r)
 		if s.app.Auth != nil {
 			if a, err := s.app.Auth.Authenticate(r); err == nil && !a.IsZero() {

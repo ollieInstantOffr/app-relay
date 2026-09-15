@@ -31,7 +31,17 @@ func (s *Server) Handler() http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(s.withActor)
 	if httpx.NetworkGuard != nil {
-		r.Use(func(next http.Handler) http.Handler { return httpx.NetworkGuard(s.app, next) })
+		r.Use(func(next http.Handler) http.Handler {
+			guarded := httpx.NetworkGuard(s.app, next)
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// MCP tools were admitted by the MCP endpoint's own access list.
+				if core.IsInternalCall(r.Context()) {
+					next.ServeHTTP(w, r)
+					return
+				}
+				guarded.ServeHTTP(w, r)
+			})
+		})
 	}
 	if s.app.Config.DevMode {
 		r.Use(devCORS)

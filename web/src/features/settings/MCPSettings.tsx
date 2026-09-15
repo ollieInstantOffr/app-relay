@@ -18,7 +18,46 @@ import '../mcp/mcp.css'
 type Transport = 'http' | 'stdio'
 
 // Tool kinds when /api/mcp/tools is unavailable.
-const WRITE_TOOLS = new Set(['create_host', 'update_host', 'delete_host', 'drain_server', 'request_certificate', 'apply_changes'])
+const WRITE_TOOLS = new Set([
+  'create_host',
+  'update_host',
+  'delete_host',
+  'drain_server',
+  'request_certificate',
+  'apply_changes',
+  'update_host_config',
+  'create_redirect',
+  'update_redirect',
+  'create_access_list',
+  'update_access_list',
+  'create_stream',
+  'update_stream',
+  'create_backend',
+  'update_backend',
+  'create_frontend',
+  'update_frontend',
+  'expose_backend',
+  'set_default_host',
+  'update_settings',
+  'set_proxy_engine',
+  'discard_changes',
+  'engine_action',
+  'upgrade_engine',
+  'upgrade_relay',
+  'create_hosts_from_docker',
+  'renew_certificate',
+  'create_backup',
+  'block_ip',
+  'check_for_updates',
+  'delete_redirect',
+  'delete_access_list',
+  'delete_stream',
+  'delete_backend',
+  'delete_frontend',
+  'delete_certificate',
+  'unblock_ip',
+  'rollback_version',
+])
 
 export default function MCPSettings() {
   const { isAdmin, role } = useRole()

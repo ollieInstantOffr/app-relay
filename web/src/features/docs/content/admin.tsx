@@ -106,8 +106,16 @@ function Mcp() {
         code={`“Why is grafana.example.com returning 502s since this morning?”
 “Which certificates expire in the next 30 days?”
 “Create a host for app.example.com pointing at 192.168.1.20:3000 with websockets, then apply.”
-“Drain api-2 so I can deploy it.”`}
+“Drain api-2 so I can deploy it.”
+“Redirect old.example.com to new.example.com with a 308, keep the path.”
+“Put Authelia in front of grafana.example.com and rate limit it to 10 requests per second.”
+“Switch to Relay Edge, apply, and show me the engine status afterwards.”
+“Is there a Relay update? If so, upgrade.”`}
       />
+      <P>
+        MCP covers everything you can do in the UI except user management, security settings and the MCP settings themselves. Changes made by the assistant go through exactly the same
+        validation, pending changes, audit log and role checks as a change made in the UI, so an assistant can never do more than the user who created its token.
+      </P>
       <Flow steps={[{ label: 'Claude' }, { label: '/mcp', sub: 'Bearer rl_mcp_…' }, { label: 'Approval', sub: 'for changes' }, { label: 'Relay' }]} />
 
       <H2>Connect Claude</H2>
@@ -158,25 +166,46 @@ function Mcp() {
         mono={[0]}
         rows={[
           ['list_hosts · get_host', 'Hosts with health, certificate, access list and full configuration.'],
-          ['query_logs', 'Search access logs by host, status, IP, text and time window.'],
-          ['list_backends · get_backend_status', 'Load balancer backends and live server status.'],
-          ['list_certificates', 'Certificates with expiry and errors.'],
-          ['list_access_lists · list_streams', 'Access lists and TCP/UDP streams.'],
-          ['get_pending_changes', 'What is saved but not live yet.'],
+          ['list_redirects · list_streams', 'Redirects and TCP/UDP streams.'],
+          ['list_access_lists · get_access_list', 'Access lists with their rules and usernames (never passwords).'],
+          ['list_backends · get_backend_status · list_frontends', 'Load balancer backends, live server status and frontends.'],
+          ['list_certificates · list_dns_providers', 'Certificates with expiry and errors, DNS providers for DNS-01.'],
+          ['get_default_host · get_settings', 'What unknown domains get, and settings (secrets redacted; not security or MCP).'],
+          ['get_pending_changes · get_config_diff', 'What is saved but not live yet, and the exact rendered config diff.'],
+          ['list_versions', 'Config history: who applied what, when, on which engine.'],
+          ['get_overview · get_health · get_activity', 'Traffic numbers, health of every host and stream, recent events.'],
+          ['query_logs · query_error_log · query_audit_log', 'Access log, engine error log and audit log search.'],
+          ['get_engine_status · get_engine_logs', 'nginx, Relay Edge and HAProxy state and process output.'],
+          ['get_updates · list_containers · list_backups · get_ports', 'Update status, Docker containers, backups and port usage.'],
           ['manage_users', 'List users, roles and 2FA status (read-only).'],
         ]}
       />
       <H3>Write tools</H3>
       <Table
-        head={['Tool', 'Does']}
+        head={['Tool', 'Does', 'Default']}
         mono={[0]}
         rows={[
-          ['create_host · update_host · delete_host', 'Change proxy hosts (saved as pending changes).'],
-          ['request_certificate', 'Request a Let’s Encrypt certificate.'],
-          ['drain_server', 'Set a server to drain, maint or ready immediately.'],
-          ['apply_changes', 'Apply all pending changes, with validation and rollback.'],
+          ['create_host · update_host · update_host_config', 'Create hosts and change any host setting: locations, forward auth, rate limits, headers, HTTP/3, snippets…', 'confirm'],
+          ['create_ / update_redirect · access_list · stream · backend · frontend', 'Create and change every other configuration object. Updates take a JSON merge patch of just the fields to change.', 'confirm'],
+          ['expose_backend · create_hosts_from_docker', 'Put a backend on a domain; create hosts from discovered containers.', 'confirm'],
+          ['set_default_host · update_settings · set_proxy_engine', 'Default host, settings, and switching between nginx and Relay Edge.', 'confirm'],
+          ['request_certificate · renew_certificate', 'Request or renew Let’s Encrypt certificates.', 'confirm'],
+          ['drain_server · block_ip', 'Take a server out of rotation; block an address everywhere.', 'confirm'],
+          ['apply_changes · discard_changes', 'Apply all pending changes (validated, health-checked, rolled back on failure), or throw them away.', 'confirm'],
+          ['engine_action · upgrade_engine · upgrade_relay · create_backup', 'Start/stop/reload engines, upgrade nginx, HAProxy or Relay, and back up.', 'confirm'],
+          ['check_for_updates', 'Look for new versions now.', 'allow'],
+          ['delete_* · unblock_ip · rollback_version', 'Deleting, unblocking and rolling back.', 'off'],
         ]}
       />
+      <Example
+        lang="json"
+        title="A merge patch: update_redirect only sends what changes"
+        code={`{ "id": "old.example.com", "changes": { "code": 308, "keepPath": true }, "reason": "make it permanent" }`}
+      />
+      <P>
+        A token can be limited to certain domains or backends. Such a token only sees and changes objects inside that limit; instance-wide tools (settings, engines, versions, access
+        lists, frontends, backups, blocklist) need a token without a limit.
+      </P>
 
       <H2>Permissions and approvals</H2>
       <List>

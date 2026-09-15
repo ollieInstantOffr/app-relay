@@ -427,20 +427,19 @@ func (h *handlers) engineAction(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 60*time.Second)
-	defer cancel()
-	var resp *agent.ActionResponse
 	action := chi.URLParam(r, "action")
-	switch action {
-	case "start":
-		resp, err = c.Start(ctx)
-	case "stop":
-		resp, err = c.Stop(ctx)
-	case "reload":
-		resp, err = c.Reload(ctx)
-	default:
+	if action != "start" && action != "stop" && action != "reload" {
 		writeErr(w, r, httpx.Errorf(http.StatusNotFound, "not_found", "unknown action (start | stop | reload)"))
 		return
+	}
+	// Starting may first start the engine's container and wait for its agent.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 150*time.Second)
+	defer cancel()
+	var resp *agent.ActionResponse
+	if svc, ok := h.app.Engine.(*Service); ok {
+		resp, err = svc.EngineAction(ctx, engine, action)
+	} else {
+		resp, err = runAction(ctx, c, action)
 	}
 	if err != nil {
 		writeErr(w, r, err)
@@ -451,10 +450,22 @@ func (h *handlers) engineAction(w http.ResponseWriter, r *http.Request) {
 		result, detail = "failed", firstErrorLine(resp.Output)
 	}
 	h.app.Audit(r.Context(), core.AuditEntry{Action: "engine." + action, Target: engine, Detail: detail, Result: result})
-	if st, err := c.Status(ctx); err == nil {
+	sctx, scancel := context.WithTimeout(ctx, 3*time.Second)
+	if st, err := c.Status(sctx); err == nil {
 		h.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": engine, "running": st.Running, "reachable": true})
 	}
+	scancel()
 	httpx.WriteJSON(w, http.StatusOK, resp)
+}
+
+func runAction(ctx context.Context, c *agent.Client, action string) (*agent.ActionResponse, error) {
+	switch action {
+	case "start":
+		return c.Start(ctx)
+	case "stop":
+		return c.Stop(ctx)
+	}
+	return c.Reload(ctx)
 }
 
 func (h *handlers) engineLogs(w http.ResponseWriter, r *http.Request) {

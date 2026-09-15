@@ -200,6 +200,7 @@ func (a *Agent) status() Status {
 		ConfigHash:     cur,
 		ConfigLines:    a.configLines,
 		Configured:     cur != "" && cur != BootstrapHash,
+		Stopped:        a.rel.marker(stoppedMarker),
 	}
 	a.mu.Unlock()
 	if s.Modules == nil {

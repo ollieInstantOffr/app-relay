@@ -168,7 +168,9 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	app.Backup = backup.New(app)
 	app.Importer = npmimport.New(app)
 	app.MCP = mcp.New(app)
-	app.Engines = engines.New(app)
+	eng := engines.New(app)
+	app.Engines = eng
+	app.Containers = eng
 
 	for _, svc := range []core.Service{app.Auth, app.Notify, app.Certs, app.Engine, app.LB, app.Logs, app.Health, app.Docker, app.Backup, app.MCP, app.Engines} {
 		if err := svc.Start(ctx); err != nil {
@@ -178,7 +180,9 @@ func serve(ctx context.Context, log *slog.Logger) error {
 
 	// The admin UI port comes from Settings → General and can change at
 	// runtime; RELAY_LISTEN supplies the bind host and the initial port.
-	admin := adminlisten.New(app, api.New(app, webui.FS()).Handler())
+	handler := api.New(app, webui.FS()).Handler()
+	app.API = handler
+	admin := adminlisten.New(app, handler)
 	app.AdminListener = admin
 	if err := admin.Start(ctx); err != nil {
 		return err

@@ -16,7 +16,7 @@ function RelayEdge() {
       </Warn>
       <P>
         Only one proxy engine serves traffic at a time. While Relay Edge serves, nginx is stopped: it holds no ports and Relay stops it again if it ever
-        starts (for example after a container restart). Its container stays up, so switching back takes one apply, and the same goes the other way round.
+        starts (for example after a container restart). Relay also stops its container and starts it again when you switch back, so switching back still takes one apply. The same goes the other way round.
       </P>
       <GoTo to="/settings/proxy">Settings → Proxy engine</GoTo>
 

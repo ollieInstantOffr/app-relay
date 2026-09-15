@@ -133,6 +133,7 @@ export default function HAProxySettings() {
       ? `${lines} lines`
       : '—'
   const running = !!engine?.running
+  const containerStopped = engine?.container === 'stopped'
   const statsList = lists.find((l) => l.id === draft.statsAccessListId)
 
   return (
@@ -142,9 +143,12 @@ export default function HAProxySettings() {
           <div className="h1">HAProxy engine</div>
           <div className="muted" style={{ marginTop: 4 }}>Global defaults for the load balancer. Per-backend settings override these.</div>
         </div>
-        <div className="row gap-10 medium" title={!engine?.reachable ? engine?.error || 'HAProxy agent not reachable' : undefined}>
-          {engine?.reachable ? (running ? 'Running' : 'Stopped') : 'Unreachable'}
-          <Toggle checked={running} disabled={!isAdmin || !engine?.reachable || toggling} onChange={(v) => (v ? engineAction('start') : setConfirmStop(true))} label="Run HAProxy" />
+        <div
+          className="row gap-10 medium"
+          title={containerStopped ? 'The HAProxy container is stopped. Turning HAProxy on starts it.' : !engine?.reachable ? engine?.error || 'HAProxy agent not reachable' : undefined}
+        >
+          {engine?.reachable || containerStopped ? (running ? 'Running' : 'Stopped') : 'Unreachable'}
+          <Toggle checked={running} disabled={!isAdmin || (!engine?.reachable && !containerStopped) || toggling} onChange={(v) => (v ? engineAction('start') : setConfirmStop(true))} label="Run HAProxy" />
         </div>
       </div>
 

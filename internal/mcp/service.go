@@ -37,7 +37,9 @@ const (
 )
 
 const serverInstructions = `Relay manages a reverse proxy (nginx or Relay Edge) and a HAProxy load balancer.
-Configuration writes (create_host, update_host, delete_host) are saved as pending changes and are not live until apply_changes runs.
+Configuration writes (hosts, redirects, access lists, streams, backends, frontends, settings, the default host and the proxy engine) are saved as pending changes and are not live until apply_changes runs; get_config_diff with pending=true shows what will change, discard_changes drops them.
+Start with get_overview, get_health and get_engine_status for a picture of the instance; query_logs, query_error_log and query_audit_log explain problems.
+Update tools take a JSON merge patch ("changes"): only the fields you pass change, nested objects merge, arrays are replaced.
 Some write tools wait for a human to approve the call in Relay's approvals inbox; the call returns once it was approved, denied or expired.
 Tokens can be limited to certain domains or backends; objects outside that scope are invisible.`
 

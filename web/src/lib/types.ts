@@ -408,6 +408,11 @@ export interface EngineState {
   configHash: string
   configLines: number
   configured: boolean
+  stopped?: boolean
+  /** Engine container state when the agent is unreachable. */
+  container?: 'running' | 'stopped' | 'missing'
+  /** The container is stopped on purpose: the engine isn't needed right now. */
+  standby?: boolean
 }
 export interface EnginesStatus {
   nginx: EngineState
@@ -451,6 +456,7 @@ export interface EngineUpdateInfo {
   missingModules: string[]
   /** nginx only: true while Relay Edge is the selected proxy engine. */
   inactive?: boolean
+  standby?: boolean
 }
 export interface RelayCommit { sha: string; short: string; author: string; date?: string; subject: string; url?: string }
 /** Relay's own update state (part of GET /api/engines/updates). */

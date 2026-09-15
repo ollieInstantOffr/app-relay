@@ -76,6 +76,8 @@ type Status struct {
 	ConfigHash     string            `json:"configHash"` // hash of the active release
 	ConfigLines    int               `json:"configLines"`
 	Configured     bool              `json:"configured"` // a release has been applied
+	// Stopped: the engine was stopped on purpose and stays stopped across restarts.
+	Stopped bool `json:"stopped,omitempty"`
 }
 
 type ValidateRequest struct {

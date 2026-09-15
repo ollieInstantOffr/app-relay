@@ -116,7 +116,7 @@ export default function ProxyEngineSettings() {
             ))}
           </div>
           <div className="small muted">
-            Only one engine serves traffic. The other one is stopped and holds no ports; its container stays up so switching back takes a single apply.
+            Only one engine serves traffic. Relay stops the other engine and its container, and starts it again when you switch back, so switching still takes a single apply.
           </div>
           {error && <div className="field-error">{error}</div>}
         </div>
@@ -207,7 +207,14 @@ function EngineRow({ name, state, live, ports, loaded }: { name: ProxyEngineName
   let tone: 'ok' | 'warn' | 'danger' | 'muted' = 'muted'
   let desc: ReactNode = loaded ? '' : 'checking…'
   let badge: ReactNode = null
-  if (state && !state.reachable) {
+  if (state && state.standby) {
+    desc = <>Stopped · the <span className="mono">{container}</span> container is stopped and holds no ports · it starts again when you switch back</>
+    badge = <Badge>standby</Badge>
+  } else if (state && !state.reachable && state.container === 'stopped') {
+    tone = 'warn'
+    desc = <>The <span className="mono">{container}</span> container is stopped · Relay starts it within a few seconds</>
+    badge = <Badge tone="warn">starting</Badge>
+  } else if (state && !state.reachable) {
     tone = active ? 'danger' : 'warn'
     desc = <>Agent unreachable · check the <span className="mono">{container}</span> container</>
   } else if (state && active) {
@@ -218,7 +225,7 @@ function EngineRow({ name, state, live, ports, loaded }: { name: ProxyEngineName
     tone = state.running ? 'warn' : 'muted'
     desc = state.running
       ? `Still running · Relay stops it shortly because ${proxyEngineLabel[other(name)]} is the proxy engine`
-      : <>Stopped · holds no ports · the <span className="mono">{container}</span> container stays up for switching back</>
+      : <>Stopped · holds no ports · Relay stops the <span className="mono">{container}</span> container shortly</>
     badge = <Badge>{state.running ? 'stopping' : 'standby'}</Badge>
   }
   return (

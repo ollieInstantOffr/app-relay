@@ -65,6 +65,21 @@ func (a Actor) Label() string {
 
 type actorKey struct{}
 
+type internalCallKey struct{}
+
+// WithInternalCall marks ctx as an in-process API request made on behalf of
+// the actor already in ctx (MCP tools reusing the REST handlers). Only code in
+// this process can set it; requests from the network never carry it.
+func WithInternalCall(ctx context.Context) context.Context {
+	return context.WithValue(ctx, internalCallKey{}, true)
+}
+
+// IsInternalCall reports whether ctx belongs to an in-process API request.
+func IsInternalCall(ctx context.Context) bool {
+	v, _ := ctx.Value(internalCallKey{}).(bool)
+	return v
+}
+
 func WithActor(ctx context.Context, a Actor) context.Context {
 	return context.WithValue(ctx, actorKey{}, a)
 }

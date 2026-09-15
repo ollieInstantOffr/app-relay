@@ -84,7 +84,9 @@ export default function LoadBalancerPage() {
   const meta = engine ? (
     <Status tone={!engine.reachable ? 'muted' : engine.running ? 'ok' : 'danger'}>
       {!engine.reachable
-        ? 'haproxy · agent unreachable'
+        ? engine.container === 'stopped'
+          ? 'haproxy · stopped'
+          : 'haproxy · agent unreachable'
         : `haproxy${engine.version ? ' ' + engine.version : ''} · ${engine.running ? 'running' : 'stopped'}${
             engine.lastReloadAt ? ` · reloaded ${agoShort(engine.lastReloadAt) === 'now' ? 'just now' : agoShort(engine.lastReloadAt) + ' ago'}` : ''
           }`}

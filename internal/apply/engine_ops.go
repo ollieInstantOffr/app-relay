@@ -35,7 +35,8 @@ func (s *Service) LiveRelease(ctx context.Context, engine string) (agent.Files, 
 		return nil, "", false, 0, err
 	}
 	if engine == agent.EngineHAProxy {
-		return agent.Files{"haproxy.cfg": live.HAProxyCfg}, live.HAProxyHash, live.HAProxyRunning, live.ID, nil
+		running := live.HAProxyRunning && !s.stoppedEngines(ctx)[agent.EngineHAProxy]
+		return agent.Files{"haproxy.cfg": live.HAProxyCfg}, live.HAProxyHash, running, live.ID, nil
 	}
 	if rowEngine(live) != engine {
 		return nil, "", false, live.ID, nil

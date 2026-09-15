@@ -209,8 +209,8 @@ function EngineCard({ info, settings, isAdmin, busy, onChannel, onUpgrade }: {
   const name = engineTitle[info.engine]
   const running = currentVersion(info)
   const latest = info.latest
-  const tone = !info.reachable ? 'danger' : info.running ? 'ok' : 'muted'
-  const state = !info.reachable ? 'agent unreachable' : info.running ? 'running' : info.engine === 'haproxy' ? 'idle · no backends' : 'stopped'
+  const tone = !info.reachable ? (info.standby ? 'muted' : 'danger') : info.running ? 'ok' : 'muted'
+  const state = !info.reachable ? (info.standby ? 'stopped · container stopped' : 'agent unreachable') : info.running ? 'running' : info.engine === 'haproxy' ? 'idle · no backends' : 'stopped'
   const channel = (info.engine === 'nginx' ? settings?.nginxChannel : settings?.haproxyChannel) ?? info.channel
   const channelHint = channelLabels[info.engine].find((c) => c.value === channel)?.hint
   const [keeping, setKeeping] = useState(false)

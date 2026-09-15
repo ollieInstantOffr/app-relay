@@ -368,6 +368,7 @@ func (s *Service) Status(ctx context.Context) (*core.EnginesStatus, error) {
 		s.setModules(ctx, agent.EngineEdge, out.Edge.Modules, out.Edge.DynamicModules, true)
 	}
 	out.Proxy = s.app.ProxyEngine(ctx)
+	s.annotateContainers(ctx, &out)
 	return &out, nil
 }
 
@@ -467,6 +468,14 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 	row.NginxFiles, row.HAProxyCfg = string(nf), r.haproxy["haproxy.cfg"]
 	row.NginxHash, row.HAProxyHash, row.HAProxyRunning = r.proxyHash, r.haproxyHash, r.haproxyRun
 
+	// A stopped engine container (the standby proxy engine, an idle HAProxy)
+	// is started before it's needed.
+	if err := s.ensureEngine(ctx, engine, func() {
+		progress("validate", fmt.Sprintf("Applying v%d… · starting the %s container", id, engineLabel(engine)), 12)
+	}); err != nil {
+		return nil, s.unavailable(engine, err)
+	}
+
 	// Validate.
 	progress("validate", fmt.Sprintf("Applying v%d… · validating · %s", id, checkName(engine)), 20)
 	vctx, cancel := context.WithTimeout(ctx, 90*time.Second)
@@ -481,6 +490,13 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 	}
 	warnings := countWarnings(nv.Output)
 	output := nv.Output
+	if r.haproxyRun {
+		if err := s.ensureEngine(ctx, agent.EngineHAProxy, func() {
+			progress("validate", fmt.Sprintf("Applying v%d… · starting the HAProxy container", id), 25)
+		}); err != nil {
+			return nil, s.unavailable("haproxy", err)
+		}
+	}
 	hst, herr := s.app.HAProxy.Status(ctx)
 	haproxyReachable := herr == nil
 	if r.haproxyRun {
@@ -545,6 +561,9 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 			return s.failAfterSwap(ctx, row, liveID, "haproxy", resp.Stage, resp.Output, &proxySwap{})
 		}
 		sw.haproxy = true
+		if r.haproxyRun {
+			s.setStoppedEngine(ctx, agent.EngineHAProxy, false)
+		}
 	} else if !haproxyReachable && r.haproxyRun {
 		return s.failAfterSwap(ctx, row, liveID, "haproxy", "swap", agentError(herr), &proxySwap{})
 	}
@@ -1123,6 +1142,7 @@ func (s *Service) reconcile(ctx context.Context) {
 		}
 	}
 	// Only the selected proxy engine may hold the ports.
+	stoppedNow := map[string]bool{}
 	if ost.Reachable && ost.Running {
 		s.log.Info("stopping the proxy engine that isn't selected", "engine", other, "selected", engine)
 		resp, err := s.app.Client(other).Apply(ctx, agent.ApplyRequest{Stop: true})
@@ -1132,13 +1152,15 @@ func (s *Service) reconcile(ctx context.Context) {
 		case !resp.OK:
 			s.log.Warn("stop "+other, "err", firstErrorLine(resp.Output))
 		default:
+			stoppedNow[other] = true
 			s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": other, "running": false, "reachable": true})
 		}
 	}
-	if st.HAProxy.Reachable && live.HAProxyHash != "" && st.HAProxy.ConfigHash != live.HAProxyHash && (live.HAProxyRunning || st.HAProxy.ConfigHash != "") {
+	wantHAProxy := live.HAProxyRunning && !s.stoppedEngines(ctx)[agent.EngineHAProxy]
+	if st.HAProxy.Reachable && live.HAProxyHash != "" && st.HAProxy.ConfigHash != live.HAProxyHash && (wantHAProxy || st.HAProxy.ConfigHash != "") {
 		files := agent.Files{"haproxy.cfg": live.HAProxyCfg}
 		s.log.Info("haproxy is not running the live version, restoring", "version", live.ID)
-		resp, err := s.app.HAProxy.Apply(ctx, agent.ApplyRequest{Files: files, Hash: live.HAProxyHash, Stop: !live.HAProxyRunning})
+		resp, err := s.app.HAProxy.Apply(ctx, agent.ApplyRequest{Files: files, Hash: live.HAProxyHash, Stop: !wantHAProxy})
 		if err == nil && resp.OK {
 			s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": "haproxy", "running": resp.Running, "reachable": true})
 		} else if err != nil {
@@ -1147,6 +1169,7 @@ func (s *Service) reconcile(ctx context.Context) {
 			s.log.Warn("restore live haproxy config", "err", firstErrorLine(resp.Output))
 		}
 	}
+	s.manageContainers(ctx, st, live, engine, stoppedNow)
 }
 
 func (s *Service) observe(ctx context.Context, engine string, st core.EngineState) {

@@ -231,6 +231,8 @@ func (s *Service) registerReadTools() {
 	addRead(s, toolInfo{Name: "manage_users", Title: "List Relay users",
 		Description: "List Relay user accounts with role (admin/editor/viewer), two-factor status, disabled flag and last activity. Creating, changing or deleting users is not available over MCP."},
 		map[string][]any{"action": {"list"}}, s.toolManageUsers)
+	s.registerExtReadTools()
+	s.registerLogTools()
 }
 
 // ---------------------------------------------------------------- implementations

@@ -43,6 +43,8 @@ type Service struct {
 	relayJob  *core.RelayUpdateJob
 	// interrupted: relay restarted during an upgrade; recover containers once.
 	interrupted bool
+	// Engine container states and the compose project (containers.go).
+	ctr containerCache
 }
 
 func New(app *core.App) *Service {
@@ -325,7 +327,7 @@ func (s *Service) Updates(ctx context.Context) (*core.EngineUpdates, error) {
 	build := func(engine string, st core.EngineState, channel, desired string) core.EngineUpdateInfo {
 		info := core.EngineUpdateInfo{Engine: engine, Channel: channel, Version: st.Version, Reachable: st.Reachable, Running: st.Running,
 			DesiredImage: desired, Channels: map[string]*core.EngineRelease{}, Modules: st.Modules, MissingModules: []string{},
-			Inactive: agent.IsProxyEngine(engine) && engine != out.ProxyEngine}
+			Inactive: agent.IsProxyEngine(engine) && engine != out.ProxyEngine, Standby: st.Standby}
 		if info.Modules == nil {
 			info.Modules = []string{}
 		}
@@ -460,8 +462,5 @@ func (s *Service) activeProxy(ctx context.Context, engine string) bool {
 
 // agentClient returns the agent client for an engine.
 func (s *Service) agentClient(engine string) *agent.Client {
-	if engine == "haproxy" {
-		return s.app.HAProxy
-	}
-	return s.app.Nginx
+	return s.app.Client(engine)
 }

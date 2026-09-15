@@ -92,6 +92,8 @@ func (s *Service) registerWriteTools() {
 	addWrite(s, toolInfo{Name: "apply_changes", Title: "Apply pending changes",
 		Description: "Make all pending configuration changes live: render the reverse proxy (nginx or Relay Edge) and HAProxy config, validate, reload, health-check for 10 s and roll back automatically on failure. Returns the new config version. Affects every pending change, not only yours — check get_pending_changes first. May wait for human approval."},
 		nil, true, s.planApply)
+	s.registerEntityTools()
+	s.registerExtWriteTools()
 }
 
 // ---------------------------------------------------------------- hosts

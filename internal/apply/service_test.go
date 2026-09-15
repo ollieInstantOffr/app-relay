@@ -43,6 +43,7 @@ type fakeAgent struct {
 	calls       *[]string // shared call log ("edge:apply", "nginx:stop" …)
 	onApply     func()
 	onRollback  func()
+	down        bool // container stopped: connections are dropped
 }
 
 func (f *fakeAgent) log(call string) {
@@ -108,6 +109,13 @@ func (f *fakeAgent) serve(t *testing.T, sock string) {
 		f.mu.Unlock()
 		json.NewEncoder(w).Encode(agent.ActionResponse{OK: true})
 	})
+	mux.HandleFunc("POST /v1/stop", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.running = false
+		f.log("stopaction")
+		f.mu.Unlock()
+		json.NewEncoder(w).Encode(agent.ActionResponse{OK: true})
+	})
 	mux.HandleFunc("POST /v1/rollback", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.rollbacks++
@@ -126,7 +134,18 @@ func (f *fakeAgent) serve(t *testing.T, sock string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := &http.Server{Handler: mux}
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		down := f.down
+		f.mu.Unlock()
+		if hj, ok := w.(http.Hijacker); down && ok {
+			if conn, _, err := hj.Hijack(); err == nil {
+				conn.Close()
+			}
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})}
 	go srv.Serve(ln)
 	t.Cleanup(func() { srv.Close() })
 }

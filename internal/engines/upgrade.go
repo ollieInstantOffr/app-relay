@@ -242,7 +242,7 @@ func (s *Service) runUpgrade(ctx context.Context, cli *client.Client, ops applyO
 	case files == nil:
 		s.step("validate", "skipped", "Nothing applied yet", 50, "")
 	case engine == "haproxy" && !running:
-		s.step("validate", "skipped", "HAProxy is stopped (no backends)", 50, "")
+		s.step("validate", "skipped", "HAProxy is stopped", 50, "")
 	default:
 		s.step("validate", "running", fmt.Sprintf("v%d on %s", liveVersion, job.To), 40, fmt.Sprintf("Validating v%d with %s %s", liveVersion, name, job.To))
 		out, err := s.validateOn(ctx, cli, old, engine, job.ToImage, files)

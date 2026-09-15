@@ -5,7 +5,8 @@
 #
 # All containers use host networking. The selected proxy engine (Settings →
 # General → Proxy engine: nginx by default, or Relay Edge) binds 80/443
-# (+443/udp for HTTP/3) directly on the host; the other one stays stopped.
+# (+443/udp for HTTP/3) directly on the host; Relay stops the other one's
+# container (and HAProxy's while it has nothing to run) and starts it when needed.
 # HAProxy frontends created by the Expose wizard bind 127.0.0.1:10080+ and are
 # reached by the proxy engine over loopback.
 #
@@ -81,7 +82,7 @@ services:
       retries: 3
 
   # Relay Edge, the reverse proxy built into the relay binary. Only the proxy
-  # engine selected in Settings → General runs; the other agent idles.
+  # engine selected in Settings → Proxy engine runs; Relay stops the other container.
   edge:
     image: alpine:3.22
     container_name: relay-edge

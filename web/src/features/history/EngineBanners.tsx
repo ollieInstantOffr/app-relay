@@ -105,14 +105,16 @@ export default function EngineBanners() {
   if (data) {
     const proxy: EngineName = data.proxy === 'edge' ? 'edge' : 'nginx'
     const ps = data[proxy]
-    if (ps && !ps.reachable) banners.push(unreachable(proxy, ps))
-    else if (ps && !ps.running && (ps.configured || enabledHosts > 0)) {
+    if (ps && !ps.reachable && ps.container !== 'stopped') banners.push(unreachable(proxy, ps))
+    else if (ps && !ps.running && (ps.configured || enabledHosts > 0 || ps.container === 'stopped')) {
       const detail = enabledHosts > 0 ? `All ${enabledHosts} host${enabledHosts === 1 ? '' : 's'} unreachable` : 'The default server and ACME challenges are unavailable'
       banners.push(notRunning(proxy, ps, detail))
     }
     const live = versions?.find((v) => v.status === 'live')
-    if (hasBackends && !data.haproxy.reachable) banners.push(unreachable('haproxy', data.haproxy))
-    else if (hasBackends && data.haproxy.reachable && data.haproxy.configured && !data.haproxy.running && live?.haproxyRunning) {
+    const hp = data.haproxy
+    const hpStopped = hp.container === 'stopped'
+    if (hasBackends && !hp.reachable && !hpStopped) banners.push(unreachable('haproxy', hp))
+    else if (hasBackends && !hp.running && !hp.standby && live?.haproxyRunning && (hpStopped || (hp.reachable && hp.configured))) {
       banners.push(notRunning('haproxy', data.haproxy, `${backends?.length ?? 0} backend${backends?.length === 1 ? '' : 's'} unavailable`))
     }
   }
