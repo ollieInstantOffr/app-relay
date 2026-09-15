@@ -1,8 +1,11 @@
-import { Fragment, useState } from 'react'
-import { Badge, Card, EmptyState, Select, Skeleton, Sparkline, StatCard, Status, Tooltip, cx, type Tone } from '../../components/ui'
+import { useRef, useState } from 'react'
+import {
+  Badge, Card, EmptyState, NoMatches, Pagination, SearchInput, Select, Skeleton, Sparkline, StatCard, Status, TableToolbar, Tooltip, cx, matchesSearch,
+  useFitRows, usePagination, type Tone,
+} from '../../components/ui'
 import { useEntities, useLBStats } from '../../lib/queries'
 import { compact, duration, ms } from '../../lib/format'
-import type { ServerStats } from '../../lib/types'
+import type { Backend, BackendStats, ServerStats } from '../../lib/types'
 import { useLBSeries } from './lbApi'
 
 const RANGES = [
@@ -10,6 +13,18 @@ const RANGES = [
   { value: '24h', label: 'Last 24h' },
   { value: '7d', label: 'Last 7d' },
 ]
+
+const STATUSES = ['UP', 'DOWN', 'DEGRADED', 'DRAIN', 'MAINT']
+
+const MODES = [
+  { value: 'http', label: 'HTTP' },
+  { value: 'tcp', label: 'TCP' },
+]
+
+type Row =
+  | { kind: 'backend'; b: BackendStats }
+  | { kind: 'server'; b: BackendStats; sv: ServerStats }
+  | { kind: 'pending'; b: Backend }
 
 function statusTone(s: string): Tone {
   if (s === 'UP' || s === 'NOCHECK') return 'ok'
@@ -26,17 +41,56 @@ function uptime(sv: ServerStats) {
 
 export default function StatsTab({ onEdit }: { onEdit: (id: string) => void }) {
   const [range, setRange] = useState('1h')
+  const [search, setSearch] = useState('')
+  const [status, setStatus] = useState('')
+  const [mode, setMode] = useState('')
   const statsQ = useLBStats(2_000)
   const series = useLBSeries(range, undefined, range === '1h' ? 10_000 : 60_000).data
   const backends = useEntities('backends').data ?? []
+  const cardRef = useRef<HTMLDivElement>(null)
+  // Below the rows: pager (41) + page bottom padding (24) + room for a repeated "continued" backend row (37).
+  const pageSize = useFitRows(cardRef, { reserve: 41 + 24 + 37, min: 5 })
 
-  if (statsQ.isLoading) return <Skeleton height={220} />
   const s = statsQ.data
   const running = !!s?.running
   const liveIds = new Set((s?.backends ?? []).map((b) => b.id))
   const notApplied = backends.filter((b) => !liveIds.has(b.id))
+  const modeById = new Map(backends.map((b) => [b.id, b.mode]))
+
+  const statusHit = (st: string) => !status || st === status
+  const flat: Row[] = []
+  for (const b of s?.backends ?? []) {
+    if (mode && modeById.get(b.id) !== mode) continue
+    const nameHit = matchesSearch(search, b.name)
+    const servers =
+      nameHit && statusHit(b.status)
+        ? b.servers
+        : b.servers.filter((sv) => (nameHit || matchesSearch(search, sv.name, sv.address)) && (statusHit(b.status) || statusHit(sv.status)))
+    if (servers.length === 0 && !(nameHit && statusHit(b.status))) continue
+    flat.push({ kind: 'backend', b })
+    for (const sv of servers) flat.push({ kind: 'server', b, sv })
+  }
+  if (!status) {
+    for (const b of notApplied) {
+      if (mode && b.mode !== mode) continue
+      if (!matchesSearch(search, b.name, ...b.servers.flatMap((sv) => [sv.name, sv.address]))) continue
+      flat.push({ kind: 'pending', b })
+    }
+  }
+  const pg = usePagination(flat, pageSize, [search, status, mode])
+  const totalRows = (s?.backends.length ?? 0) + notApplied.length
+  const clearFilters = () => {
+    setSearch('')
+    setStatus('')
+    setMode('')
+  }
+
+  if (statsQ.isLoading) return <Skeleton height={220} />
   const errors = series ? series.connErrors + series.respErrors + series.reqErrors : undefined
   const peak = Math.max(series?.peak ?? 0, s?.peakSessRate ?? 0)
+
+  const first = pg.rows[0]
+  const continued = first?.kind === 'server' ? first.b : undefined
 
   return (
     <>
@@ -83,76 +137,102 @@ export default function StatsTab({ onEdit }: { onEdit: (id: string) => void }) {
           />
         </Card>
       ) : (
-        <Card>
-          <div className="table-wrap">
-            <table className="table compact lb-stats-table">
-              <thead>
-                <tr>
-                  <th>Backend / server</th>
-                  <th>Status</th>
-                  <th className="num">Sess/s</th>
-                  <th className="num">Current</th>
-                  <th className="num">Max</th>
-                  <th className="num">Queue</th>
-                  <th className="num">
-                    <Tooltip content="Connection + response errors since the last reload">
-                      <span>Errors</span>
-                    </Tooltip>
-                  </th>
-                  <th className="num">
-                    <Tooltip content="95th percentile of HAProxy's rolling response-time average (last 1024 requests), sampled every 2 s over the last hour">
-                      <span>Resp p95 ≈</span>
-                    </Tooltip>
-                  </th>
-                  <th className="num">Uptime</th>
-                </tr>
-              </thead>
-              <tbody>
-                {s!.backends.map((b) => (
-                  <Fragment key={b.name}>
-                    <tr className="backend">
-                      <td className={cx('name', b.id && 'clickable')} onClick={() => b.id && onEdit(b.id)}>
-                        {b.name}
-                        {!b.id && <span className="faint" style={{ fontWeight: 400 }}> · removed, pending apply</span>}
-                      </td>
-                      <td><Badge tone={statusTone(b.status)}>{b.status}</Badge></td>
-                      <td className="num">{compact(b.sessRate)}</td>
-                      <td className="num">{compact(b.current)}</td>
-                      <td className="num">{compact(b.max)}</td>
-                      <td className="num">{compact(b.queue)}</td>
-                      <td className={cx('num', b.errors > 0 && 'danger-text')}>{compact(b.errors)}</td>
-                      <td className="num">{b.respP95Ms ? ms(b.respP95Ms) : '—'}</td>
-                      <td className="num">{b.status === 'DOWN' ? '—' : duration(b.uptimeSec)}</td>
-                    </tr>
-                    {b.servers.map((sv) => (
-                      <tr key={sv.name} className={cx('server', sv.status === 'DOWN' && 'down', sv.status === 'MAINT' && 'dim')}>
-                        <td className="name" title={sv.name + (sv.checkDetail ? ` · ${sv.checkDetail}` : '')}>
-                          {sv.address || sv.name}
-                          {sv.role === 'backup' && <span className="faint"> · backup</span>}
-                        </td>
-                        <td><Badge tone={statusTone(sv.status)}>{sv.status}</Badge></td>
-                        <td className="num">{compact(sv.sessRate)}</td>
-                        <td className="num">{compact(sv.current)}</td>
-                        <td className="num">{compact(sv.max)}</td>
-                        <td className="num">{compact(sv.queue)}</td>
-                        <td className="num">{compact(sv.errors)}</td>
-                        <td className="num">{sv.respP95Ms ? ms(sv.respP95Ms) : '—'}</td>
-                        <td className="num">{uptime(sv)}</td>
-                      </tr>
-                    ))}
-                  </Fragment>
-                ))}
-                {notApplied.map((b) => (
-                  <tr key={b.id} className="dim">
-                    <td className="name clickable" onClick={() => onEdit(b.id)}>{b.name}</td>
-                    <td colSpan={8}><Badge tone="pending">not applied yet</Badge></td>
+        <>
+          <TableToolbar>
+            <SearchInput value={search} onChange={setSearch} placeholder="Search backends or servers" label="Search stats" />
+            <div className="lb-filter-select">
+              <Select inputSize="sm" value={status} placeholder="All statuses" options={STATUSES} onChange={setStatus} aria-label="Status" />
+            </div>
+            <div className="lb-filter-select">
+              <Select inputSize="sm" value={mode} placeholder="All modes" options={MODES} onChange={setMode} aria-label="Mode" />
+            </div>
+          </TableToolbar>
+
+          <div className="card" ref={cardRef}>
+            <div className="table-wrap">
+              <table className="table compact lb-stats-table">
+                <thead>
+                  <tr>
+                    <th>Backend / server</th>
+                    <th>Status</th>
+                    <th className="num">Sess/s</th>
+                    <th className="num">Current</th>
+                    <th className="num">Max</th>
+                    <th className="num">Queue</th>
+                    <th className="num">
+                      <Tooltip content="Connection + response errors since the last reload">
+                        <span>Errors</span>
+                      </Tooltip>
+                    </th>
+                    <th className="num">
+                      <Tooltip content="95th percentile of HAProxy's rolling response-time average (last 1024 requests), sampled every 2 s over the last hour">
+                        <span>Resp p95 ≈</span>
+                      </Tooltip>
+                    </th>
+                    <th className="num">Uptime</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {flat.length === 0 && totalRows > 0 && <NoMatches what="rows" onClear={clearFilters} colSpan={9} />}
+                  {continued && <BackendRow key={`c:${continued.name}`} b={continued} onEdit={onEdit} continued />}
+                  {pg.rows.map((r) =>
+                    r.kind === 'backend' ? (
+                      <BackendRow key={`b:${r.b.name}`} b={r.b} onEdit={onEdit} />
+                    ) : r.kind === 'server' ? (
+                      <ServerRow key={`s:${r.b.name}:${r.sv.name}`} sv={r.sv} />
+                    ) : (
+                      <tr key={`p:${r.b.id}`} className="dim">
+                        <td className="name clickable" onClick={() => onEdit(r.b.id)}>{r.b.name}</td>
+                        <td colSpan={8}><Badge tone="pending">not applied yet</Badge></td>
+                      </tr>
+                    ),
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <Pagination page={pg.page} pageSize={pg.pageSize} total={pg.total} onPage={pg.setPage} label="rows" />
           </div>
-        </Card>
+        </>
       )}
     </>
+  )
+}
+
+function BackendRow({ b, onEdit, continued }: { b: BackendStats; onEdit: (id: string) => void; continued?: boolean }) {
+  return (
+    <tr className="backend">
+      <td className={cx('name', b.id && 'clickable')} onClick={() => b.id && onEdit(b.id)}>
+        {b.name}
+        {continued && <span className="faint" style={{ fontWeight: 400 }}> · continued</span>}
+        {!b.id && <span className="faint" style={{ fontWeight: 400 }}> · removed, pending apply</span>}
+      </td>
+      <td><Badge tone={statusTone(b.status)}>{b.status}</Badge></td>
+      <td className="num">{compact(b.sessRate)}</td>
+      <td className="num">{compact(b.current)}</td>
+      <td className="num">{compact(b.max)}</td>
+      <td className="num">{compact(b.queue)}</td>
+      <td className={cx('num', b.errors > 0 && 'danger-text')}>{compact(b.errors)}</td>
+      <td className="num">{b.respP95Ms ? ms(b.respP95Ms) : '—'}</td>
+      <td className="num">{b.status === 'DOWN' ? '—' : duration(b.uptimeSec)}</td>
+    </tr>
+  )
+}
+
+function ServerRow({ sv }: { sv: ServerStats }) {
+  return (
+    <tr className={cx('server', sv.status === 'DOWN' && 'down', sv.status === 'MAINT' && 'dim')}>
+      <td className="name" title={sv.name + (sv.checkDetail ? ` · ${sv.checkDetail}` : '')}>
+        {sv.address || sv.name}
+        {sv.role === 'backup' && <span className="faint"> · backup</span>}
+      </td>
+      <td><Badge tone={statusTone(sv.status)}>{sv.status}</Badge></td>
+      <td className="num">{compact(sv.sessRate)}</td>
+      <td className="num">{compact(sv.current)}</td>
+      <td className="num">{compact(sv.max)}</td>
+      <td className="num">{compact(sv.queue)}</td>
+      <td className="num">{compact(sv.errors)}</td>
+      <td className="num">{sv.respP95Ms ? ms(sv.respP95Ms) : '—'}</td>
+      <td className="num">{uptime(sv)}</td>
+    </tr>
   )
 }

@@ -1,9 +1,12 @@
 // Streams (design 06).
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { TopBar } from '../../components/shell/TopBar'
-import { Button, ConfirmDialog, Dot, EmptyState, IconButton, Menu, Skeleton, Tooltip, useToast } from '../../components/ui'
+import {
+  Button, ConfirmDialog, Dot, EmptyState, IconButton, Menu, NoMatches, Pagination, SearchInput, Select, Skeleton, TableToolbar, Tooltip, matchesSearch,
+  useElementHeight, useFitGrid, usePagination, useToast,
+} from '../../components/ui'
 import { api } from '../../lib/api'
 import { useEntities, useHealth, useRole, useSaveEntity, useDeleteEntity } from '../../lib/queries'
 import { rate } from '../../lib/format'
@@ -40,6 +43,31 @@ export default function StreamsPage() {
   const metrics = useQuery({ queryKey: ['metrics', 'streams'], queryFn: () => api.get<StreamMetrics>('/api/metrics/streams'), refetchInterval: 5_000, retry: false })
   const ports = useQuery({ queryKey: ['ports'], queryFn: () => api.get<PortEntry[]>('/api/ports'), refetchInterval: 15_000 })
   const [deleting, setDeleting] = useState<Stream | undefined>()
+  const [search, setSearch] = useState('')
+  const [proto, setProto] = useState('')
+  const [state, setState] = useState('')
+  const rowsRef = useRef<HTMLDivElement>(null)
+  const belowRef = useRef<HTMLDivElement>(null)
+
+  const filtered = useMemo(() => {
+    const backendName = new Map(backends.map((b) => [b.id, b.name]))
+    return streams.filter(
+      (s) =>
+        (!proto || s.protocol === proto) &&
+        (!state || (state === 'enabled') === s.enabled) &&
+        matchesSearch(search, s.name, s.listenPorts, `:${s.listenPorts}`, s.listenAddress, s.forwardHost, s.forwardPorts, s.backendId && backendName.get(s.backendId)),
+    )
+  }, [streams, backends, search, proto, state])
+  // Rows that fit the window: below them sit the pager, the port usage cards (+ gap) and the page padding.
+  const below = useElementHeight(belowRef, 160)
+  const { pageSize } = useFitGrid(rowsRef, { reserve: 41 + 1 + 16 + below + 24, itemHeight: 66, min: 3 })
+  const pg = usePagination(filtered, pageSize, [search, proto, state])
+  const filtersOn = !!(search.trim() || proto || state)
+  const clearFilters = () => {
+    setSearch('')
+    setProto('')
+    setState('')
+  }
 
   const editId = params.get('edit')
   const drawerOpen = params.get('new') === '1' || !!editId
@@ -87,6 +115,35 @@ export default function StreamsPage() {
           Raw port forwarding at layer 4 — for anything that isn't HTTP: game servers, databases, SSH, DNS. No TLS termination, no path routing.
         </div>
 
+        {streams.length > 0 && (
+          <TableToolbar>
+            <SearchInput value={search} onChange={setSearch} placeholder="Search name, port or target" label="Search streams" />
+            <div className="cs-filter-select" style={{ width: 150 }}>
+              <Select
+                inputSize="sm"
+                value={proto}
+                placeholder="All protocols"
+                aria-label="Protocol"
+                onChange={setProto}
+                options={(['tcp', 'udp', 'both'] as const).map((p) => ({ value: p, label: protoLabel[p] }))}
+              />
+            </div>
+            <div className="cs-filter-select" style={{ width: 150 }}>
+              <Select
+                inputSize="sm"
+                value={state}
+                placeholder="All states"
+                aria-label="State"
+                onChange={setState}
+                options={[
+                  { value: 'enabled', label: 'Enabled' },
+                  { value: 'disabled', label: 'Disabled' },
+                ]}
+              />
+            </div>
+          </TableToolbar>
+        )}
+
         <div className="card" style={{ overflow: 'hidden' }}>
           <div className="cs-grid-head cs-streams">
             <span>Listen</span><span>Name</span><span>Proto</span><span>Forward to</span><span>Connections</span><span>Throughput</span><span />
@@ -100,7 +157,10 @@ export default function StreamsPage() {
               actions={canWrite && <Button variant="primary" icon="plus" onClick={() => setParam('new', '1')}>New stream</Button>}
             />
           )}
-          {streams.map((s) => {
+          {streams.length > 0 && (
+          <div ref={rowsRef}>
+          {filtered.length === 0 && <NoMatches what="streams" onClear={filtersOn ? clearFilters : undefined} />}
+          {pg.rows.map((s) => {
             const m = metrics.data?.[s.id]
             const h = health?.[`stream:${s.id}`]
             const backend = backends.find((b) => b.id === s.backendId)
@@ -139,9 +199,12 @@ export default function StreamsPage() {
               </div>
             )
           })}
+          </div>
+          )}
+          <Pagination page={pg.page} pageSize={pg.pageSize} total={pg.total} onPage={pg.setPage} label="streams" />
         </div>
 
-        <div className="grid-2" style={{ gap: 14 }}>
+        <div ref={belowRef} className="grid-2" style={{ gap: 14 }}>
           <div className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="card-title">Port usage</div>
             <div className="small muted">Ports bound by Relay on this machine. Grey = free, black = in use.</div>

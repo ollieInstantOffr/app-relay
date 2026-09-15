@@ -1,10 +1,11 @@
 // SSL certificates (design 04).
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { TopBar } from '../../components/shell/TopBar'
 import {
-  Button, ConfirmDialog, Dot, EmptyState, IconButton, Menu, Skeleton, Spinner, Toggle, useToast,
+  Button, ConfirmDialog, Dot, EmptyState, IconButton, Menu, NoMatches, Pagination, SearchInput, Select, Skeleton, Spinner, TableToolbar, Toggle,
+  matchesSearch, useElementHeight, useFitGrid, usePagination, useToast,
 } from '../../components/ui'
 import { api } from '../../lib/api'
 import { Topics, useBusEvent } from '../../lib/events'
@@ -15,10 +16,24 @@ import DNSProviderDialog from './DNSProviderDialog'
 import RequestCertificateDialog from './RequestCertificateDialog'
 import UploadCertificateDialog from './UploadCertificateDialog'
 import {
-  certExpiry, certSubtitle, daysText, downloadUrl, isACME, providerText, triggerDownload, usageCount, usageText, useCertUsage,
+  certExpiry, certSubtitle, daysText, downloadUrl, isACME, providerName, providerText, triggerDownload, usageCount, usageText, useCertUsage,
   type CertView,
 } from './common'
 import './certs.css'
+
+type StatusFilter = '' | 'valid' | 'expiring' | 'pending' | 'failed' | 'expired'
+
+function matchesStatus(c: CertView, status: StatusFilter): boolean {
+  const days = certExpiry(c).days
+  switch (status) {
+    case 'valid': return c.status === 'valid' && (days === undefined || days >= 0)
+    case 'expiring': return days !== undefined && days >= 0 && days < 14 && c.status !== 'pending'
+    case 'pending': return c.status === 'pending' || !!c.renewing
+    case 'failed': return c.status === 'failed'
+    case 'expired': return c.status === 'expired' || (days !== undefined && days < 0)
+    default: return true
+  }
+}
 
 function SummaryCard({ value, label, tone }: { value: number | string; label: string; tone: 'ok' | 'warn' | 'muted' }) {
   return (
@@ -49,6 +64,11 @@ export default function CertificatesPage() {
   const [replace, setReplace] = useState<Certificate | undefined>()
   const [deleting, setDeleting] = useState<CertView | undefined>()
   const [retrying, setRetrying] = useState<string | undefined>()
+  const [search, setSearch] = useState('')
+  const [status, setStatus] = useState<StatusFilter>('')
+  const [provider, setProvider] = useState('')
+  const rowsRef = useRef<HTMLDivElement>(null)
+  const belowRef = useRef<HTMLDivElement>(null)
 
   const selectedId = params.get('cert') ?? undefined
   const selected = certs.find((c) => c.id === selectedId)
@@ -107,6 +127,31 @@ export default function CertificatesPage() {
     return { valid, expiring, custom }
   }, [certs])
 
+  const providerOptions = useMemo(
+    () => [...new Set(certs.map((c) => c.provider))].sort().map((p) => ({ value: p, label: providerName(p) })),
+    [certs],
+  )
+  const filtered = useMemo(
+    () =>
+      certs.filter(
+        (c) =>
+          (!provider || c.provider === provider) &&
+          matchesStatus(c, status) &&
+          matchesSearch(search, c.name, ...(c.domains ?? []), c.issuer, providerText(c)),
+      ),
+    [certs, search, status, provider],
+  )
+  // Rows that fit the window: below them sit the pager, the DNS providers card (+ gap) and the page padding.
+  const below = useElementHeight(belowRef, 74)
+  const { pageSize } = useFitGrid(rowsRef, { reserve: 41 + 1 + 16 + below + 24, itemHeight: 65, min: 3 })
+  const pg = usePagination(filtered, pageSize, [search, status, provider])
+  const filtersOn = !!(search.trim() || status || provider)
+  const clearFilters = () => {
+    setSearch('')
+    setStatus('')
+    setProvider('')
+  }
+
   const toggleAutoRenew = async (c: CertView, v: boolean) => {
     try {
       await save.mutateAsync({ id: c.id, name: c.name, autoRenew: v })
@@ -133,6 +178,33 @@ export default function CertificatesPage() {
           <SummaryCard value={certsQ.data ? stats.custom : '—'} label="Custom (manual)" tone="muted" />
         </div>
 
+        {certs.length > 0 && (
+          <TableToolbar>
+            <SearchInput value={search} onChange={setSearch} placeholder="Search name or domain" label="Search certificates" />
+            <div className="cs-filter-select">
+              <Select
+                inputSize="sm"
+                value={status}
+                placeholder="All statuses"
+                aria-label="Status"
+                onChange={(v) => setStatus(v as StatusFilter)}
+                options={[
+                  { value: 'valid', label: 'Valid' },
+                  { value: 'expiring', label: 'Expiring within 14 days' },
+                  { value: 'pending', label: 'Requesting or renewing' },
+                  { value: 'failed', label: 'Failed' },
+                  { value: 'expired', label: 'Expired' },
+                ]}
+              />
+            </div>
+            {providerOptions.length > 1 && (
+              <div className="cs-filter-select">
+                <Select inputSize="sm" value={provider} placeholder="All providers" aria-label="Provider" onChange={setProvider} options={providerOptions} />
+              </div>
+            )}
+          </TableToolbar>
+        )}
+
         <div className="card" style={{ overflow: 'hidden' }}>
           <div className="cs-grid-head cs-certs">
             <span>Certificate</span><span>Provider</span><span>Expiry</span><span>Used by</span><span>Auto-renew</span><span />
@@ -156,7 +228,10 @@ export default function CertificatesPage() {
               )}
             />
           )}
-          {certs.map((c) => {
+          {certs.length > 0 && (
+          <div ref={rowsRef}>
+          {filtered.length === 0 && <NoMatches what="certificates" onClear={filtersOn ? clearFilters : undefined} />}
+          {pg.rows.map((c) => {
             const exp = certExpiry(c)
             const sub = certSubtitle(c)
             const u = usage.get(c.id)
@@ -215,9 +290,12 @@ export default function CertificatesPage() {
               </div>
             )
           })}
+          </div>
+          )}
+          <Pagination page={pg.page} pageSize={pg.pageSize} total={pg.total} onPage={pg.setPage} label="certificates" />
         </div>
 
-        <div className="card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+        <div ref={belowRef} className="card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
           <div className="grow">
             <div className="card-title">DNS providers</div>
             <div className="small muted" style={{ marginTop: 2 }}>Credentials for DNS-01 wildcard challenges</div>

@@ -1,9 +1,10 @@
 // Public DNS: records in the domains Relay manages at the user's DNS provider.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { TopBar } from '../../components/shell/TopBar'
 import {
-  Badge, Button, Callout, ConfirmDialog, EmptyState, Icon, IconButton, Input, Pagination, Select, Skeleton, Tooltip, pageCount, paginate, useToast,
+  Badge, Button, Callout, ConfirmDialog, EmptyState, IconButton, Pagination, SearchInput, Select, Skeleton, TableToolbar, Tooltip, matchesSearch, useFitRows,
+  usePagination, useToast,
 } from '../../components/ui'
 import { errorMessage } from '../../lib/api'
 import { useEntities, useRole } from '../../lib/queries'
@@ -16,7 +17,6 @@ import {
 import './dns.css'
 
 const EDITABLE = new Set<string>(EDITABLE_TYPES)
-const PAGE_SIZE = 25
 
 export default function DNSPage() {
   const toast = useToast()
@@ -31,7 +31,7 @@ export default function DNSPage() {
   const [typeFilter, setTypeFilter] = useState('')
   const [dialog, setDialog] = useState<{ open: boolean; record?: DNSRecord }>({ open: false })
   const [deleting, setDeleting] = useState<DNSRecord | undefined>()
-  const [page, setPage] = useState(1)
+  const tableRef = useRef<HTMLDivElement>(null)
 
   const zones = useMemo(() => [...(status.data?.zones ?? [])].sort((a, b) => a.name.localeCompare(b.name)), [status.data])
   const zone = zones.find((z) => z.name === stored) ?? zones[0]
@@ -46,18 +46,15 @@ export default function DNSPage() {
 
   const records = useMemo(() => {
     const list = recordsQ.data?.records ?? []
-    const needle = filter.trim().toLowerCase()
     return list
       .filter((r) => !typeFilter || r.type === typeFilter)
-      .filter((r) => !needle || r.fqdn.toLowerCase().includes(needle) || r.name.toLowerCase().includes(needle) || r.data.toLowerCase().includes(needle))
+      .filter((r) => matchesSearch(filter, r.fqdn, r.name, r.data))
       .sort((a, b) => (a.name === '@' ? -1 : b.name === '@' ? 1 : a.name.localeCompare(b.name)) || a.type.localeCompare(b.type))
   }, [recordsQ.data, filter, typeFilter])
   const types = useMemo(() => [...new Set((recordsQ.data?.records ?? []).map((r) => r.type))].sort(), [recordsQ.data])
-  // Back to the first page when the domain or filters change; stay in range after deletes.
-  useEffect(() => setPage(1), [zoneName, filter, typeFilter])
-  const lastPage = pageCount(records.length, PAGE_SIZE)
-  const currentPage = Math.min(page, lastPage)
-  const pageRows = paginate(records, currentPage, PAGE_SIZE)
+  // Rows that fit the window: below the table sit the pager (41px), the provider note and the page padding.
+  const pageSize = useFitRows(tableRef, { reserve: 41 + 16 + 20 + 24 })
+  const pg = usePagination(records, pageSize, [zoneName, filter, typeFilter])
   const total = recordsQ.data?.records.length
 
   const pickZone = (name: string) => {
@@ -144,7 +141,13 @@ export default function DNSPage() {
           </div>
         ) : (
           <>
-            <div className="dns-toolbar">
+            <TableToolbar
+              actions={
+                <Tooltip content="Reload from provider">
+                  <IconButton icon="reload" bare label="Reload records" onClick={invalidate} />
+                </Tooltip>
+              }
+            >
               <div className="dns-zone-select">
                 <Select
                   value={zoneName}
@@ -153,39 +156,15 @@ export default function DNSPage() {
                   options={zones.map((z) => ({ value: z.name, label: z.name, hint: z.providerName || dnsTypeLabel(typeDefs, z.providerType) }))}
                 />
               </div>
-              <div className="dns-filter">
-                <Icon name="search" size={14} />
-                <Input
-                  inputSize="sm"
-                  value={filter}
-                  placeholder="Filter by name or value"
-                  aria-label="Filter records"
-                  onChange={(e) => setFilter(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') {
-                      setFilter('')
-                      e.currentTarget.blur()
-                    }
-                  }}
-                />
-                {filter && (
-                  <button type="button" className="dns-filter-clear" onClick={() => setFilter('')} aria-label="Clear filter">
-                    <Icon name="close" size={12} />
-                  </button>
-                )}
-              </div>
+              <SearchInput value={filter} onChange={setFilter} placeholder="Search name or value" label="Search records" />
               <div className="dns-type-select">
                 <Select inputSize="sm" value={typeFilter} placeholder="All types" options={types} onChange={setTypeFilter} aria-label="Record type" />
               </div>
-              <div className="spacer" style={{ flex: 1 }} />
-              <Tooltip content="Reload from provider">
-                <IconButton icon="reload" bare label="Reload records" onClick={invalidate} />
-              </Tooltip>
-            </div>
+            </TableToolbar>
 
             {recordsQ.isError && <Callout tone="danger" title="Couldn’t load records">{errorMessage(recordsQ.error)}</Callout>}
 
-            <div className="card" style={{ overflow: 'hidden' }}>
+            <div className="card" style={{ overflow: 'hidden' }} ref={tableRef}>
               {recordsQ.isLoading ? (
                 <div className="card-body col gap-8"><Skeleton height={28} /><Skeleton height={28} /><Skeleton height={28} /></div>
               ) : recordsQ.data && recordsQ.data.records.length === 0 ? (
@@ -196,6 +175,7 @@ export default function DNSPage() {
                   actions={canWrite && <Button variant="primary" icon="plus" onClick={() => setDialog({ open: true })}>Add record</Button>}
                 />
               ) : recordsQ.data ? (
+                <>
                 <div className="table-wrap">
                   <table className="table compact dns-table">
                     <thead>
@@ -210,11 +190,11 @@ export default function DNSPage() {
                     </thead>
                     <tbody>
                       {records.length === 0 && (
-                        <tr>
+                        <tr data-empty-row="1">
                           <td colSpan={6} className="muted small" style={{ textAlign: 'center', padding: 24 }}>No records match.</td>
                         </tr>
                       )}
-                      {pageRows.map((r) => {
+                      {pg.rows.map((r) => {
                         const used = r.hosts ?? []
                         const editable = canWrite && !r.readOnly && EDITABLE.has(r.type)
                         return (
@@ -262,8 +242,9 @@ export default function DNSPage() {
                       })}
                     </tbody>
                   </table>
-                  <Pagination page={currentPage} pageSize={PAGE_SIZE} total={records.length} onPage={setPage} label="records" />
                 </div>
+                <Pagination page={pg.page} pageSize={pg.pageSize} total={pg.total} onPage={pg.setPage} label="records" />
+                </>
               ) : null}
             </div>
             <div className="small faint">

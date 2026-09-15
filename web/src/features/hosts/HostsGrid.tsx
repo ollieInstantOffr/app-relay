@@ -1,5 +1,5 @@
 // Owner: slice hosts. Hosts grid (design 02).
-import { useState } from 'react'
+import { useState, type RefObject } from 'react'
 import { Bars, Checkbox, IconButton, Menu, Skeleton, Tooltip, cx } from '../../components/ui'
 import { compact } from '../../lib/format'
 import type { HealthState, ProxyHost } from '../../lib/types'
@@ -21,7 +21,8 @@ function padSeries(series: number[] | undefined): number[] {
   return s.length >= 24 ? s : [...Array<number>(24 - s.length).fill(0), ...s]
 }
 
-export function HostsGrid({ hosts, ctx, selected, focusedId, canWrite, actions, onToggleSelect, onFocus, onNew, loading }: {
+export function HostsGrid({ gridRef, hosts, ctx, selected, focusedId, canWrite, actions, onToggleSelect, onFocus, onNew, loading }: {
+  gridRef?: RefObject<HTMLDivElement | null>
   hosts: ProxyHost[]
   ctx: ViewCtx
   selected: Set<string>
@@ -35,7 +36,7 @@ export function HostsGrid({ hosts, ctx, selected, focusedId, canWrite, actions, 
 }) {
   if (loading) {
     return (
-      <div className="hosts-grid">
+      <div className="hosts-grid" ref={gridRef}>
         {Array.from({ length: 6 }, (_, i) => (
           <Skeleton key={i} height={156} />
         ))}
@@ -43,7 +44,7 @@ export function HostsGrid({ hosts, ctx, selected, focusedId, canWrite, actions, 
     )
   }
   return (
-    <div className={cx('hosts-grid', selected.size > 0 && 'selecting')}>
+    <div className={cx('hosts-grid', selected.size > 0 && 'selecting')} ref={gridRef}>
       {hosts.map((h) => (
         <HostCard
           key={h.id}

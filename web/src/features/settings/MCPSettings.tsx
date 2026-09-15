@@ -1,10 +1,10 @@
 // Settings → MCP server (design 13). Owner: slice mcp.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  Badge, Button, Callout, Card, Checkbox, CodeBlock, ConfirmDialog, CopyButton, Field, Input, Segmented, Select, Skeleton,
-  Toggle, cx, useToast,
+  Badge, Button, Callout, Card, Checkbox, CodeBlock, ConfirmDialog, CopyButton, Field, Input, NoMatches, Pagination, SearchInput, Segmented, Select,
+  Skeleton, TableToolbar, Toggle, cx, matchesSearch, useFitGrid, usePagination, useToast,
 } from '../../components/ui'
 import CreateTokenDialog from '../auth/CreateTokenDialog'
 import NotAllowed from '../auth/NotAllowed'
@@ -211,15 +211,46 @@ function MCPSettingsPage() {
 
 // ---------------------------------------------------------------- tokens
 
+// Space under the token list: pager (41) + card border (1) + settings page bottom padding (28).
+const FIT_RESERVE = 70
+const TOOLBAR_STYLE = { padding: '10px 18px', borderBottom: '1px solid var(--hairline-soft)' } as const
+const TOKEN_STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'revoked', label: 'Revoked' },
+  { value: 'expired', label: 'Expired' },
+]
+const TOKEN_SCOPE_OPTIONS = [
+  { value: 'read', label: 'Read-only' },
+  { value: 'write', label: 'Read + write' },
+]
+
 function TokensCard({ onCreated }: { onCreated: (token: string) => void }) {
   const tokens = useMCPTokens()
   const del = useDeleteToken()
   const toast = useToast()
   const [creating, setCreating] = useState(false)
   const [target, setTarget] = useState<ApiToken | null>(null)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [scopeFilter, setScopeFilter] = useState('')
+  const listRef = useRef<HTMLDivElement>(null)
   const now = Date.now()
   const rows = (tokens.data ?? []).filter((t) => !t.surfaces || t.surfaces.includes('mcp'))
   const inactive = (t: ApiToken) => !!t.revokedAt || (!!t.expiresAt && new Date(t.expiresAt).getTime() <= now)
+  const state = (t: ApiToken) => (t.revokedAt ? 'revoked' : inactive(t) ? 'expired' : 'active')
+  const filtered = rows.filter(
+    (t) =>
+      (!statusFilter || state(t) === statusFilter) &&
+      (!scopeFilter || t.scope === scopeFilter) &&
+      matchesSearch(search, t.name, `${t.prefix || 'rl_mcp_'}${t.last4}`, ...(t.limitTo ?? [])),
+  )
+  const { pageSize } = useFitGrid(listRef, { viewport: true, reserve: FIT_RESERVE, min: 4, itemHeight: 65 })
+  const pg = usePagination(filtered, pageSize, [search, statusFilter, scopeFilter])
+  const clearFilters = () => {
+    setSearch('')
+    setStatusFilter('')
+    setScopeFilter('')
+  }
 
   return (
     <Card title="API tokens" actions={<Button size="sm" variant="ghost" icon="plus" onClick={() => setCreating(true)}>Generate token</Button>}>
@@ -230,25 +261,38 @@ function TokensCard({ onCreated }: { onCreated: (token: string) => void }) {
       ) : rows.length === 0 ? (
         <div className="card-body small muted">No MCP tokens yet — generate one to connect an assistant.</div>
       ) : (
-        rows.map((t) => {
-          const off = inactive(t)
-          const status = t.revokedAt ? 'revoked' : off ? 'expired' : t.lastUsedAt ? `last used ${ago(t.lastUsedAt)}` : 'never used'
-          return (
-            <div key={t.id} className={cx('mcp-token-row', off && 'inactive')}>
-              <div className="grow" style={{ minWidth: 0 }}>
-                <div className="mcp-token-name">{t.name}</div>
-                <div className="mono small faint mcp-token-meta">
-                  {t.prefix || 'rl_mcp_'}••••••••••••{t.last4} · {status}
-                  {t.limitTo?.length ? ` · limited to ${t.limitTo.join(', ')}` : ''}
+        <>
+          <div style={TOOLBAR_STYLE}>
+            <TableToolbar>
+              <SearchInput value={search} onChange={setSearch} placeholder="Search name, token or tool" label="Search tokens" />
+              <Select inputSize="sm" style={{ width: 130 }} value={statusFilter} placeholder="All statuses" options={TOKEN_STATUS_OPTIONS} onChange={setStatusFilter} aria-label="Status" />
+              <Select inputSize="sm" style={{ width: 140 }} value={scopeFilter} placeholder="All scopes" options={TOKEN_SCOPE_OPTIONS} onChange={setScopeFilter} aria-label="Scope" />
+            </TableToolbar>
+          </div>
+          <div ref={listRef}>
+            {filtered.length === 0 && <NoMatches what="tokens" onClear={clearFilters} />}
+            {pg.rows.map((t) => {
+              const off = inactive(t)
+              const status = t.revokedAt ? 'revoked' : off ? 'expired' : t.lastUsedAt ? `last used ${ago(t.lastUsedAt)}` : 'never used'
+              return (
+                <div key={t.id} className={cx('mcp-token-row', off && 'inactive')}>
+                  <div className="grow" style={{ minWidth: 0 }}>
+                    <div className="mcp-token-name">{t.name}</div>
+                    <div className="mono small faint mcp-token-meta">
+                      {t.prefix || 'rl_mcp_'}••••••••••••{t.last4} · {status}
+                      {t.limitTo?.length ? ` · limited to ${t.limitTo.join(', ')}` : ''}
+                    </div>
+                  </div>
+                  <Badge>{t.scope === 'write' ? 'read + write' : 'read-only'}</Badge>
+                  <Button size="sm" variant="ghost" className={off ? undefined : 'revoke'} onClick={() => setTarget(t)}>
+                    {off ? 'Delete' : 'Revoke'}
+                  </Button>
                 </div>
-              </div>
-              <Badge>{t.scope === 'write' ? 'read + write' : 'read-only'}</Badge>
-              <Button size="sm" variant="ghost" className={off ? undefined : 'revoke'} onClick={() => setTarget(t)}>
-                {off ? 'Delete' : 'Revoke'}
-              </Button>
-            </div>
-          )
-        })
+              )
+            })}
+          </div>
+          <Pagination page={pg.page} pageSize={pg.pageSize} total={pg.total} onPage={pg.setPage} label="tokens" />
+        </>
       )}
       <CreateTokenDialog
         open={creating}

@@ -1,14 +1,25 @@
 // Owner: slice ops. Settings → Docker discovery (design 15b, 22b) — multiple Docker hosts.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { keys, useContainers, useEntities, useRole, useSaveSettings, useSettings } from '../../lib/queries'
 import type { Backend, Container, DockerEndpoint, DockerSettings as DockerSettingsT } from '../../lib/types'
-import { Badge, Button, Card, Checkbox, Field, Input, Menu, SectionHeader, Select, Skeleton, Toggle, ToggleCard, cx, useToast } from '../../components/ui'
+import {
+  Badge, Button, Card, Field, Input, Menu, NoMatches, Pagination, SearchInput, SectionHeader, Select, Skeleton, TableToolbar, Toggle, ToggleCard, cx,
+  matchesSearch, useFitGrid, usePagination, useToast,
+} from '../../components/ui'
 import DockerSuggestionsDialog from '../docker/DockerSuggestionsDialog'
 import DockerHostsCard from '../docker/DockerHostsCard'
 import { applyNowAction, useDockerStatus } from '../docker/ops'
 import '../docker/ops.css'
+
+const STATE_OPTIONS = [
+  { value: 'running', label: 'Running' },
+  { value: 'stopped', label: 'Stopped' },
+]
+// Space under the container list: pager (41) + card border (1) + settings page bottom padding (28).
+const FIT_RESERVE = 70
+const TOOLBAR_STYLE = { padding: '10px 18px', borderBottom: '1px solid var(--hairline-soft)' } as const
 
 const LABEL_REFERENCE = [
   ['relay.host=grafana.home.lan', ''],
@@ -40,7 +51,10 @@ export default function DockerSettings() {
   const accessLists = useEntities('access-lists')
 
   const [dialog, setDialog] = useState<{ open: boolean; preselect?: string[] }>({ open: false })
-  const [showStopped, setShowStopped] = useState(true)
+  const [search, setSearch] = useState('')
+  const [stateFilter, setStateFilter] = useState('')
+  const [hostFilter, setHostFilter] = useState('')
+  const listRef = useRef<HTMLDivElement>(null)
   const [pattern, setPattern] = useState('')
 
   useEffect(() => {
@@ -90,22 +104,35 @@ export default function DockerSettings() {
     const list = containers.data ?? []
     return list.filter((c) => !c.hostId && !c.backendId && (c.http || matchBackend(c, backends.data ?? [])))
   }, [containers.data, backends.data])
-  const stoppedCount = all.filter((c) => c.state !== 'running').length
-  const discovered = showStopped ? all : all.filter((c) => c.state === 'running')
-
-  const groups = useMemo(() => {
+  // Filtered and flattened: endpoint order, then running first, then name.
+  const discovered = useMemo(() => {
     const order = new Map(endpoints.map((e, i) => [e.id, i]))
-    const byEp = new Map<string, Container[]>()
-    for (const c of discovered) byEp.set(c.endpointId, [...(byEp.get(c.endpointId) ?? []), c])
-    return [...byEp.entries()]
-      .sort(([a], [b]) => (order.get(a) ?? 99) - (order.get(b) ?? 99))
-      .map(([id, list]) => ({
-        id,
-        name: list[0]?.endpointName || id,
-        address: st?.endpoints?.find((e) => e.id === id)?.upstreamAddress ?? '',
-        list: [...list].sort((a, b) => Number(b.state === 'running') - Number(a.state === 'running') || a.name.localeCompare(b.name)),
-      }))
-  }, [discovered, endpoints, st])
+    return all
+      .filter(
+        (c) =>
+          (!stateFilter || (stateFilter === 'running') === (c.state === 'running')) &&
+          (!multiHost || !hostFilter || c.endpointId === hostFilter) &&
+          matchesSearch(search, c.name, c.image, c.upstreamHost, c.upstreamHost && `${c.upstreamHost}:${c.suggestedPort}`),
+      )
+      .sort(
+        (a, b) =>
+          (order.get(a.endpointId) ?? 99) - (order.get(b.endpointId) ?? 99) ||
+          a.endpointId.localeCompare(b.endpointId) ||
+          Number(b.state === 'running') - Number(a.state === 'running') ||
+          a.name.localeCompare(b.name),
+      )
+  }, [all, endpoints, multiHost, stateFilter, hostFilter, search])
+  const hostOptions = endpoints
+    .filter((e) => e.enabled || all.some((c) => c.endpointId === e.id))
+    .map((e) => ({ value: e.id, label: e.name || e.id }))
+  const endpointAddress = (id: string) => st?.endpoints?.find((e) => e.id === id)?.upstreamAddress ?? ''
+  const { pageSize } = useFitGrid(listRef, { viewport: true, reserve: FIT_RESERVE, min: 5, itemHeight: 50 })
+  const pg = usePagination(discovered, pageSize, [search, stateFilter, hostFilter])
+  const clearFilters = () => {
+    setSearch('')
+    setStateFilter('')
+    setHostFilter('')
+  }
 
   if (settings.isLoading || !settings.data) {
     return (
@@ -193,7 +220,6 @@ export default function DockerSettings() {
           title="Discovered, not yet proxied"
           actions={
             <div className="row gap-12">
-              {stoppedCount > 0 && <Checkbox checked={showStopped} onChange={setShowStopped} label={<span className="small" style={{ fontWeight: 400 }}>Show stopped</span>} />}
               <span className="small muted" style={{ fontWeight: 400 }}>{discovered.length}</span>
               {canWrite && discovered.some((c) => c.upstreamHost || c.linkOnStart) && (
                 <Button size="sm" onClick={() => setDialog({ open: true })}>Create hosts…</Button>
@@ -203,19 +229,22 @@ export default function DockerSettings() {
         >
           {containers.isLoading ? (
             <div className="card-body"><Skeleton height={60} /></div>
-          ) : discovered.length === 0 ? (
-            <div className="ops-list-row"><span className="muted small">Every {showStopped ? '' : 'running '}web container is already proxied.</span></div>
+          ) : all.length === 0 ? (
+            <div className="ops-list-row"><span className="muted small">Every web container is already proxied.</span></div>
           ) : (
-            groups.map((g) => (
-              <div key={g.id}>
-                {multiHost && (
-                  <div className="ops-group-head">
-                    {g.name}
-                    {g.address && <span className="mono">· {g.address}</span>}
-                    <span style={{ marginLeft: 'auto', fontWeight: 400 }}>{g.list.length}</span>
-                  </div>
-                )}
-                {g.list.map((c) => {
+            <>
+              <div style={TOOLBAR_STYLE}>
+                <TableToolbar>
+                  <SearchInput value={search} onChange={setSearch} placeholder="Search name, image or address" label="Search containers" />
+                  <Select inputSize="sm" style={{ width: 130 }} value={stateFilter} placeholder="All states" options={STATE_OPTIONS} onChange={setStateFilter} aria-label="State" />
+                  {multiHost && (
+                    <Select inputSize="sm" style={{ width: 170 }} value={hostFilter} placeholder="All hosts" options={hostOptions} onChange={setHostFilter} aria-label="Docker host" />
+                  )}
+                </TableToolbar>
+              </div>
+              <div ref={listRef}>
+                {discovered.length === 0 && <NoMatches what="containers" onClear={clearFilters} />}
+                {pg.rows.map((c) => {
                   const matched = matchBackend(c, backends.data ?? [])
                   const running = c.state === 'running'
                   const reachable = !!c.upstreamHost
@@ -228,6 +257,9 @@ export default function DockerSettings() {
                       <span className="ops-name" title={`${c.image}${c.reason ? ` · ${c.reason}` : ''}`}>
                         {c.name} <span className="faint">· {where}</span>
                       </span>
+                      {multiHost && (
+                        <Badge tone="outline" title={endpointAddress(c.endpointId) || undefined}>{c.endpointName || c.endpointId}</Badge>
+                      )}
                       {!running && <Badge>stopped</Badge>}
                       {canWrite && (reachable || c.linkOnStart) && (
                         <div className="row gap-4">
@@ -250,7 +282,8 @@ export default function DockerSettings() {
                   )
                 })}
               </div>
-            ))
+              <Pagination page={pg.page} pageSize={pg.pageSize} total={pg.total} onPage={pg.setPage} label="containers" />
+            </>
           )}
         </Card>
       )}

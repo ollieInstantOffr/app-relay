@@ -1,7 +1,7 @@
 # Relay Edge — contracts
 
 Relay Edge is Relay's own reverse proxy engine. Users choose nginx or Relay
-Edge in Settings → General (`proxyEngine`). Exactly one of them serves the
+Edge in Settings → Proxy engine (`proxyEngine` in the general settings). Exactly one of them serves the
 HTTP/HTTPS ports and streams; HAProxy is unaffected.
 
 This file is the contract between the parts that build it. Keep it current.
@@ -131,8 +131,9 @@ Improvements over nginx (intentional differences):
 - Basic-auth verifications are cached for 60 s.
 - `/metrics` Prometheus endpoint on the status listener.
 
-Not supported (rejected by validation when Relay Edge is selected):
-- Custom nginx snippets (`customNginx`).
+Not supported:
+- Custom nginx snippets (`customNginx`): kept on the host and skipped with a
+  note in the rendered config; they apply again after switching back to nginx.
 - Geo-blocking by country (same as the official nginx image: skipped with a
   warning in the rendered config).
 
@@ -142,9 +143,8 @@ Not supported (rejected by validation when Relay Edge is selected):
   `edge`. Part of the snapshot and of the General pending projection, so a
   switch is a pending change applied with validation, health check and
   automatic rollback.
-  Saving `edge` is refused while any host has `customNginx` (field error on
-  `proxyEngine` listing up to 5 hosts), and a host with `customNginx` can't
-  be saved while `edge` is selected (field error on `customNginx`).
+  Hosts with `customNginx` can be saved with either engine; Relay Edge skips
+  the snippet (render note) and nginx runs it again after switching back.
 - The active proxy engine is the live version's `proxyEngine` (General
   settings before the first apply): `app.ProxyEngine(ctx)` / `app.Proxy(ctx)`.
 - `core.EnginesStatus` gains `edge` (EngineState) and `proxy` (active engine

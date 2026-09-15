@@ -1,10 +1,10 @@
 // Settings → Users & access (design 08, 28c).
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  Badge, Button, Callout, Card, ConfirmDialog, CopyButton, Dialog, Field, IconButton, Menu, SectionHeader, Select, Skeleton,
-  ToggleRow, cx, useToast, type MenuEntry,
+  Badge, Button, Callout, Card, ConfirmDialog, CopyButton, Dialog, Field, IconButton, Menu, NoMatches, Pagination, SearchInput, SectionHeader, Select,
+  Skeleton, TableToolbar, ToggleRow, cx, matchesSearch, useFitGrid, usePagination, useToast, type MenuEntry,
 } from '../../components/ui'
 import { api } from '../../lib/api'
 import { useEntities, useRole, useSaveSettings, useSettings } from '../../lib/queries'
@@ -94,6 +94,15 @@ async function resetPassword(u: { id: string; username: string }): Promise<TempP
 // ---------------------------------------------------------------- users
 type Pending = { kind: 'reset' | 'reset2fa' | 'disable' | 'delete'; user: UserRow }
 
+// Space under a fitted list: pager (41) + card border (1) + settings page bottom padding (28).
+const FIT_RESERVE = 70
+const TOOLBAR_STYLE = { padding: '10px 18px', borderBottom: '1px solid var(--hairline-soft)' } as const
+const ROLE_OPTIONS = ROLES.map((r) => ({ value: r.role, label: r.title }))
+const USER_STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'disabled', label: 'Disabled' },
+]
+
 function UsersCard() {
   const users = useUsers()
   const qc = useQueryClient()
@@ -102,6 +111,25 @@ function UsersCard() {
   const [inviteOpen, setInviteOpen] = useState(false)
   const [pending, setPending] = useState<Pending | null>(null)
   const [temp, setTemp] = useState<TempPassword | null>(null)
+  const [search, setSearch] = useState('')
+  const [roleFilter, setRoleFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const listRef = useRef<HTMLDivElement>(null)
+
+  const allUsers = users.data ?? []
+  const filtered = allUsers.filter(
+    (u) =>
+      (!roleFilter || u.role === roleFilter) &&
+      (!statusFilter || (statusFilter === 'disabled') === !!u.disabled) &&
+      matchesSearch(search, u.username, u.email),
+  )
+  const { pageSize } = useFitGrid(listRef, { viewport: true, reserve: FIT_RESERVE, min: 5, itemHeight: 65 })
+  const pg = usePagination(filtered, pageSize, [search, roleFilter, statusFilter])
+  const clearFilters = () => {
+    setSearch('')
+    setRoleFilter('')
+    setStatusFilter('')
+  }
 
   const refresh = () => qc.invalidateQueries({ queryKey: authKeys.users })
 
@@ -206,30 +234,43 @@ function UsersCard() {
           </div>
         )}
         {users.isError && <div className="card-body small danger-text">{describeError(users.error)}</div>}
-        {(users.data ?? []).map((u) => (
-          <div key={u.id} className={cx('user-row', u.disabled && 'dim')}>
-            <div className="user-avatar">{u.username.slice(0, 1).toUpperCase()}</div>
-            <div className="grow" style={{ minWidth: 0 }}>
-              <div className="user-name truncate">
-                {u.username}
-                {u.self && ' (you)'}
-              </div>
-              <div className="user-sub truncate">
-                {[u.email, u.self ? 'last active now' : u.lastActiveAt ? `last active ${ago(u.lastActiveAt)}` : 'never signed in'].filter(Boolean).join(' · ')}
-              </div>
-            </div>
-            {u.disabled && <Badge>disabled</Badge>}
-            {u.mustChangePassword && <Badge tone="pending">temporary password</Badge>}
-            <Badge tone={u.role === 'admin' ? 'dark' : u.role === 'member' ? 'outline' : undefined} title={ROLES.find((r) => r.role === u.role)?.description}>
-              {roleBadge[u.role] ?? u.role}
-            </Badge>
-            <span className={cx('twofa', u.twoFactor ? 'on' : 'off')} title={u.twoFactor ? [u.totpEnabled && 'authenticator app', u.passkeys > 0 && `${u.passkeys} passkey${u.passkeys === 1 ? '' : 's'}`].filter(Boolean).join(' + ') : undefined}>
-              <span className="d" />
-              2FA {u.twoFactor ? 'on' : 'off'}
-            </span>
-            <Menu trigger={<IconButton icon="more" bare label={`Actions for ${u.username}`} />} items={menuFor(u)} />
+        {allUsers.length > 0 && (
+          <div style={TOOLBAR_STYLE}>
+            <TableToolbar>
+              <SearchInput value={search} onChange={setSearch} placeholder="Search username or email" label="Search users" />
+              <Select inputSize="sm" style={{ width: 160 }} value={roleFilter} placeholder="All roles" options={ROLE_OPTIONS} onChange={setRoleFilter} aria-label="Role" />
+              <Select inputSize="sm" style={{ width: 130 }} value={statusFilter} placeholder="All statuses" options={USER_STATUS_OPTIONS} onChange={setStatusFilter} aria-label="Status" />
+            </TableToolbar>
           </div>
-        ))}
+        )}
+        <div ref={listRef}>
+          {allUsers.length > 0 && filtered.length === 0 && <NoMatches what="users" onClear={clearFilters} />}
+          {pg.rows.map((u) => (
+            <div key={u.id} className={cx('user-row', u.disabled && 'dim')}>
+              <div className="user-avatar">{u.username.slice(0, 1).toUpperCase()}</div>
+              <div className="grow" style={{ minWidth: 0 }}>
+                <div className="user-name truncate">
+                  {u.username}
+                  {u.self && ' (you)'}
+                </div>
+                <div className="user-sub truncate">
+                  {[u.email, u.self ? 'last active now' : u.lastActiveAt ? `last active ${ago(u.lastActiveAt)}` : 'never signed in'].filter(Boolean).join(' · ')}
+                </div>
+              </div>
+              {u.disabled && <Badge>disabled</Badge>}
+              {u.mustChangePassword && <Badge tone="pending">temporary password</Badge>}
+              <Badge tone={u.role === 'admin' ? 'dark' : u.role === 'member' ? 'outline' : undefined} title={ROLES.find((r) => r.role === u.role)?.description}>
+                {roleBadge[u.role] ?? u.role}
+              </Badge>
+              <span className={cx('twofa', u.twoFactor ? 'on' : 'off')} title={u.twoFactor ? [u.totpEnabled && 'authenticator app', u.passkeys > 0 && `${u.passkeys} passkey${u.passkeys === 1 ? '' : 's'}`].filter(Boolean).join(' + ') : undefined}>
+                <span className="d" />
+                2FA {u.twoFactor ? 'on' : 'off'}
+              </span>
+              <Menu trigger={<IconButton icon="more" bare label={`Actions for ${u.username}`} />} items={menuFor(u)} />
+            </div>
+          ))}
+        </div>
+        <Pagination page={pg.page} pageSize={pg.pageSize} total={pg.total} onPage={pg.setPage} label="users" />
       </Card>
       <AddUserDialog open={inviteOpen} onClose={() => setInviteOpen(false)} require2fa={!!security?.require2faForAdmins} />
       <ConfirmDialog
@@ -248,11 +289,27 @@ function UsersCard() {
 }
 
 // ---------------------------------------------------------------- REST tokens
+function tokenState(t: ApiToken): 'active' | 'revoked' | 'expired' {
+  if (t.revokedAt) return 'revoked'
+  if (t.expiresAt && new Date(t.expiresAt).getTime() <= Date.now()) return 'expired'
+  return 'active'
+}
+
 function tokenStatus(t: ApiToken): { label: string; active: boolean } {
-  if (t.revokedAt) return { label: 'revoked', active: false }
-  if (t.expiresAt && new Date(t.expiresAt).getTime() <= Date.now()) return { label: 'expired', active: false }
+  const state = tokenState(t)
+  if (state !== 'active') return { label: state, active: false }
   return { label: t.lastUsedAt ? `used ${ago(t.lastUsedAt)}` : 'never used', active: true }
 }
+
+const TOKEN_STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'revoked', label: 'Revoked' },
+  { value: 'expired', label: 'Expired' },
+]
+const TOKEN_SCOPE_OPTIONS = [
+  { value: 'read', label: 'Read-only' },
+  { value: 'write', label: 'Read + write' },
+]
 
 function RestTokensCard() {
   const tokens = useTokens('rest')
@@ -260,6 +317,25 @@ function RestTokensCard() {
   const toast = useToast()
   const [open, setOpen] = useState(false)
   const [revoking, setRevoking] = useState<ApiToken | null>(null)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [scopeFilter, setScopeFilter] = useState('')
+  const listRef = useRef<HTMLDivElement>(null)
+
+  const allTokens = tokens.data ?? []
+  const filtered = allTokens.filter(
+    (t) =>
+      (!statusFilter || tokenState(t) === statusFilter) &&
+      (!scopeFilter || t.scope === scopeFilter) &&
+      matchesSearch(search, t.name, `${t.prefix}${t.last4}`, t.createdBy),
+  )
+  const { pageSize } = useFitGrid(listRef, { viewport: true, reserve: FIT_RESERVE, min: 4, itemHeight: 65 })
+  const pg = usePagination(filtered, pageSize, [search, statusFilter, scopeFilter])
+  const clearFilters = () => {
+    setSearch('')
+    setStatusFilter('')
+    setScopeFilter('')
+  }
 
   const remove = async (t: ApiToken) => {
     const { active } = tokenStatus(t)
@@ -292,28 +368,41 @@ function RestTokensCard() {
             No REST API tokens. Scripts and integrations send them as <span className="mono">Authorization: Bearer rl_api_…</span>
           </div>
         )}
-        {(tokens.data ?? []).map((t) => {
-          const st = tokenStatus(t)
-          return (
-            <div key={t.id} className={cx('user-row', !st.active && 'dim')}>
-              <div className="user-avatar api">API</div>
-              <div className="grow" style={{ minWidth: 0 }}>
-                <div className="user-name truncate">{t.name}</div>
-                <div className="user-sub truncate">
-                  <span className="mono">
-                    {t.prefix}••••{t.last4}
-                  </span>{' '}
-                  · {t.scope === 'read' ? 'read-only' : 'read + write'} · {st.label}
-                  {t.createdBy ? ` · by ${t.createdBy}` : ''}
+        {allTokens.length > 0 && (
+          <div style={TOOLBAR_STYLE}>
+            <TableToolbar>
+              <SearchInput value={search} onChange={setSearch} placeholder="Search name, token or creator" label="Search tokens" />
+              <Select inputSize="sm" style={{ width: 130 }} value={statusFilter} placeholder="All statuses" options={TOKEN_STATUS_OPTIONS} onChange={setStatusFilter} aria-label="Status" />
+              <Select inputSize="sm" style={{ width: 140 }} value={scopeFilter} placeholder="All scopes" options={TOKEN_SCOPE_OPTIONS} onChange={setScopeFilter} aria-label="Scope" />
+            </TableToolbar>
+          </div>
+        )}
+        <div ref={listRef}>
+          {allTokens.length > 0 && filtered.length === 0 && <NoMatches what="tokens" onClear={clearFilters} />}
+          {pg.rows.map((t) => {
+            const st = tokenStatus(t)
+            return (
+              <div key={t.id} className={cx('user-row', !st.active && 'dim')}>
+                <div className="user-avatar api">API</div>
+                <div className="grow" style={{ minWidth: 0 }}>
+                  <div className="user-name truncate">{t.name}</div>
+                  <div className="user-sub truncate">
+                    <span className="mono">
+                      {t.prefix}••••{t.last4}
+                    </span>{' '}
+                    · {t.scope === 'read' ? 'read-only' : 'read + write'} · {st.label}
+                    {t.createdBy ? ` · by ${t.createdBy}` : ''}
+                  </div>
                 </div>
+                <Badge>{t.scope === 'write' ? 'editor' : 'viewer'}</Badge>
+                <Button size="sm" variant="ghost" onClick={() => (st.active ? setRevoking(t) : remove(t))}>
+                  {st.active ? 'Revoke' : 'Delete'}
+                </Button>
               </div>
-              <Badge>{t.scope === 'write' ? 'editor' : 'viewer'}</Badge>
-              <Button size="sm" variant="ghost" onClick={() => (st.active ? setRevoking(t) : remove(t))}>
-                {st.active ? 'Revoke' : 'Delete'}
-              </Button>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
+        <Pagination page={pg.page} pageSize={pg.pageSize} total={pg.total} onPage={pg.setPage} label="tokens" />
       </Card>
       <CreateTokenDialog open={open} onClose={() => setOpen(false)} surface="rest" />
       <ConfirmDialog

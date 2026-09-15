@@ -1,6 +1,7 @@
 export * from './Icon'
 export * from './controls'
 export * from './display'
+export * from './fitGrid'
 export * from './overlay'
 export * from './pagination'
 export * from './toast'

@@ -1,10 +1,11 @@
 // Access lists (design 05).
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { TopBar } from '../../components/shell/TopBar'
 import {
-  Badge, Button, Callout, ConfirmDialog, Dialog, EmptyState, Field, Input, Skeleton, Spinner, Toggle, Tooltip, useToast,
+  Badge, Button, Callout, ConfirmDialog, Dialog, EmptyState, Field, Input, NoMatches, Pagination, SearchInput, Select, Skeleton, Spinner, TableToolbar,
+  Toggle, Tooltip, matchesSearch, useFitGrid, usePagination, useToast,
 } from '../../components/ui'
 import { api } from '../../lib/api'
 import { Topics, useBusEvent } from '../../lib/events'
@@ -121,6 +122,24 @@ export default function AccessListsPage() {
   const [drawer, setDrawer] = useState<{ open: boolean; list?: AccessList; tab?: AccessTab }>({ open: false })
   const [testOpen, setTestOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [search, setSearch] = useState('')
+  const [kind, setKind] = useState('')
+  const listRef = useRef<HTMLDivElement>(null)
+
+  const filtered = useMemo(
+    () =>
+      lists.filter((l) => {
+        if (kind === 'ip' && l.rules.length === 0) return false
+        if (kind === 'auth' && !l.basicAuth.enabled) return false
+        if (kind === 'open' && (l.rules.length > 0 || l.basicAuth.enabled)) return false
+        return matchesSearch(search, l.name, l.description, ...l.rules.map((r) => r.cidr), ...l.rules.map((r) => r.note))
+      }),
+    [lists, search, kind],
+  )
+  // Items that fit the sidebar: below them sit the pager and the list padding.
+  const { pageSize } = useFitGrid(listRef, { reserve: 41 + 12, itemHeight: 63, min: 3 })
+  const pg = usePagination(filtered, pageSize, [search, kind])
+  const filtersOn = !!(search.trim() || kind)
 
   useBusEvent(Topics.ConfigChanged, () => qc.invalidateQueries({ queryKey: ['entities', 'access-lists', '__usage'] }))
 
@@ -207,7 +226,40 @@ export default function AccessListsPage() {
       ) : (
         <div className="cs-split">
           <div className="cs-list">
-            {lists.map((l) => {
+            <div className="cs-list-tools">
+              <TableToolbar>
+                <SearchInput value={search} onChange={setSearch} placeholder="Search name or description" label="Search access lists" width={320} />
+                <div className="cs-list-filter">
+                  <Select
+                    inputSize="sm"
+                    value={kind}
+                    placeholder="All lists"
+                    aria-label="Restriction"
+                    onChange={setKind}
+                    options={[
+                      { value: 'ip', label: 'With IP rules' },
+                      { value: 'auth', label: 'With basic auth' },
+                      { value: 'open', label: 'No restrictions' },
+                    ]}
+                  />
+                </div>
+              </TableToolbar>
+            </div>
+            <div className="cs-list-items" ref={listRef}>
+            {filtered.length === 0 && (
+              <NoMatches
+                what="lists"
+                onClear={
+                  filtersOn
+                    ? () => {
+                        setSearch('')
+                        setKind('')
+                      }
+                    : undefined
+                }
+              />
+            )}
+            {pg.rows.map((l) => {
               const n = hostCount(usage[l.id])
               return (
                 <button key={l.id} type="button" className={`cs-list-item${l.id === selectedId ? ' active' : ''}`} onClick={() => select(l.id)}>
@@ -219,6 +271,8 @@ export default function AccessListsPage() {
                 </button>
               )
             })}
+            </div>
+            <Pagination page={pg.page} pageSize={pg.pageSize} total={pg.total} onPage={pg.setPage} label="lists" />
           </div>
 
           {selected && draft && (

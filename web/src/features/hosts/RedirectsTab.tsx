@@ -1,9 +1,9 @@
 // Owner: slice hosts. Redirects tab + drawer (design 20).
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Badge, Button, ConfirmDialog, Drawer, EmptyState, Field, IconButton, Input, Menu, Segmented, Select, Skeleton, Spinner, ToggleCard, cx, useToast,
-  type MenuEntry,
+  Badge, Button, ConfirmDialog, Drawer, EmptyState, Field, IconButton, Input, Menu, NoMatches, Pagination, SearchInput, Segmented, Select, Skeleton,
+  Spinner, TableToolbar, ToggleCard, cx, matchesSearch, useFitRows, usePagination, useToast, type MenuEntry,
 } from '../../components/ui'
 import { ApiError } from '../../lib/api'
 import { useDeleteEntity, useEntities, useEntity, useRole, useSaveEntity } from '../../lib/queries'
@@ -20,7 +20,12 @@ const CODE_HINTS: Record<number, string> = {
 
 const redirectName = (r: { domains: string[]; fromPath: string }) => `${r.domains[0] ?? ''}${r.fromPath}`
 
-export function RedirectsView({ redirects, loading, filter }: { redirects: Redirect[]; loading: boolean; filter: string }) {
+export function RedirectsView({ redirects, loading, filter, onFilter }: {
+  redirects: Redirect[]
+  loading: boolean
+  filter: string
+  onFilter: (v: string) => void
+}) {
   const { canWrite } = useRole()
   const [params, setParams] = useSearchParams()
   const toast = useToast()
@@ -29,6 +34,9 @@ export function RedirectsView({ redirects, loading, filter }: { redirects: Redir
   const [deleting, setDeleting] = useState<Redirect | null>(null)
   const editId = params.get('edit')
   const isNew = params.get('new') === '1'
+  const [status, setStatus] = useState('')
+  const [code, setCode] = useState('')
+  const tableRef = useRef<HTMLDivElement>(null)
 
   const open = (r?: Redirect) =>
     setParams((p) => {
@@ -65,10 +73,24 @@ export function RedirectsView({ redirects, loading, filter }: { redirects: Redir
     }
   }
 
-  const q = filter.trim().toLowerCase()
-  const rows = redirects.filter(
-    (r) => !q || r.domains.some((d) => d.includes(q)) || r.to.toLowerCase().includes(q) || r.fromPath.toLowerCase().includes(q),
+  const rows = useMemo(
+    () =>
+      redirects.filter(
+        (r) =>
+          (!status || (status === 'enabled') === r.enabled) &&
+          (!code || String(r.code) === code) &&
+          matchesSearch(filter, ...r.domains, r.fromPath, r.to),
+      ),
+    [redirects, filter, status, code],
   )
+  const pageSize = useFitRows(tableRef, { reserve: 41 + 24 })
+  const pg = usePagination(rows, pageSize, [filter, status, code])
+  const filtersOn = !!(filter.trim() || status || code)
+  const clearFilters = () => {
+    setStatus('')
+    setCode('')
+    onFilter('')
+  }
 
   let body: React.ReactNode
   if (loading) {
@@ -92,7 +114,7 @@ export function RedirectsView({ redirects, loading, filter }: { redirects: Redir
     )
   } else {
     body = (
-      <div className="card">
+      <div className="card" style={{ overflow: 'hidden' }} ref={tableRef}>
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -105,7 +127,7 @@ export function RedirectsView({ redirects, loading, filter }: { redirects: Redir
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
+              {pg.rows.map((r) => {
                 const items: MenuEntry[] = [{ header: redirectName(r) }, { label: canWrite ? 'Edit' : 'View', icon: 'edit', onSelect: () => open(r) }]
                 if (canWrite) {
                   items.push('separator', { label: r.enabled ? 'Disable' : 'Enable', icon: 'power', onSelect: () => void toggle(r) }, {
@@ -142,22 +164,45 @@ export function RedirectsView({ redirects, loading, filter }: { redirects: Redir
                   </tr>
                 )
               })}
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="muted" style={{ textAlign: 'center', padding: 28 }}>
-                    No redirects match “{filter}”
-                  </td>
-                </tr>
-              )}
+              {rows.length === 0 && <NoMatches what="redirects" colSpan={5} onClear={filtersOn ? clearFilters : undefined} />}
             </tbody>
           </table>
         </div>
+        <Pagination page={pg.page} pageSize={pg.pageSize} total={pg.total} onPage={pg.setPage} label="redirects" />
       </div>
     )
   }
 
   return (
     <>
+      {!loading && redirects.length > 0 && (
+        <TableToolbar>
+          <SearchInput value={filter} onChange={onFilter} placeholder="Search domain, path or target" label="Search redirects" width={280} />
+          <div className="hosts-filter-select">
+            <Select
+              inputSize="sm"
+              value={status}
+              placeholder="All statuses"
+              aria-label="Status"
+              onChange={setStatus}
+              options={[
+                { value: 'enabled', label: 'Enabled' },
+                { value: 'disabled', label: 'Disabled' },
+              ]}
+            />
+          </div>
+          <div className="hosts-filter-select">
+            <Select
+              inputSize="sm"
+              value={code}
+              placeholder="All codes"
+              aria-label="Status code"
+              onChange={setCode}
+              options={['301', '302', '307', '308'].map((c) => ({ value: c, label: c, hint: CODE_HINTS[Number(c)].split(' · ')[0] }))}
+            />
+          </div>
+        </TableToolbar>
+      )}
       {body}
       <RedirectDrawer open={isNew || !!editId} isNew={isNew} redirectId={editId ?? undefined} redirects={redirects} onClose={close} />
       <ConfirmDialog

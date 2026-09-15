@@ -525,3 +525,16 @@ input, select, textarea { font: inherit; color: inherit; }
 .pagination { display: flex; align-items: center; gap: 6px; padding: 8px 12px 8px 18px; border-top: 1px solid var(--hairline-soft); font-size: 12px; color: var(--ink-subtle); }
 .pagination-range { font-variant-numeric: tabular-nums; }
 .pagination-page { margin-right: 4px; font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------- table toolbar & search */
+.table-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.table-toolbar > .spacer { flex: 1; }
+.search-input { position: relative; flex: 0 1 auto; min-width: 160px; max-width: 100%; }
+.search-input .input { height: 32px; width: 100%; padding-left: 32px; padding-right: 28px; background: var(--bg); }
+.search-input .input:focus { background: var(--surface); }
+.search-input > svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--ink-faint); pointer-events: none; }
+.search-input-clear {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; border: 0; border-radius: 5px;
+  background: transparent; color: var(--ink-faint); cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.search-input-clear:hover { background: var(--surface-2); color: var(--ink); }

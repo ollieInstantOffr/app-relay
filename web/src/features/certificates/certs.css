@@ -24,6 +24,8 @@
 .cs-certs { grid-template-columns: 2fr 1.2fr 1.6fr 1fr 120px 40px; }
 .cs-streams { grid-template-columns: 120px 1.4fr 60px 1.6fr 1fr 1fr 40px; }
 .cs-streams.cs-grid-row { padding: 16px 20px; }
+.cs-filter-select { width: 170px; }
+.cs-filter-select .select-trigger { width: 100%; }
 
 .cs-expiry-bar { height: 4px; border-radius: 2px; background: #eeede9; overflow: hidden; display: block; margin-right: 24px; }
 .cs-expiry-bar > span { display: block; height: 100%; background: var(--ok); }
@@ -50,7 +52,13 @@ button.cs-chip:hover, a.cs-chip:hover { border-color: var(--hairline-strong); ba
 
 /* access lists */
 .cs-split { flex: 1; display: grid; grid-template-columns: 320px 1fr; min-height: 0; }
-.cs-list { border-right: 1px solid var(--hairline); background: var(--surface); padding: 12px; display: flex; flex-direction: column; gap: 4px; overflow: auto; }
+.cs-list { border-right: 1px solid var(--hairline); background: var(--surface); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.cs-list-tools { padding: 12px 12px 8px; flex: none; }
+.cs-list-tools .search-input { flex: 1 1 100%; }
+.cs-list-tools .cs-list-filter { width: 100%; }
+.cs-list-tools .cs-list-filter .select-trigger { width: 100%; }
+.cs-list-items { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 4px; flex: 1; min-height: 0; overflow: auto; }
+.cs-list > .pagination { flex: none; padding-left: 14px; }
 .cs-list-item { padding: 12px 14px; border-radius: 8px; display: flex; flex-direction: column; gap: 3px; cursor: pointer; text-align: left; border: 0; background: transparent; font: inherit; color: inherit; width: 100%; }
 .cs-list-item:hover { background: var(--surface-3); }
 .cs-list-item.active { background: var(--surface-2); }

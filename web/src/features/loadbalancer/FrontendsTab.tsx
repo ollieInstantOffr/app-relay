@@ -1,6 +1,9 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Badge, Button, Callout, Card, ConfirmDialog, EmptyState, IconButton, Menu, Skeleton, cx, useToast } from '../../components/ui'
+import {
+  Badge, Button, Callout, Card, ConfirmDialog, EmptyState, IconButton, ListPager, Menu, NoMatches, SearchInput, Select, Skeleton, TableToolbar, cx,
+  matchesSearch, useElementHeight, useFitGrid, usePagination, useToast,
+} from '../../components/ui'
 import { useDeleteEntity, useEntities, useLBStats, useRole, useSaveEntity, useSettings } from '../../lib/queries'
 import { compact } from '../../lib/format'
 import type { Backend, Frontend, LBStats, ProxyHost } from '../../lib/types'
@@ -22,9 +25,38 @@ export default function FrontendsTab({ onNew, onEdit, onDuplicate }: {
   const del = useDeleteEntity('frontends')
   const toast = useToast()
   const [deleting, setDeleting] = useState<Frontend | null>(null)
+  const [search, setSearch] = useState('')
+  const [mode, setMode] = useState('')
+  const [status, setStatus] = useState('')
+  const listRef = useRef<HTMLDivElement>(null)
+  const calloutRef = useRef<HTMLDivElement>(null)
+  const calloutHeight = useElementHeight(calloutRef, 64)
+  // Below the list: gap (20) + ListPager (28) + gap (20) + info callout + page bottom padding (24).
+  const { pageSize } = useFitGrid(listRef, { reserve: 20 + 28 + 20 + calloutHeight + 24, min: 1, itemHeight: 120 })
+
+  const frontends = q.data ?? []
+  const backendName = (id?: string) => backends.find((b) => b.id === id)?.name
+  const filtered = frontends.filter(
+    (f) =>
+      (!mode || f.mode === mode) &&
+      (!status || (status === 'enabled') === f.enabled) &&
+      matchesSearch(
+        search,
+        f.name,
+        f.bind,
+        frontendHost(f, hosts)?.domains.join(' '),
+        backendName(f.defaultBackendId),
+        ...f.rules.map((r) => backendName(r.backendId)),
+      ),
+  )
+  const pg = usePagination(filtered, pageSize, [search, mode, status])
+  const clearFilters = () => {
+    setSearch('')
+    setMode('')
+    setStatus('')
+  }
 
   if (q.isLoading) return <Skeleton height={180} />
-  const frontends = q.data ?? []
 
   const toggle = async (f: Frontend) => {
     try {
@@ -40,6 +72,18 @@ export default function FrontendsTab({ onNew, onEdit, onDuplicate }: {
       <div className="muted" style={{ maxWidth: 820 }}>
         A frontend is a listening port plus rules that pick a backend. Frontends created by the Expose wizard bind to localhost and are reached only through the reverse proxy.
       </div>
+
+      {frontends.length > 0 && (
+        <TableToolbar>
+          <SearchInput value={search} onChange={setSearch} placeholder="Search frontends" label="Search frontends" />
+          <div className="lb-filter-select">
+            <Select inputSize="sm" value={mode} placeholder="All modes" options={MODES} onChange={setMode} aria-label="Mode" />
+          </div>
+          <div className="lb-filter-select">
+            <Select inputSize="sm" value={status} placeholder="All statuses" options={STATUSES} onChange={setStatus} aria-label="Status" />
+          </div>
+        </TableToolbar>
+      )}
 
       {frontends.length === 0 ? (
         <Card>
@@ -63,9 +107,13 @@ export default function FrontendsTab({ onNew, onEdit, onDuplicate }: {
             }
           />
         </Card>
+      ) : filtered.length === 0 ? (
+        <Card>
+          <NoMatches what="frontends" onClear={clearFilters} />
+        </Card>
       ) : (
-        <div className="col gap-14">
-          {frontends.map((f) => (
+        <div className="col gap-14" ref={listRef}>
+          {pg.rows.map((f) => (
             <FrontendCard
               key={f.id}
               frontend={f}
@@ -81,10 +129,13 @@ export default function FrontendsTab({ onNew, onEdit, onDuplicate }: {
           ))}
         </div>
       )}
+      <ListPager page={pg.page} pageSize={pg.pageSize} total={pg.total} onPage={pg.setPage} label="frontends" />
 
-      <Callout tone="info" icon="info">
-        The reverse proxy owns public TLS and domains. HAProxy owns pools and health. Public HTTP traffic always enters through the reverse proxy; only raw TCP/UDP frontends bind to a LAN or public IP directly.
-      </Callout>
+      <div ref={calloutRef}>
+        <Callout tone="info" icon="info">
+          The reverse proxy owns public TLS and domains. HAProxy owns pools and health. Public HTTP traffic always enters through the reverse proxy; only raw TCP/UDP frontends bind to a LAN or public IP directly.
+        </Callout>
+      </div>
 
       <ConfirmDialog
         open={!!deleting}
@@ -111,6 +162,22 @@ export default function FrontendsTab({ onNew, onEdit, onDuplicate }: {
   )
 }
 
+const MODES = [
+  { value: 'http', label: 'HTTP' },
+  { value: 'tcp', label: 'TCP' },
+]
+
+const STATUSES = [
+  { value: 'enabled', label: 'Enabled' },
+  { value: 'disabled', label: 'Disabled' },
+]
+
+/** Proxy host that sends traffic to a frontend (linked, or a loopback upstream on its port). */
+function frontendHost(f: Frontend, hosts: ProxyHost[]): ProxyHost | undefined {
+  const { port } = splitBind(f.bind)
+  return hosts.find((h) => h.id === f.hostId) ?? hosts.find((h) => h.upstream.port === port && /^127\.|^localhost$/.test(h.upstream.host))
+}
+
 function FrontendCard({ frontend: f, backends, hosts, stats, canWrite, onEdit, onToggle, onDuplicate, onDelete }: {
   frontend: Frontend
   backends: Backend[]
@@ -124,7 +191,7 @@ function FrontendCard({ frontend: f, backends, hosts, stats, canWrite, onEdit, o
 }) {
   const { addr } = splitBind(f.bind)
   const kind = bindKind(addr)
-  const host = hosts.find((h) => h.id === f.hostId) ?? hosts.find((h) => h.upstream.port === splitBind(f.bind).port && /^127\.|^localhost$/.test(h.upstream.host))
+  const host = frontendHost(f, hosts)
   const fs = stats?.running ? stats.frontends.find((x) => x.id === f.id) : undefined
   const name = (id?: string) => backends.find((b) => b.id === id)?.name
   const sni = f.rules.some((r) => r.conditions.some((c) => c.type === 'sni'))

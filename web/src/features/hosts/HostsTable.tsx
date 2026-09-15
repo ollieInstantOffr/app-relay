@@ -1,5 +1,5 @@
 // Owner: slice hosts. Hosts table view (design 27).
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { Badge, Checkbox, IconButton, Menu, Skeleton, cx } from '../../components/ui'
 import { agoShort, compact } from '../../lib/format'
 import type { ProxyHost } from '../../lib/types'
@@ -24,9 +24,13 @@ export interface SortState {
 }
 
 export function HostsTable({
-  hosts, ctx, hidden, sort, onSort, selected, focusedId, canWrite, actions, onToggleSelect, onSelectAll, onFocus, loading,
+  cardRef, hosts, allIds, ctx, hidden, sort, onSort, selected, focusedId, canWrite, actions, onToggleSelect, onSelectAll, onFocus, loading, footer,
 }: {
+  cardRef?: RefObject<HTMLDivElement | null>
+  /** Rows on the current page. */
   hosts: ProxyHost[]
+  /** Every host matching search and filters (all pages): what "select all" selects. */
+  allIds: string[]
   ctx: ViewCtx
   hidden: ColumnId[]
   sort: SortState
@@ -39,10 +43,12 @@ export function HostsTable({
   onSelectAll: (ids: string[]) => void
   onFocus: (id: string) => void
   loading: boolean
+  footer?: ReactNode
 }) {
   const show = (c: ColumnId) => !hidden.includes(c)
-  const allSelected = hosts.length > 0 && hosts.every((h) => selected.has(h.id))
-  const someSelected = !allSelected && hosts.some((h) => selected.has(h.id))
+  const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id))
+  const someSelected = !allSelected && allIds.some((id) => selected.has(id))
+  const selectAllLabel = allSelected ? 'Clear selection' : `Select all ${allIds.length} matching ${allIds.length === 1 ? 'host' : 'hosts'}`
   const colCount = 3 + (canWrite ? 1 : 0) + COLUMNS.filter((c) => show(c.id)).length - 1
 
   const sortTh = (key: SortKey, label: ReactNode, className?: string) => (
@@ -53,14 +59,16 @@ export function HostsTable({
   )
 
   return (
-    <div className="card hosts-table-card">
+    <div className="card hosts-table-card" ref={cardRef}>
       <div className="table-wrap">
         <table className="table hosts-table">
           <thead>
             <tr>
               {canWrite && (
                 <th>
-                  <Checkbox checked={allSelected} indeterminate={someSelected} onChange={(v) => onSelectAll(v ? hosts.map((h) => h.id) : [])} />
+                  <span className="hosts-select-all" title={selectAllLabel} aria-label={selectAllLabel}>
+                    <Checkbox checked={allSelected} indeterminate={someSelected} onChange={(v) => onSelectAll(v ? allIds : [])} />
+                  </span>
                 </th>
               )}
               {sortTh('domain', 'Domain')}
@@ -153,6 +161,7 @@ export function HostsTable({
           </tbody>
         </table>
       </div>
+      {footer}
     </div>
   )
 }

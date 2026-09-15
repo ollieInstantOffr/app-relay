@@ -35,7 +35,18 @@ Use a separate clone for development if you also run Relay for real: **Settings
 → Updates → Upgrade** builds from the checkout it runs from, including
 uncommitted changes.
 
-The README's **Development** section explains where things live in the code.
+### Where things live
+
+- `cmd/relay`: the `relay` binary (server, agents, Relay Edge, CLI)
+- `internal/model`: configuration entities; `internal/store`: SQLite
+- `internal/render/{nginx,edge,haproxy}`: config renderers; `internal/agent`: engine control protocol
+- `internal/edge`: Relay Edge, the built-in reverse proxy (`relay edge run`)
+- `internal/apply`: pending changes, versions, validation, reload, auto-rollback
+- `internal/publicdns`, `internal/mcp`, `internal/auth` …: one package per feature area
+- `web/`: React + TypeScript UI (built into `internal/webui/dist`, embedded in the binary)
+- `docs/SLICES.md`: architecture contracts between feature areas
+
+Run the tests with `make test`.
 
 ## Making a change
 

@@ -1,5 +1,8 @@
 /* Load balancer slice (screens 09, 10, 14, 16a, 19a, 19b, 25, 29d) */
 
+/* list toolbars (backends, frontends, stats) */
+.lb-filter-select { width: 140px; }
+
 .lb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-content: start; }
 @media (max-width: 1180px) { .lb-grid { grid-template-columns: 1fr; } }
 

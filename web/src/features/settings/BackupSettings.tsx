@@ -7,7 +7,8 @@ import { useRole, useSaveSettings, useSettings } from '../../lib/queries'
 import type { BackupSettings as BackupSettingsT } from '../../lib/types'
 import { bytes, dateTime } from '../../lib/format'
 import {
-  Button, Callout, Card, Dialog, Field, IconButton, Input, Menu, PasswordInput, SectionHeader, Skeleton, Spinner, Toggle, Tooltip, useToast, ConfirmDialog,
+  Button, Callout, Card, Dialog, Field, IconButton, Input, Menu, NoMatches, Pagination, PasswordInput, SearchInput, SectionHeader, Select, Skeleton, Spinner,
+  TableToolbar, Toggle, Tooltip, matchesSearch, useFitGrid, usePagination, useToast, ConfirmDialog,
 } from '../../components/ui'
 import NpmImportWizard from '../docker/NpmImportWizard'
 import { applyNowAction, opsKeys, until, useBackups, type BackupRow, type RestoreResult } from '../docker/ops'
@@ -19,6 +20,15 @@ const TRIGGER_LABEL: Record<string, string> = {
   'before-restore': 'Before restore',
   'before-upgrade': 'Before upgrade',
 }
+const TRIGGER_OPTIONS = Object.entries(TRIGGER_LABEL).map(([value, label]) => ({ value, label }))
+const SNAPSHOT_STATUS_OPTIONS = [
+  { value: 'ok', label: 'OK' },
+  { value: 'failed', label: 'Failed' },
+  { value: 'running', label: 'Running' },
+]
+// Space under the snapshot list: pager (41) + card border (1) + settings page bottom padding (28).
+const FIT_RESERVE = 70
+const TOOLBAR_STYLE = { padding: '10px 18px', borderBottom: '1px solid var(--hairline-soft)' } as const
 
 function contents(c: Record<string, number>): string {
   const p = (n: number | undefined, one: string, many: string) => `${n ?? 0} ${n === 1 ? one : many}`
@@ -47,6 +57,24 @@ export default function BackupSettings() {
   const [drag, setDrag] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const importOpen = params.get('import') === 'npm'
+  const [snapSearch, setSnapSearch] = useState('')
+  const [triggerFilter, setTriggerFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const snapListRef = useRef<HTMLDivElement>(null)
+
+  const snapshots = (backups.data?.items ?? []).filter(
+    (b) =>
+      (!triggerFilter || b.trigger === triggerFilter) &&
+      (!statusFilter || b.status === statusFilter) &&
+      matchesSearch(snapSearch, b.file, dateTime(b.createdAt)),
+  )
+  const { pageSize: snapPageSize } = useFitGrid(snapListRef, { viewport: true, reserve: FIT_RESERVE, min: 5, itemHeight: 50 })
+  const snapPg = usePagination(snapshots, snapPageSize, [snapSearch, triggerFilter, statusFilter])
+  const clearSnapFilters = () => {
+    setSnapSearch('')
+    setTriggerFilter('')
+    setStatusFilter('')
+  }
 
   useEffect(() => {
     if (restore) {
@@ -233,6 +261,15 @@ export default function BackupSettings() {
           )
         }
       >
+        {items.length > 0 && (
+          <div style={TOOLBAR_STYLE}>
+            <TableToolbar>
+              <SearchInput value={snapSearch} onChange={setSnapSearch} placeholder="Search file or date" label="Search backups" />
+              <Select inputSize="sm" style={{ width: 160 }} value={triggerFilter} placeholder="All triggers" options={TRIGGER_OPTIONS} onChange={setTriggerFilter} aria-label="Trigger" />
+              <Select inputSize="sm" style={{ width: 130 }} value={statusFilter} placeholder="All statuses" options={SNAPSHOT_STATUS_OPTIONS} onChange={setStatusFilter} aria-label="Status" />
+            </TableToolbar>
+          </div>
+        )}
         <div className="ops-snap-head">
           <span>Created</span>
           <span>Size</span>
@@ -247,7 +284,10 @@ export default function BackupSettings() {
             <span className="muted">No backups yet{s.passphraseSet ? ' — create one with “Back up now”.' : '. Set a passphrase to start backing up.'}</span>
           </div>
         ) : (
-          items.map((b) => (
+          <>
+          <div ref={snapListRef}>
+          {snapshots.length === 0 && <NoMatches what="backups" onClear={clearSnapFilters} />}
+          {snapPg.rows.map((b) => (
             <div key={b.id} className="ops-snap-row">
               <span className="mono" title={b.file}>{dateTime(b.createdAt)}</span>
               <span style={{ color: 'var(--ink-muted)' }}>{b.status === 'ok' ? bytes(b.size) : '—'}</span>
@@ -276,7 +316,10 @@ export default function BackupSettings() {
                 )}
               </span>
             </div>
-          ))
+          ))}
+          </div>
+          <Pagination page={snapPg.page} pageSize={snapPg.pageSize} total={snapPg.total} onPage={snapPg.setPage} label="backups" />
+          </>
         )}
       </Card>
 

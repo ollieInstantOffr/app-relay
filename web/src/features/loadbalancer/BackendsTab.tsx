@@ -1,5 +1,8 @@
-import { useState } from 'react'
-import { Badge, Button, Card, ConfirmDialog, Dot, EmptyState, IconButton, Menu, Skeleton, StatCard, cx, useToast, type MenuEntry } from '../../components/ui'
+import { useRef, useState } from 'react'
+import {
+  Badge, Button, Card, ConfirmDialog, Dot, EmptyState, IconButton, ListPager, Menu, NoMatches, SearchInput, Select, Skeleton, StatCard, TableToolbar, cx,
+  matchesSearch, useFitGrid, usePagination, useToast, type MenuEntry,
+} from '../../components/ui'
 import { useDeleteEntity, useEntities, useLBStats, useRole, useSettings } from '../../lib/queries'
 import { compact, pluralize } from '../../lib/format'
 import type { Backend, BackendStats, Frontend, LBStats, ProxyHost, Server, ServerStats } from '../../lib/types'
@@ -24,6 +27,33 @@ export default function BackendsTab({ onNew, onEdit, onExpose, onDuplicate }: {
   const [deleting, setDeleting] = useState<Backend | null>(null)
   const del = useDeleteEntity('backends')
   const toast = useToast()
+  const [search, setSearch] = useState('')
+  const [mode, setMode] = useState('')
+  const [state, setState] = useState('')
+  const gridRef = useRef<HTMLDivElement>(null)
+  // Below the grid: gap (20) + ListPager (28) + page bottom padding (24).
+  const { pageSize } = useFitGrid(gridRef, { reserve: 20 + 28 + 24, min: 1, itemHeight: 200 })
+
+  const backends = backendsQ.data ?? []
+  const running = !!stats?.running
+  const byId = new Map((stats?.backends ?? []).map((b) => [b.id, b]))
+  const stateOf = (b: Backend) => {
+    const st = byId.get(b.id)
+    if (!st) return 'pending'
+    return st.status === 'DOWN' ? 'down' : st.status === 'DEGRADED' ? 'degraded' : 'up'
+  }
+  const filtered = backends.filter(
+    (b) =>
+      (!mode || b.mode === mode) &&
+      (!running || !state || stateOf(b) === state) &&
+      matchesSearch(search, b.name, ...b.servers.flatMap((s) => [s.name, `${s.address}:${s.port}`]), ...backendRoutes(b, frontends, hosts)),
+  )
+  const pg = usePagination(filtered, pageSize, [search, mode, state])
+  const clearFilters = () => {
+    setSearch('')
+    setMode('')
+    setState('')
+  }
 
   if (backendsQ.isLoading) {
     return (
@@ -32,8 +62,6 @@ export default function BackendsTab({ onNew, onEdit, onExpose, onDuplicate }: {
       </div>
     )
   }
-  const backends = backendsQ.data ?? []
-
   if (backends.length === 0) {
     return (
       <>
@@ -57,8 +85,6 @@ export default function BackendsTab({ onNew, onEdit, onExpose, onDuplicate }: {
     )
   }
 
-  const running = !!stats?.running
-  const byId = new Map((stats?.backends ?? []).map((b) => [b.id, b]))
   const counts = summarize(backends, stats)
 
   return (
@@ -85,24 +111,43 @@ export default function BackendsTab({ onNew, onEdit, onExpose, onDuplicate }: {
         />
       </div>
 
-      <div className="lb-grid">
-        {backends.map((b) => (
-          <BackendCard
-            key={b.id}
-            backend={b}
-            stats={byId.get(b.id)}
-            running={running}
-            frontends={frontends}
-            hosts={hosts}
-            globalInterval={settings?.checkInterval}
-            canWrite={canWrite}
-            onEdit={() => onEdit(b.id)}
-            onExpose={() => onExpose(b.id)}
-            onDuplicate={() => onDuplicate(cloneBackend(b, backends.map((x) => x.name)))}
-            onDelete={() => setDeleting(b)}
-          />
-        ))}
-      </div>
+      <TableToolbar>
+        <SearchInput value={search} onChange={setSearch} placeholder="Search backends or servers" label="Search backends" />
+        <div className="lb-filter-select">
+          <Select inputSize="sm" value={mode} placeholder="All modes" options={MODES} onChange={setMode} aria-label="Mode" />
+        </div>
+        {running && (
+          <div className="lb-filter-select">
+            <Select inputSize="sm" value={state} placeholder="All states" options={STATES} onChange={setState} aria-label="State" />
+          </div>
+        )}
+      </TableToolbar>
+
+      {filtered.length === 0 ? (
+        <Card>
+          <NoMatches what="backends" onClear={clearFilters} />
+        </Card>
+      ) : (
+        <div className="lb-grid" ref={gridRef}>
+          {pg.rows.map((b) => (
+            <BackendCard
+              key={b.id}
+              backend={b}
+              stats={byId.get(b.id)}
+              running={running}
+              frontends={frontends}
+              hosts={hosts}
+              globalInterval={settings?.checkInterval}
+              canWrite={canWrite}
+              onEdit={() => onEdit(b.id)}
+              onExpose={() => onExpose(b.id)}
+              onDuplicate={() => onDuplicate(cloneBackend(b, backends.map((x) => x.name)))}
+              onDelete={() => setDeleting(b)}
+            />
+          ))}
+        </div>
+      )}
+      <ListPager page={pg.page} pageSize={pg.pageSize} total={pg.total} onPage={pg.setPage} label="backends" />
 
       <ConfirmDialog
         open={!!deleting}
@@ -129,6 +174,18 @@ export default function BackendsTab({ onNew, onEdit, onExpose, onDuplicate }: {
     </>
   )
 }
+
+const MODES = [
+  { value: 'http', label: 'HTTP' },
+  { value: 'tcp', label: 'TCP' },
+]
+
+const STATES = [
+  { value: 'up', label: 'Up' },
+  { value: 'degraded', label: 'Degraded' },
+  { value: 'down', label: 'Down' },
+  { value: 'pending', label: 'Not applied' },
+]
 
 function summarize(backends: Backend[], stats?: LBStats) {
   let servers = 0
