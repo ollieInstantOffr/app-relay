@@ -39,7 +39,7 @@ export function RelayCard({ info, isAdmin, busy, onUpdate }: { info: RelayUpdate
       sub={info.container ? <span className="mono">{info.container}</span> : undefined}
       actions={
         info.updateAvailable ? (
-          <Badge tone="info">{info.rebuildNeeded ? 'Rebuild needed' : 'Update available'}</Badge>
+          <Badge tone="info">Upgrade available</Badge>
         ) : checked && !info.checkError && !info.blocker ? (
           <Badge tone="ok">Up to date</Badge>
         ) : undefined
@@ -116,7 +116,7 @@ export function RelayCard({ info, isAdmin, busy, onUpdate }: { info: RelayUpdate
       {info.rebuildNeeded && (
         <div className="eng-callout">
           <Callout tone="info">
-            The checkout is at <span className="mono">{shortSha(info.checkoutHead)}</span> but Relay runs <span className="mono">{shortSha(info.commit)}</span>. Rebuild to run the checked-out version.
+            The checkout is at <span className="mono">{shortSha(info.checkoutHead)}</span> but Relay runs <span className="mono">{shortSha(info.commit)}</span>. Upgrade to run the checked-out version.
           </Callout>
         </div>
       )}
@@ -131,7 +131,7 @@ export function RelayCard({ info, isAdmin, busy, onUpdate }: { info: RelayUpdate
         <div className="spacer" />
         {isAdmin && info.canUpdate && (behind > 0 || info.rebuildNeeded) && (
           <Button variant="primary" icon="reload" disabled={busy} onClick={onUpdate}>
-            {behind > 0 ? `Update to ${shortSha(info.remoteHead)}` : 'Rebuild'}
+            {behind > 0 ? `Upgrade to ${shortSha(info.remoteHead)}` : 'Upgrade'}
           </Button>
         )}
       </div>
@@ -153,7 +153,7 @@ export function RelayUpdateDialog({ info, open, onClose }: { info: RelayUpdateIn
       qc.setQueryData(relayJobKey, job)
       onClose()
     } catch (err) {
-      toast.error(err, "Couldn't start the Relay update")
+      toast.error(err, "Couldn't start the Relay upgrade")
     } finally {
       setBusy(false)
     }
@@ -165,7 +165,7 @@ export function RelayUpdateDialog({ info, open, onClose }: { info: RelayUpdateIn
       onClose={onClose}
       width={540}
       icon="reload"
-      title={info.behind > 0 ? `Update Relay to ${target}?` : `Rebuild Relay from ${target}?`}
+      title={`Upgrade Relay to ${target}?`}
       description={
         <>
           <span className="mono">{shortSha(info.commit) || info.version}</span> → <span className="mono">{target}</span> · {info.branch}
@@ -175,7 +175,7 @@ export function RelayUpdateDialog({ info, open, onClose }: { info: RelayUpdateIn
         <>
           <Button onClick={onClose} disabled={busy}>Cancel</Button>
           <Button variant="primary" icon="reload" loading={busy} onClick={start}>
-            {info.behind > 0 ? 'Update Relay' : 'Rebuild'}
+            Upgrade
           </Button>
         </>
       }
@@ -193,7 +193,7 @@ export function RelayUpdateDialog({ info, open, onClose }: { info: RelayUpdateIn
         />
       </div>
       <div className="small muted" style={{ marginTop: 12, lineHeight: 1.5 }}>
-        A backup is created first. Proxy traffic keeps flowing while Relay rebuilds. The admin UI disconnects for a few seconds during the restart, and this page reconnects and reloads by itself.
+        A backup is created first. Proxy traffic keeps flowing while Relay builds the new version. The admin UI disconnects for a few seconds during the restart, and this page reconnects and reloads by itself.
       </div>
     </Dialog>
   )
@@ -210,10 +210,10 @@ export function RelayUpdateProgress({ job, onDismiss }: { job: RelayUpdateJob; o
   const running = job.status === 'running'
   const [showLog, setShowLog] = useState(false)
   const title = running
-    ? `Updating Relay${job.to ? ` to ${shortSha(job.to)}` : ''}`
+    ? `Upgrading Relay${job.to ? ` to ${shortSha(job.to)}` : ''}`
     : job.status === 'succeeded'
-      ? job.message || 'Relay updated'
-      : 'Relay update failed'
+      ? job.message || 'Relay upgraded'
+      : 'Relay upgrade failed'
   const steps = VISIBLE_STEPS.map((v) => ({ ...v, step: job.steps.find((s) => s.id === v.id) }))
   const rolledBack = job.steps.some((s) => s.id === 'rollback' && (s.status === 'running' || s.status === 'done' || s.status === 'failed'))
   return (
@@ -267,10 +267,10 @@ export function useRelayUpdateToasts(job: RelayUpdateJob | null | undefined) {
     if (prev !== 'running' || job.status === 'running') return
     qc.invalidateQueries({ queryKey: updatesKey })
     if (job.status === 'succeeded') {
-      toast.show({ kind: 'success', title: job.message || 'Relay updated', message: 'Reloading to load the new version…' })
+      toast.show({ kind: 'success', title: job.message || 'Relay upgraded', message: 'Reloading to load the new version…' })
       window.setTimeout(() => window.location.reload(), 2500)
     } else {
-      toast.show({ kind: 'error', title: 'Relay update failed', message: job.message })
+      toast.show({ kind: 'error', title: 'Relay upgrade failed', message: job.message })
     }
   }, [job, qc, toast])
 }

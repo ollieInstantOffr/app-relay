@@ -57,7 +57,7 @@ cd relay`} />
 
       <H2>Updating Relay</H2>
       <P>
-        The easiest way is <UI>Settings → Updates → Update</UI>: Relay pulls the newest commits, rebuilds and restarts itself. <See id="engines">How in-app updates work →</See> From a shell:
+        The easiest way is <UI>Settings → Updates → Upgrade</UI>: Relay pulls the newest commits, builds and restarts itself. <See id="engines">How in-app updates work →</See> From a shell:
       </P>
       <Example lang="bash" code={`git pull
 docker compose up -d --build

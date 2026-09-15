@@ -306,7 +306,7 @@ function Engines() {
           You also get an <C>engine_update_available</C> notification for each new version.
         </Step>
         <Step title="Update">
-          Click <UI>Update to abc1234</UI> on the Relay card. Optionally tick <UI>Also restart nginx and HAProxy</UI> so the engines pick up the new agent (a 1–3 second pause in traffic).
+          Click <UI>Upgrade to abc1234</UI> on the Relay card. Optionally tick <UI>Also restart nginx and HAProxy</UI> so the engines pick up the new agent (a 1–3 second pause in traffic).
         </Step>
         <Step title="Watch it run">
           The progress panel shows pull, build and restart. <UI>Show build output</UI> streams the docker build log. Building takes a few minutes the first time and is much faster afterwards thanks to the build cache.

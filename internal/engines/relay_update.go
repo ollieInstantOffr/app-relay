@@ -159,7 +159,7 @@ func (s *Service) followRelayHelper(ctx context.Context, cli *client.Client, id 
 			case "pulled":
 				d := shortSHA(r.PulledFrom) + " → " + shortSHA(r.PulledTo)
 				if r.PulledFrom == r.PulledTo {
-					d = "Already at " + shortSHA(r.PulledTo) + " · rebuilding"
+					d = "Already at " + shortSHA(r.PulledTo)
 				}
 				s.mu.Lock()
 				s.relayJob.To = r.PulledTo
@@ -313,10 +313,7 @@ func (s *Service) finalizeRelay(ctx context.Context, cli *client.Client, helperI
 			return
 		}
 		s.relayStep("verify", "done", "Running "+firstNonEmpty(shortSHA(running), s.app.Config.Version), 98, "")
-		msg := "Relay updated to " + shortSHA(to)
-		if job.From != "" && job.From == to {
-			msg = "Relay rebuilt from " + shortSHA(to)
-		}
+		msg := "Relay upgraded to " + shortSHA(to)
 		s.finishRelay(ctx, core.UpgradeSucceeded, msg+".", "")
 		s.app.Audit(ctx, core.AuditEntry{Actor: &sys, Action: "relay.update", Target: "relay", Detail: fmt.Sprintf("%s → %s", shortSHA(job.From), shortSHA(to)), Result: "ok"})
 		s.app.Activity(ctx, "relay.update", "ok", msg, "relay", fmt.Sprintf("%s → %s", firstNonEmpty(shortSHA(job.From), "unknown"), shortSHA(to)))
@@ -349,9 +346,9 @@ func (s *Service) finalizeRelay(ctx context.Context, cli *client.Client, helperI
 	}
 	s.finishRelay(ctx, core.UpgradeFailed, msg, errText)
 	s.app.Audit(ctx, core.AuditEntry{Actor: &sys, Action: "relay.update", Target: "relay", Detail: errText, Result: "failed"})
-	s.app.Activity(ctx, "relay.update", "warn", "Relay update failed", "relay", msg)
+	s.app.Activity(ctx, "relay.update", "warn", "Relay upgrade failed", "relay", msg)
 	if s.app.Notify != nil {
-		s.app.Notify.Notify(ctx, core.Notification{Event: model.EventReloadFailed, Level: "error", Title: "Relay update failed", Message: msg, URL: "/settings/engines"})
+		s.app.Notify.Notify(ctx, core.Notification{Event: model.EventReloadFailed, Level: "error", Title: "Relay upgrade failed", Message: msg, URL: "/settings/engines"})
 	}
 	go s.checkRelay(context.WithoutCancel(ctx))
 }
@@ -374,7 +371,7 @@ func (s *Service) resumeRelayUpdate(ctx context.Context) {
 	}
 	if _, err := cli.ContainerInspect(ctx, job.HelperID); err != nil {
 		if running := s.app.Config.Commit; running != "" && running == job.To {
-			s.finishRelay(ctx, core.UpgradeSucceeded, "Relay updated to "+shortSHA(running)+".", "")
+			s.finishRelay(ctx, core.UpgradeSucceeded, "Relay upgraded to "+shortSHA(running)+".", "")
 			return
 		}
 		s.finishRelay(ctx, core.UpgradeFailed, "Relay restarted during the update and the updater container is gone.", strings.TrimSpace(err.Error()))

@@ -45,7 +45,7 @@ export default function EnginesSettings() {
       if (next.checkError) toast.show({ kind: 'error', title: "Couldn't check for updates", message: next.checkError })
       else {
         const avail = [
-          ...(next.relay?.updateAvailable ? [`Relay ${shortSha(next.relay.remoteHead) || 'rebuild'}`] : []),
+          ...(next.relay?.updateAvailable ? [`Relay ${shortSha(next.relay.remoteHead) || 'upgrade'}`] : []),
           ...[next.nginx, next.haproxy].filter((e) => e.updateAvailable).map((e) => `${engineTitle[e.engine]} ${e.latest?.version}`),
         ]
         if (next.relay?.checkError) toast.show({ kind: 'warning', title: "Couldn't check for Relay updates", message: next.relay.checkError })
