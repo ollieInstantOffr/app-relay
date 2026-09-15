@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// engine abstracts the nginx / haproxy / edge specifics.
+// engine abstracts the nginx / haproxy / edge / balancer specifics.
 type engine interface {
 	mainFile() string
 	binary() string
@@ -29,7 +29,7 @@ type engine interface {
 	// alwaysOn engines should run whenever they are configured: a failed
 	// start restores and restarts the previous release, and /v1/stop does
 	// not persist (the container restart brings them back). HAProxy only
-	// runs while backends exist.
+	// and Relay Balancer only run while backends exist.
 	alwaysOn() bool
 	// proxy engines serve the HTTP/HTTPS ports and streams; only the one
 	// selected in /run/relay/proxy-engine starts on a fresh config root.
@@ -38,9 +38,10 @@ type engine interface {
 
 // engineFactories is the engine registry (agent --engine <name>).
 var engineFactories = map[string]func(a *Agent) engine{
-	EngineNginx:   func(a *Agent) engine { return &nginxEngine{a: a} },
-	EngineHAProxy: func(a *Agent) engine { return &haproxyEngine{a: a} },
-	EngineEdge:    func(a *Agent) engine { return &edgeEngine{a: a} },
+	EngineNginx:    func(a *Agent) engine { return &nginxEngine{a: a} },
+	EngineHAProxy:  func(a *Agent) engine { return &haproxyEngine{a: a} },
+	EngineEdge:     func(a *Agent) engine { return &edgeEngine{a: a} },
+	EngineBalancer: func(a *Agent) engine { return &balancerEngine{a: a} },
 }
 
 // EngineNames lists the registered engines, sorted.

@@ -5,8 +5,8 @@ import {
   ToggleCard, cx, useToast,
 } from '../../components/ui'
 import { api, errorMessage } from '../../lib/api'
-import { keys, useEntities, usePending, useProxyEngine, useSettings } from '../../lib/queries'
-import { proxyEngineLabel } from '../../lib/types'
+import { keys, useEntities, useLBEngine, usePending, useProxyEngine, useSettings } from '../../lib/queries'
+import { asLBEngine, lbCheckName, lbEngineLabel, proxyEngineLabel } from '../../lib/types'
 import { daysUntil, pluralize } from '../../lib/format'
 import type { Certificate, ForwardAuth, RateLimit } from '../../lib/types'
 import {
@@ -104,6 +104,9 @@ export default function ExposeWizard({ backendId, onClose }: { backendId: string
   const proxyEngine = preview?.engine ?? liveProxy.engine
   const proxyLabel = proxyEngineLabel[proxyEngine]
   const proxyCheck = proxyEngine === 'edge' ? 'relay edge check' : 'nginx -t'
+  const liveLB = useLBEngine()
+  const lbEngine = preview?.lbEngine ? asLBEngine(preview.lbEngine) : liveLB.engine
+  const lbLabel = lbEngineLabel[lbEngine]
   const scheme = tlsOn ? 'https' : 'http'
   const port = preview?.port ?? nextFreePort(frontends, haproxy?.exposePortStart ?? 10080)
   const list = lists.find((l) => l.id === req.access.accessListId)
@@ -246,7 +249,7 @@ export default function ExposeWizard({ backendId, onClose }: { backendId: string
       <div className="lb-path-arrow">↓</div>
       <div className="lb-path-node new">
         <div className="k">Load balancer <span className="lb-tag-new">new frontend</span></div>
-        <div className="v">haproxy · 127.0.0.1:{port}</div>
+        <div className="v">{lbLabel} · 127.0.0.1:{port}</div>
       </div>
       <div className="lb-path-arrow">↓</div>
       <div className="lb-path-node">
@@ -521,14 +524,14 @@ export default function ExposeWizard({ backendId, onClose }: { backendId: string
             {previewErr && <Callout tone="danger">{previewErr}</Callout>}
             <div className="lb-review">
               <ReviewCard title={`Reverse proxy · ${proxyLabel}`} tag="+1 host" label={proxyCheck} valid={preview?.nginxValid} output={preview?.nginxOutput} code={preview?.nginx} loading={!preview && !previewErr} />
-              <ReviewCard title="Load balancer" tag="+1 frontend" label="haproxy -c" valid={preview?.haproxyValid} output={preview?.haproxyOutput} code={preview?.haproxy} loading={!preview && !previewErr} />
+              <ReviewCard title={`Load balancer · ${lbLabel}`} tag="+1 frontend" label={lbCheckName[lbEngine]} valid={preview?.haproxyValid} output={preview?.haproxyOutput} code={preview?.haproxy} loading={!preview && !previewErr} />
             </div>
             <div>
               <div className="section-title" style={{ marginBottom: 10 }}>What happens when you apply</div>
               <ol className="lb-steps-list">
                 {[
                   mode === 'request' && `Request certificate (${challenge.toUpperCase()}${challenge === 'http-01' ? ', ~30 s' : ''})`,
-                  'Add HAProxy frontend, hot-reload (0 dropped connections)',
+                  `Add ${lbLabel} frontend, hot-reload (0 dropped connections)`,
                   'Add proxy host, reload, health-check for 10 s — auto-rollback on failure',
                   `Saved as config version v${(pending?.liveVersion ?? 0) + 1}`,
                 ]

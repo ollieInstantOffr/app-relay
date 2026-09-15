@@ -37,10 +37,12 @@ uncommitted changes.
 
 ### Where things live
 
-- `cmd/relay`: the `relay` binary (server, agents, Relay Edge, CLI)
+- `cmd/relay`: the `relay` binary (server, agents, Relay Edge, Relay Balancer, CLI)
 - `internal/model`: configuration entities; `internal/store`: SQLite
-- `internal/render/{nginx,edge,haproxy}`: config renderers; `internal/agent`: engine control protocol
+- `internal/render/{nginx,edge,haproxy,balancer}`: config renderers; `internal/agent`: engine control protocol
 - `internal/edge`: Relay Edge, the built-in reverse proxy (`relay edge run`)
+- `internal/balancer`: Relay Balancer, the built-in load balancer (`relay balancer run`)
+- `internal/lb`: load balancer stats, server states, Expose wizard; `internal/lb/lbengine`: HAProxy / Relay Balancer renderer registry
 - `internal/apply`: pending changes, versions, validation, reload, auto-rollback
 - `internal/publicdns`, `internal/mcp`, `internal/auth` …: one package per feature area
 - `web/`: React + TypeScript UI (built into `internal/webui/dist`, embedded in the binary)

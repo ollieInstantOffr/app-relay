@@ -55,6 +55,7 @@ type sampler struct {
 	acc        map[string]*minuteAcc
 	status     map[string]string // "backend/server" → status class
 	pid        string
+	engine     string // load balancer engine of the last sample
 	quietUntil time.Time
 	lastPrune  time.Time
 	queue      []store.LBMinute // completed minutes waiting to be written
@@ -82,11 +83,10 @@ func (s *sampler) run(ctx context.Context) {
 }
 
 func (s *sampler) tick(ctx context.Context) {
-	app := s.svc.app
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	now := time.Now()
-	out, err := app.HAProxy.Runtime(cctx, "show stat")
+	out, engine, err := s.svc.runtime(cctx, "show stat")
 	var ls *liveStats
 	if err == nil {
 		ls, err = parseLive(out, now)
@@ -99,15 +99,16 @@ func (s *sampler) tick(ctx context.Context) {
 		return
 	}
 	pid := ""
-	if info, ierr := app.HAProxy.Runtime(cctx, "show info"); ierr == nil {
+	if info, _, ierr := s.svc.runtime(cctx, "show info"); ierr == nil {
 		pid = parseInfo(info)["Pid"]
 	}
 
 	s.mu.Lock()
-	reloaded := pid != "" && pid != s.pid
+	// A new process (reload, or a switch to the other load balancer engine).
+	reloaded := pid != "" && (pid != s.pid || engine != s.engine)
 	firstSight := s.pid == ""
 	if reloaded {
-		s.pid = pid
+		s.pid, s.engine = pid, engine
 		if !firstSight {
 			s.quietUntil = now.Add(reloadQuiet)
 		}
@@ -118,7 +119,7 @@ func (s *sampler) tick(ctx context.Context) {
 	s.mu.Unlock()
 
 	if reloaded {
-		go s.svc.reapplyStates(context.WithoutCancel(ctx), "haproxy process started")
+		go s.svc.reapplyStates(context.WithoutCancel(ctx), engine+" process started")
 	}
 	for _, tr := range transitions {
 		s.svc.announce(ctx, tr)

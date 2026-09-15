@@ -4,7 +4,8 @@ import { Dot, Icon, Skeleton, Spinner } from '../../components/ui'
 import { extractLocationBlocks, type PreviewState } from './lib'
 
 /** Validator named in the preview status for the engine that rendered the preview. */
-export const previewCheck = (engine?: string) => (engine === 'edge' ? 'relay edge check' : engine === 'haproxy' ? 'haproxy -c' : 'nginx -t')
+export const previewCheck = (engine?: string) =>
+  engine === 'edge' ? 'relay edge check' : engine === 'haproxy' ? 'haproxy -c' : engine === 'balancer' ? 'relay balancer check' : 'nginx -t'
 export const previewTitle = (engine?: string) => (engine === 'edge' ? 'Relay Edge config (JSON)' : 'Generated nginx config')
 
 export function PreviewStatus({ state }: { state: PreviewState }) {

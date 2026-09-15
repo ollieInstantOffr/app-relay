@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/instantoffr/relay/internal/core"
 	"github.com/instantoffr/relay/internal/httpx"
 	"github.com/instantoffr/relay/internal/model"
 	"github.com/instantoffr/relay/internal/store"
@@ -127,15 +128,18 @@ func (h *handlers) configPorts(ctx context.Context) ([]PortEntry, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Frontends and the stats listener belong to the active load balancer
+	// engine: haproxy | balancer.
+	lbOwner := h.app.LBEngine(ctx)
 	for _, f := range frontends {
 		if host, port, ok := splitBind(f.Bind); ok {
-			out = append(out, PortEntry{Port: port, Proto: "tcp", Address: host, Owner: "haproxy", Kind: "frontend", Name: f.Name, ID: f.ID, Enabled: f.Enabled})
+			out = append(out, PortEntry{Port: port, Proto: "tcp", Address: host, Owner: lbOwner, Kind: "frontend", Name: f.Name, ID: f.ID, Enabled: f.Enabled})
 		}
 	}
 	hp, err := store.LoadSettings[model.HAProxySettings](ctx, h.app.Store, model.SettingsHAProxy)
 	if err == nil && hp.StatsEnabled {
 		if host, port, ok := splitBind(hp.StatsBind); ok {
-			out = append(out, PortEntry{Port: port, Proto: "tcp", Address: host, Owner: "haproxy", Kind: "stats", Name: "HAProxy stats", Enabled: len(frontends) > 0 || hasBackends(ctx, h.app.Store)})
+			out = append(out, PortEntry{Port: port, Proto: "tcp", Address: host, Owner: lbOwner, Kind: "stats", Name: core.ProxyEngineLabel(lbOwner) + " stats", Enabled: len(frontends) > 0 || hasBackends(ctx, h.app.Store)})
 		}
 	}
 	// Proxy ports and streams belong to whichever proxy engine is active.
@@ -227,6 +231,9 @@ func describeConflict(e PortEntry) string {
 		who = "stream " + e.Name
 	case "frontend":
 		who = "HAProxy frontend " + e.Name
+		if e.Owner == "balancer" {
+			who = "Relay Balancer frontend " + e.Name
+		}
 	case "http", "https":
 		who = "nginx " + e.Name
 	case "":

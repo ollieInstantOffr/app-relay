@@ -43,7 +43,8 @@ type fakeAgent struct {
 	calls       *[]string // shared call log ("edge:apply", "nginx:stop" …)
 	onApply     func()
 	onRollback  func()
-	down        bool // container stopped: connections are dropped
+	down        bool   // container stopped: connections are dropped
+	runtime     string // "show stat" output of the runtime API ("" = not supported)
 }
 
 func (f *fakeAgent) log(call string) {
@@ -54,6 +55,16 @@ func (f *fakeAgent) log(call string) {
 
 func (f *fakeAgent) serve(t *testing.T, sock string) {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/runtime", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		out := f.runtime
+		f.mu.Unlock()
+		if out == "" {
+			http.Error(w, "runtime API not supported", http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode(agent.RuntimeResponse{Output: out})
+	})
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -156,6 +167,7 @@ type testEnv struct {
 	nginx    *fakeAgent
 	haproxy  *fakeAgent
 	edge     *fakeAgent
+	balancer *fakeAgent
 	calls    []string
 	upstream *atomic.Int32
 	ctx      context.Context
@@ -181,10 +193,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	e.nginx = &fakeAgent{engine: "nginx", validateOK: true, running: true, hash: agent.BootstrapHash}
 	e.haproxy = &fakeAgent{engine: "haproxy", validateOK: true}
 	e.edge = &fakeAgent{engine: "edge", validateOK: true, hash: agent.BootstrapHash, calls: &e.calls}
+	e.balancer = &fakeAgent{engine: "balancer", validateOK: true, calls: &e.calls}
 	e.nginx.calls = &e.calls
 	e.nginx.serve(t, agent.SocketPath(runDir, "nginx"))
 	e.haproxy.serve(t, agent.SocketPath(runDir, "haproxy"))
 	e.edge.serve(t, agent.SocketPath(runDir, "edge"))
+	e.balancer.serve(t, agent.SocketPath(runDir, "balancer"))
 
 	// The "nginx" the health check talks to.
 	e.upstream = &atomic.Int32{}

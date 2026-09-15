@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Navigate, useParams, useSearchParams } from 'react-router-dom'
 import { TopBar } from '../../components/shell/TopBar'
 import { Button, Status } from '../../components/ui'
-import { useEngine, useEntities, useRole, useSettings } from '../../lib/queries'
+import { useEntities, useLBEngine, useRole, useSettings } from '../../lib/queries'
 import { agoShort } from '../../lib/format'
 import type { Backend, Frontend } from '../../lib/types'
 import BackendsTab from './BackendsTab'
@@ -25,7 +25,8 @@ export default function LoadBalancerPage() {
   const backends = useEntities('backends').data
   const frontends = useEntities('frontends').data
   const settings = useSettings('haproxy').data
-  const engine = useEngine('haproxy')
+  const lb = useLBEngine()
+  const engine = lb.state
   const [showConfig, setShowConfig] = useState(false)
   const [dupBackend, setDupBackend] = useState<Backend | null>(null)
   const [dupFrontend, setDupFrontend] = useState<Frontend | null>(null)
@@ -85,9 +86,9 @@ export default function LoadBalancerPage() {
     <Status tone={!engine.reachable ? 'muted' : engine.running ? 'ok' : 'danger'}>
       {!engine.reachable
         ? engine.container === 'stopped'
-          ? 'haproxy · stopped'
-          : 'haproxy · agent unreachable'
-        : `haproxy${engine.version ? ' ' + engine.version : ''} · ${engine.running ? 'running' : 'stopped'}${
+          ? `${lb.label} · stopped`
+          : `${lb.label} · agent unreachable`
+        : `${lb.label}${engine.version ? ' ' + engine.version : ''} · ${engine.running ? 'running' : 'stopped'}${
             engine.lastReloadAt ? ` · reloaded ${agoShort(engine.lastReloadAt) === 'now' ? 'just now' : agoShort(engine.lastReloadAt) + ' ago'}` : ''
           }`}
     </Status>
@@ -105,7 +106,7 @@ export default function LoadBalancerPage() {
         meta={meta}
         actions={
           <>
-            <Button onClick={() => setShowConfig(true)}>View haproxy.cfg</Button>
+            <Button onClick={() => setShowConfig(true)}>View config</Button>
             {canWrite &&
               (onFrontends ? (
                 <Button variant="primary" icon="plus" onClick={() => update((p) => p.set('new', '1'))}>

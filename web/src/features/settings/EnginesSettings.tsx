@@ -1,6 +1,6 @@
 // Settings → Updates (slice engine): Relay self-update from its git checkout,
 // version check + in-UI upgrade of the official nginx / HAProxy images. Relay Edge
-// is part of the relay binary and upgrades with Relay.
+// and Relay Balancer are part of the relay binary and upgrade with Relay.
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
@@ -73,7 +73,7 @@ export default function EnginesSettings() {
   const header = (
     <SectionHeader
       title="Updates"
-      description="Update Relay (including Relay Edge) from its GitHub repository, and upgrade nginx and HAProxy to new official Docker images."
+      description="Update Relay (including Relay Edge and Relay Balancer) from its GitHub repository, and upgrade nginx and HAProxy to new official Docker images."
       actions={
         isAdmin ? (
           <Button icon="reload" loading={checking} onClick={check}>
@@ -127,6 +127,12 @@ export default function EnginesSettings() {
           Relay Edge (beta) is the proxy engine. It ships with Relay and updates with it; restart the engines when updating to run the new version right away.
         </div>
       )}
+      {u.haproxy.inactive && (
+        <div className="small faint row gap-6">
+          <Icon name="info" size={12} />
+          Relay Balancer (beta) is the load balancer engine. It ships with Relay and updates with it; restart the engines when updating to run the new version right away.
+        </div>
+      )}
 
       {showJob && job && <UpgradeProgress job={job} onDismiss={() => setDismissedJob(job.id)} />}
 
@@ -174,8 +180,11 @@ export default function EnginesSettings() {
   )
 }
 
-/** nginx while Relay Edge is the proxy engine: kept installed, not upgraded or checked for problems. */
+/** nginx while Relay Edge is the proxy engine, or HAProxy while Relay Balancer is the load balancer engine: kept installed, not upgraded or checked for problems. */
 function InactiveEngineCard({ info, running }: { info: EngineUpdateInfo; running: string }) {
+  const lb = info.engine === 'haproxy'
+  const replacement = lb ? 'Relay Balancer (beta) is the load balancer engine' : 'Relay Edge (beta) is the proxy engine'
+  const page = lb ? { to: '/settings/lb-engine', label: 'Settings → Load balancer engine' } : { to: '/settings/proxy', label: 'Settings → Proxy engine' }
   return (
     <Card
       className="eng-card inactive"
@@ -190,8 +199,8 @@ function InactiveEngineCard({ info, running }: { info: EngineUpdateInfo; running
     >
       <div className="eng-callout" style={{ opacity: 0.75 }}>
         <div className="small muted">
-          Not in use — Relay Edge (beta) is the proxy engine. Switch back to nginx in Settings → Proxy engine at any time. {running ? <>Installed: <span className="mono">{running}</span>{info.image ? <> · <span className="mono">{info.image}</span></> : null}. </> : null}
-          Upgrades are available again after switching back to nginx in <Link to="/settings/proxy">Settings → Proxy engine</Link>.
+          Not in use — {replacement}. {running ? <>Installed: <span className="mono">{running}</span>{info.image ? <> · <span className="mono">{info.image}</span></> : null}. </> : null}
+          Upgrades are available again after switching back to {engineTitle[info.engine]} in <Link to={page.to}>{page.label}</Link>.
         </div>
       </div>
     </Card>

@@ -54,7 +54,7 @@ type deleteHostArgs struct {
 
 type drainServerArgs struct {
 	Backend string `json:"backend" jsonschema:"Backend name or id, e.g. minio"`
-	Server  string `json:"server" jsonschema:"Server address (10.0.0.92), address:port (10.0.0.92:9000), HAProxy server name or id"`
+	Server  string `json:"server" jsonschema:"Server address (10.0.0.92), address:port (10.0.0.92:9000), load balancer server name or id"`
 	State   string `json:"state,omitempty" jsonschema:"drain (default) stops new sessions and lets existing ones finish; maint takes the server out entirely; ready puts it back into rotation"`
 	Reason  string `json:"reason,omitempty" jsonschema:"Why; shown to the person approving it"`
 }
@@ -84,13 +84,13 @@ func (s *Service) registerWriteTools() {
 		Description: "Delete a proxy host by id or domain. Saved to pending changes; the host keeps serving until apply_changes runs. Relay's own admin host cannot be deleted. May wait for human approval."},
 		nil, true, s.planDeleteHost)
 	addWrite(s, toolInfo{Name: "drain_server", Title: "Drain a backend server",
-		Description: "Change a load balancer server's admin state at runtime: drain (finish existing sessions, accept no new ones), maint (remove) or ready (back in rotation). Takes effect immediately through HAProxy's runtime API and is remembered on the backend — no apply needed. May wait for human approval."},
+		Description: "Change a load balancer server's admin state at runtime: drain (finish existing sessions, accept no new ones), maint (remove) or ready (back in rotation). Takes effect immediately through the load balancer's runtime API (HAProxy or Relay Balancer) and is remembered on the backend — no apply needed. May wait for human approval."},
 		map[string][]any{"state": {model.ServerStateDrain, model.ServerStateMaint, model.ServerStateReady}}, true, s.planDrainServer)
 	addWrite(s, toolInfo{Name: "request_certificate", Title: "Request a TLS certificate",
 		Description: "Request a Let's Encrypt certificate for one or more domains (wildcards need dns-01 and a configured DNS provider). Issuance runs in the background; check list_certificates for the result, then attach it with update_host. May wait for human approval."},
 		map[string][]any{"challenge": {model.ChallengeHTTP01, model.ChallengeDNS01}}, false, s.planRequestCertificate)
 	addWrite(s, toolInfo{Name: "apply_changes", Title: "Apply pending changes",
-		Description: "Make all pending configuration changes live: render the reverse proxy (nginx or Relay Edge) and HAProxy config, validate, reload, health-check for 10 s and roll back automatically on failure. Returns the new config version. Affects every pending change, not only yours — check get_pending_changes first. May wait for human approval."},
+		Description: "Make all pending configuration changes live: render the reverse proxy (nginx or Relay Edge) and load balancer (HAProxy or Relay Balancer) config, validate, reload, health-check for 10 s and roll back automatically on failure. Returns the new config version. Affects every pending change, not only yours — check get_pending_changes first. May wait for human approval."},
 		nil, true, s.planApply)
 	s.registerEntityTools()
 	s.registerExtWriteTools()

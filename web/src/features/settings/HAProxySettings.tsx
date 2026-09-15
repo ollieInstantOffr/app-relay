@@ -1,16 +1,20 @@
-// Settings → HAProxy engine (design 16a). Owner: slice lb.
+// Settings → Load balancer (design 16a): shared settings for both load balancer
+// engines (HAProxy and Relay Balancer). Engine actions target the active engine.
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Button, Card, ConfirmDialog, Dot, Field, Input, Select, SectionHeader, Skeleton, Toggle, ToggleRow, useToast } from '../../components/ui'
+import { Badge, Button, Card, ConfirmDialog, Dot, Field, Input, Select, SectionHeader, Skeleton, Toggle, ToggleRow, useToast } from '../../components/ui'
 import { api } from '../../lib/api'
-import { keys, useEngine, useEntities, useRole, useSaveSettings, useSettings } from '../../lib/queries'
+import { keys, useEntities, useLBEngine, useRole, useSaveSettings, useSettings } from '../../lib/queries'
 import { ago } from '../../lib/format'
 import { Link } from 'react-router-dom'
 import { useEngineUpdates } from './enginesApi'
-import type { HAProxySettings as Settings } from '../../lib/types'
+import { lbCheckName, lbConfigFile, type HAProxySettings as Settings } from '../../lib/types'
 import ConfigDrawer from '../loadbalancer/ConfigDrawer'
-import { applyNowAction, fieldErrors, useHAProxyConfig, type ValidationResult } from '../loadbalancer/lbApi'
+import { applyNowAction, checkedByEngine, fieldErrors, useLBConfig, type ValidationResult } from '../loadbalancer/lbApi'
 import '../loadbalancer/loadbalancer.css'
+
+const TITLE = 'Load balancer'
+const DESCRIPTION = 'Global defaults for backends and frontends, shared by both load balancer engines. Per-backend settings override these.'
 
 function isLTS(version: string) {
   const m = version.match(/^(\d+)\.(\d+)/)
@@ -20,10 +24,13 @@ function isLTS(version: string) {
 export default function HAProxySettings() {
   const { data, isLoading } = useSettings('haproxy')
   const save = useSaveSettings('haproxy')
-  const engine = useEngine('haproxy')
+  const lb = useLBEngine()
+  const engine = lb.state
+  const name = lb.engine
+  const label = lb.label
   const haproxyUpdate = useEngineUpdates().data?.haproxy
   const lists = useEntities('access-lists').data ?? []
-  const cfg = useHAProxyConfig(true).data
+  const cfg = useLBConfig(true).data
   const { isAdmin, canWrite } = useRole()
   const toast = useToast()
   const qc = useQueryClient()
@@ -35,6 +42,7 @@ export default function HAProxySettings() {
   const [toggling, setToggling] = useState(false)
   const [confirmStop, setConfirmStop] = useState(false)
   const [showCfg, setShowCfg] = useState(false)
+  const configFile = lbConfigFile[cfg?.engine ?? name]
 
   useEffect(() => {
     if (data && !draft) setDraft(data)
@@ -43,17 +51,17 @@ export default function HAProxySettings() {
   const validate = async (quiet: boolean) => {
     setValidating(true)
     try {
-      const v = await api.post<ValidationResult>('/api/haproxy/validate')
+      const v = await api.post<ValidationResult>('/api/lb/validate')
       setValidation(v)
       if (!quiet) {
         if (v.valid) {
           toast.show({
             kind: 'success',
-            title: 'haproxy.cfg is valid',
-            message: `${v.checked === 'haproxy' ? `haproxy -c passed in ${v.durationMs} ms` : 'Checked by Relay · HAProxy agent offline'} · ${v.lines} lines`,
+            title: `${configFile} is valid`,
+            message: `${checkedByEngine(v.checked) ? `${lbCheckName[v.checked]} passed in ${v.durationMs} ms` : `Checked by Relay · ${label} agent offline`} · ${v.lines} lines`,
           })
         } else {
-          toast.show({ kind: 'error', title: 'haproxy.cfg is invalid', message: v.output })
+          toast.show({ kind: 'error', title: `${configFile} is invalid`, message: v.output })
         }
       }
     } catch (err) {
@@ -66,12 +74,12 @@ export default function HAProxySettings() {
   useEffect(() => {
     if (canWrite) validate(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canWrite])
+  }, [canWrite, name])
 
   if (isLoading || !draft) {
     return (
       <>
-        <SectionHeader title="HAProxy engine" description="Global defaults for the load balancer. Per-backend settings override these." />
+        <SectionHeader title={TITLE} description={DESCRIPTION} />
         <Skeleton height={320} />
       </>
     )
@@ -86,10 +94,10 @@ export default function HAProxySettings() {
   const engineAction = async (action: 'start' | 'stop') => {
     setToggling(true)
     try {
-      await api.post(`/api/engines/haproxy/${action}`)
-      toast.success(action === 'start' ? 'HAProxy started' : 'HAProxy stopped')
+      await api.post(`/api/engines/${name}/${action}`)
+      toast.success(action === 'start' ? `${label} started` : `${label} stopped`)
     } catch (e) {
-      toast.error(e, `Could not ${action} HAProxy`)
+      toast.error(e, `Could not ${action} ${label}`)
     } finally {
       setToggling(false)
       qc.invalidateQueries({ queryKey: keys.engines })
@@ -99,8 +107,8 @@ export default function HAProxySettings() {
   const reload = async () => {
     setReloading(true)
     try {
-      await api.post('/api/engines/haproxy/reload')
-      toast.show({ kind: 'success', title: 'HAProxy reloaded', message: 'The live config was reloaded. Pending changes still need Apply.' })
+      await api.post(`/api/engines/${name}/reload`)
+      toast.show({ kind: 'success', title: `${label} reloaded`, message: 'The live config was reloaded. Pending changes still need Apply.' })
       qc.invalidateQueries({ queryKey: keys.engines })
     } catch (e) {
       toast.error(e, 'Reload failed')
@@ -115,7 +123,7 @@ export default function HAProxySettings() {
       setDraft(saved)
       setErrors({})
       qc.invalidateQueries({ queryKey: ['haproxy'] })
-      toast.show({ kind: 'success', title: 'HAProxy settings saved', message: 'Added to pending changes.', actions: [applyNowAction] })
+      toast.show({ kind: 'success', title: 'Load balancer settings saved', message: 'Added to pending changes.', actions: [applyNowAction] })
     } catch (e) {
       const f = fieldErrors(e)
       if (Object.keys(f).length) setErrors(f)
@@ -124,10 +132,10 @@ export default function HAProxySettings() {
   }
 
   const lines = validation?.lines ?? cfg?.lines
-  const configTone = validation ? (validation.valid ? (validation.checked === 'haproxy' ? 'ok' : 'muted') : 'danger') : 'muted'
+  const configTone = validation ? (validation.valid ? (checkedByEngine(validation.checked) ? 'ok' : 'muted') : 'danger') : 'muted'
   const configText = validation
     ? validation.valid
-      ? `${validation.checked === 'haproxy' ? 'valid' : 'not checked'} · ${lines} lines`
+      ? `${checkedByEngine(validation.checked) ? 'valid' : 'not checked'} · ${lines} lines`
       : 'invalid'
     : lines !== undefined
       ? `${lines} lines`
@@ -135,31 +143,40 @@ export default function HAProxySettings() {
   const running = !!engine?.running
   const containerStopped = engine?.container === 'stopped'
   const statsList = lists.find((l) => l.id === draft.statsAccessListId)
+  const showUpdate = name === 'haproxy' && !haproxyUpdate?.inactive && haproxyUpdate?.updateAvailable && haproxyUpdate.latest
 
   return (
     <>
       <div className="row-top gap-16">
         <div className="grow">
-          <div className="h1">HAProxy engine</div>
-          <div className="muted" style={{ marginTop: 4 }}>Global defaults for the load balancer. Per-backend settings override these.</div>
+          <div className="h1">{TITLE}</div>
+          <div className="muted" style={{ marginTop: 4 }}>{DESCRIPTION}</div>
         </div>
         <div
           className="row gap-10 medium"
-          title={containerStopped ? 'The HAProxy container is stopped. Turning HAProxy on starts it.' : !engine?.reachable ? engine?.error || 'HAProxy agent not reachable' : undefined}
+          title={containerStopped ? `The ${label} container is stopped. Turning ${label} on starts it.` : !engine?.reachable ? engine?.error || `${label} agent not reachable` : undefined}
         >
           {engine?.reachable || containerStopped ? (running ? 'Running' : 'Stopped') : 'Unreachable'}
-          <Toggle checked={running} disabled={!isAdmin || (!engine?.reachable && !containerStopped) || toggling} onChange={(v) => (v ? engineAction('start') : setConfirmStop(true))} label="Run HAProxy" />
+          <Toggle checked={running} disabled={!isAdmin || (!engine?.reachable && !containerStopped) || toggling} onChange={(v) => (v ? engineAction('start') : setConfirmStop(true))} label={`Run ${label}`} />
         </div>
       </div>
 
-      <div className="grid-3">
+      <div className="grid-4">
+        <div className="lb-mini">
+          <div className="k">Engine</div>
+          <div className="v" style={{ fontFamily: 'var(--font-sans)' }}>
+            {label}
+            {name === 'balancer' && <Badge tone="info">beta</Badge>}
+            <Link to="/settings/lb-engine" className="small">Change</Link>
+          </div>
+        </div>
         <div className="lb-mini">
           <div className="k">Version</div>
           <div className="v">
-            {engine?.version ? `${engine.version}${isLTS(engine.version) ? ' · LTS' : ''}` : '—'}
-            {haproxyUpdate?.updateAvailable && haproxyUpdate.latest && (
+            {engine?.version ? `${engine.version}${name === 'haproxy' && isLTS(engine.version) ? ' · LTS' : ''}` : '—'}
+            {showUpdate && (
               <Link to="/settings/engines" className="badge info" style={{ fontFamily: 'var(--font-sans)' }} title="Upgrade from Settings → Updates">
-                {haproxyUpdate.latest.version} available
+                {haproxyUpdate.latest!.version} available
               </Link>
             )}
           </div>
@@ -206,8 +223,12 @@ export default function HAProxySettings() {
 
       <Card title="Reload & observability">
         <ToggleRow
-          title="Seamless reloads"
-          description="Hand off listening sockets to the new process · no dropped connections"
+          title={<span className="row gap-6">Seamless reloads <Badge>HAProxy only</Badge></span>}
+          description={
+            name === 'balancer'
+              ? 'Relay Balancer always hands over connections on reload · this setting applies when HAProxy is the engine'
+              : 'Hand off listening sockets to the new process · no dropped connections'
+          }
           checked={draft.seamlessReload}
           disabled={readOnly}
           onChange={(v) => set({ seamlessReload: v })}
@@ -216,7 +237,7 @@ export default function HAProxySettings() {
           title="Stats endpoint"
           description={
             <>
-              Feeds the Prometheus scrape and HAProxy's own stats page · {statsList ? <>protected by <span className="mono">{statsList.name}</span></> : 'no access list'}
+              Feeds the Prometheus scrape and {label}'s stats page · {statsList ? <>protected by <span className="mono">{statsList.name}</span></> : 'no access list'}
             </>
           }
         >
@@ -259,7 +280,7 @@ export default function HAProxySettings() {
       </Card>
 
       <div className="row gap-10">
-        <Button size="md" onClick={() => setShowCfg(true)}>View full haproxy.cfg</Button>
+        <Button size="md" onClick={() => setShowCfg(true)}>View config</Button>
         {canWrite && <Button size="md" loading={validating} onClick={() => validate(false)}>Validate</Button>}
         {canWrite && <Button size="md" loading={reloading} disabled={!engine?.reachable || !running} onClick={reload}>Reload now</Button>}
         <span className="spacer" />
@@ -275,9 +296,9 @@ export default function HAProxySettings() {
         open={confirmStop}
         onClose={() => setConfirmStop(false)}
         danger
-        title="Stop HAProxy?"
+        title={`Stop ${label}?`}
         message="All load-balanced traffic, including backends exposed through the reverse proxy, stops until you start it again."
-        confirmLabel="Stop HAProxy"
+        confirmLabel={`Stop ${label}`}
         onConfirm={() => engineAction('stop')}
       />
     </>

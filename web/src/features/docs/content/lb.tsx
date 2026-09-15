@@ -14,14 +14,20 @@ function LoadBalancer() {
           ['Non-HTTP traffic across several servers (databases, MQTT)', 'A TCP backend plus a frontend or stream'],
         ]}
       />
-      <P>HAProxy starts automatically when you create your first backend.</P>
+      <P>The load balancer starts automatically when you create your first backend.</P>
+
+      <H2>Load balancer engine</H2>
+      <P>
+        Backends and frontends run on <strong>HAProxy</strong> by default. You can switch to <See id="relay-balancer">Relay Balancer</See> (beta), Relay’s own engine,
+        in <UI>Settings → Load balancer engine</UI>. Everything on these pages works with both; the examples below show HAProxy’s config.
+      </P>
 
       <H2>The building blocks</H2>
       <Defs
         items={[
           ['Backend', <>A named pool of servers running the same app, e.g. <C>api</C>.</>],
           ['Server', <>One instance: address, port, weight and role (active or backup), e.g. <C>10.0.0.11:3000</C>.</>],
-          ['Health check', 'How HAProxy decides a server is up. Failing servers stop receiving traffic.'],
+          ['Health check', 'How the load balancer decides a server is up. Failing servers stop receiving traffic.'],
           ['Frontend', <>A listening port with rules that choose a backend. <See id="frontends">Frontends →</See></>],
           ['Expose', <>Puts a backend on a public domain through nginx, with HTTPS. <See id="expose">Expose →</See></>],
         ]}
@@ -44,12 +50,12 @@ Expected status   200
 Interval          5 s
 Rise / Fall       2 / 3    (2 passes → UP, 3 failures → DOWN)`} />
         </Step>
-        <Step title="Save and apply">HAProxy reloads seamlessly: existing connections aren’t dropped.</Step>
+        <Step title="Save and apply">The load balancer reloads seamlessly: existing connections aren’t dropped.</Step>
         <Step title="Put it online"><See id="expose">Expose</See> the backend on <C>api.example.com</C>.</Step>
       </Steps>
       <Example
         lang="haproxy"
-        title="Generated haproxy.cfg (simplified; “View haproxy.cfg” shows the real file)"
+        title="Generated haproxy.cfg (simplified; “View config” shows the real file)"
         code={`backend api
     mode http
     balance roundrobin
@@ -91,11 +97,11 @@ Rise / Fall       2 / 3    (2 passes → UP, 3 failures → DOWN)`} />
       <Table
         head={['Option', 'What it does']}
         rows={[
-          ['Sticky sessions', 'Keep a visitor on the same server: HAProxy inserts a cookie, prefixes your app’s cookie, or uses a source IP stick table.'],
+          ['Sticky sessions', 'Keep a visitor on the same server: the load balancer inserts a cookie, prefixes your app’s cookie, or uses a source IP stick table.'],
           ['Forward client IP', <>Adds <C>X-Forwarded-For</C> so the app sees the visitor’s IP.</>],
           ['TLS re-encrypt', 'Connects to servers over HTTPS. Turn off Verify server certificates for self-signed ones.'],
           ['Send PROXY protocol', 'Passes client IPs to TCP servers that support it.'],
-          ['Timeouts', 'Connect, server and queue timeouts; empty values use Settings → HAProxy engine.'],
+          ['Timeouts', 'Connect, server and queue timeouts; empty values use Settings → Load balancer.'],
           ['Retries', 'Connection retries; with redispatch a retry may go to another server.'],
         ]}
       />
@@ -109,7 +115,7 @@ function Frontends() {
     <>
       <H2>What a frontend is</H2>
       <P>
-        A frontend is a port HAProxy listens on (the <strong>bind</strong>, for example <C>:8443</C> or <C>127.0.0.1:10081</C>) plus <strong>rules</strong> that decide
+        A frontend is a port the load balancer listens on (the <strong>bind</strong>, for example <C>:8443</C> or <C>127.0.0.1:10081</C>) plus <strong>rules</strong> that decide
         which backend gets each request.
       </P>
       <Note title="Most people don’t need to create frontends by hand">
@@ -130,7 +136,7 @@ function Frontends() {
           ['host', 'The Host header (HTTP)', 'api.example.com'],
           ['path_beg', 'Path begins with', '/static'],
           ['path', 'Exact path', '/healthz'],
-          ['path_reg', 'Path regular expression', '^/v[0-9]+/'],
+          ['path_reg', 'Path regular expression (RE2 syntax on Relay Balancer)', '^/v[0-9]+/'],
           ['header', 'A request header value', 'X-Tenant: acme'],
           ['src', 'Client IP or range', '10.0.0.0/8'],
           ['sni', 'TLS server name (TCP mode, no decryption)', 'db.example.com'],
@@ -158,7 +164,7 @@ function Frontends() {
           ['Mode', 'HTTP (can read hosts, paths, headers) or TCP (raw, can route by SNI and client IP).'],
           ['Accept PROXY protocol', 'When the traffic comes from a proxy that sends it, such as an nginx stream with PROXY protocol on.'],
           ['Compression', 'gzip text and JSON responses.'],
-          ['Enabled', 'Disabled frontends are left out of haproxy.cfg.'],
+          ['Enabled', 'Disabled frontends are left out of the load balancer config.'],
         ]}
       />
     </>
@@ -170,18 +176,18 @@ function Expose() {
     <>
       <H2>What “Expose online” does</H2>
       <P>
-        Exposing a backend gives it a public domain with HTTPS and optional protection, in one wizard. Relay creates an nginx host and a local
-        HAProxy frontend and wires them together:
+        Exposing a backend gives it a public domain with HTTPS and optional protection, in one wizard. Relay creates a reverse proxy host and a local
+        load balancer frontend and wires them together:
       </P>
       <Flow
         steps={[
           { label: 'Internet', sub: 'https://api.example.com' },
           { label: 'nginx', sub: ':443 · TLS · access' },
-          { label: 'HAProxy', sub: '127.0.0.1:10080' },
+          { label: 'Load balancer', sub: '127.0.0.1:10080' },
           { label: 'backend api', sub: 'api-1 · api-2 · api-3' },
         ]}
       />
-      <P>Local frontends take the first free port from <C>10080</C> upwards. Change the starting port in <UI>Settings → HAProxy engine</UI>.</P>
+      <P>Local frontends take the first free port from <C>10080</C> upwards. Change the starting port in <UI>Settings → Load balancer</UI>.</P>
 
       <H2>Walkthrough</H2>
       <Steps>
@@ -189,7 +195,7 @@ function Expose() {
           <UI>Load balancer → Backends</UI>, open the backend’s <UI>⋯</UI> menu and choose <UI>Expose online</UI>.
         </Step>
         <Step title="Domain and route">
-          Enter <C>api.example.com</C>. Choose <UI>Reverse proxy</UI> (recommended: nginx handles HTTPS and security) or <UI>Load balancer</UI> (HAProxy binds the port itself).
+          Enter <C>api.example.com</C>. Choose <UI>Reverse proxy</UI> (recommended: the reverse proxy handles HTTPS and security) or <UI>Load balancer</UI> (the load balancer binds the port itself).
         </Step>
         <Step title="Who can reach it">
           <List>
@@ -205,7 +211,7 @@ function Expose() {
           Use an existing certificate (a wildcard is picked automatically if one matches), request a new one, or choose none (HTTP only; not recommended for anything public).
         </Step>
         <Step title="Review">
-          The wizard shows the nginx and HAProxy config it will create and validates both (<C>nginx -t</C>, <C>haproxy -c</C>). Confirm, then apply.
+          The wizard shows the reverse proxy and load balancer config it will create and validates both (for example <C>nginx -t</C> and <C>haproxy -c</C>, or <C>relay balancer check</C> on Relay Balancer). Confirm, then apply.
         </Step>
       </Steps>
       <Warn>Only HTTP backends can sit behind the reverse proxy. For TCP backends, create a <See id="frontends">frontend</See> or a <See id="streams">stream</See> that points at the backend.</Warn>
@@ -232,7 +238,7 @@ function Stats() {
           ['maint', 'Taken out of rotation completely.'],
         ]}
       />
-      <P>State changes take effect immediately through HAProxy’s runtime API. No apply is needed, and Relay remembers the state across reloads.</P>
+      <P>State changes take effect immediately through the engine’s runtime API (HAProxy’s, or Relay Balancer’s compatible one). No apply is needed, and Relay remembers the state across reloads.</P>
 
       <H2>Example: zero-downtime deploy</H2>
       <Steps>
@@ -243,9 +249,9 @@ function Stats() {
       </Steps>
       <Tip>An AI assistant connected over <See id="mcp">MCP</See> can do this for you with the <C>drain_server</C> tool.</Tip>
 
-      <H2>Prometheus & HAProxy stats page</H2>
+      <H2>Prometheus & stats page</H2>
       <P>
-        <UI>Settings → HAProxy engine</UI> enables the stats endpoint (default <C>127.0.0.1:8404</C>) and Prometheus metrics at <C>/metrics</C>. Protect it with a
+        <UI>Settings → Load balancer</UI> enables the stats endpoint (default <C>127.0.0.1:8404</C>) and Prometheus metrics at <C>/metrics</C>. Protect it with a
         stats access list if you bind it to a LAN address.
       </P>
       <Example
@@ -259,7 +265,7 @@ function Stats() {
       />
 
       <H3>Global defaults</H3>
-      <P>The same settings page holds default timeouts, max connections, health check interval and rise/fall for every backend, plus seamless reloads.</P>
+      <P>The same settings page holds default timeouts, max connections, health check interval and rise/fall for every backend, plus seamless reloads (HAProxy only; Relay Balancer always reloads seamlessly).</P>
       <Note>A server listed as <C>DOWN</C> while the app works? Check the health check path and expected status, and that the app accepts connections from Relay’s host.</Note>
     </>
   )
@@ -272,7 +278,7 @@ export const lbSections: DocSection[] = [
     title: 'Backends & servers',
     icon: 'load-balancer',
     summary: 'Spread traffic across several instances of an app with health checks, weights, backups and sticky sessions.',
-    keywords: 'haproxy backend server pool roundrobin leastconn source uri health check sticky session cookie weight backup tls re-encrypt',
+    keywords: 'haproxy relay balancer engine backend server pool roundrobin leastconn source uri health check sticky session cookie weight backup tls re-encrypt',
     app: [{ to: '/load-balancer/backends?new=1', label: 'New backend' }],
     Body: LoadBalancer,
   },
@@ -302,7 +308,7 @@ export const lbSections: DocSection[] = [
     icon: 'stats',
     summary: 'Watch servers live, drain them for zero-downtime deploys, and scrape metrics with Prometheus.',
     keywords: 'stats drain maintenance maint ready zero downtime deploy rolling prometheus metrics 8404 runtime api',
-    app: [{ to: '/load-balancer/stats', label: 'Open stats' }, { to: '/settings/haproxy', label: 'HAProxy settings' }],
+    app: [{ to: '/load-balancer/stats', label: 'Open stats' }, { to: '/settings/load-balancer', label: 'Load balancer settings' }],
     Body: Stats,
   },
 ]

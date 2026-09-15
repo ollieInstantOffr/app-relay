@@ -26,17 +26,19 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// fakeEdge also plays `relay balancer run|check` (same protocol, balancer.json).
 func fakeEdge(args []string) int {
-	if len(args) >= 3 && args[0] == "edge" && args[1] == "check" {
-		b, err := os.ReadFile(filepath.Join(args[2], "edge.json"))
+	if len(args) >= 3 && (args[0] == "edge" || args[0] == "balancer") && args[1] == "check" {
+		name := args[0] + ".json"
+		b, err := os.ReadFile(filepath.Join(args[2], name))
 		if err != nil || strings.Contains(string(b), "invalid") {
-			fmt.Println("[emerg] edge.json: invalid configuration")
+			fmt.Println("[emerg] " + name + ": invalid configuration")
 			return 1
 		}
 		fmt.Println("[notice] configuration is valid")
 		return 0
 	}
-	if len(args) < 4 || args[0] != "edge" || args[1] != "run" || args[2] != "--config" {
+	if len(args) < 4 || (args[0] != "edge" && args[0] != "balancer") || args[1] != "run" || args[2] != "--config" {
 		fmt.Fprintln(os.Stderr, "fake edge: bad args", args)
 		return 2
 	}
@@ -105,11 +107,11 @@ func edgeFiles(content string) Files {
 }
 
 func TestEngineRegistryAndPolicy(t *testing.T) {
-	if got := strings.Join(EngineNames(), ","); got != "edge,haproxy,nginx" {
+	if got := strings.Join(EngineNames(), ","); got != "balancer,edge,haproxy,nginx" {
 		t.Fatalf("engines = %s", got)
 	}
 	a := &Agent{}
-	for name, want := range map[string][2]bool{EngineNginx: {true, true}, EngineEdge: {true, true}, EngineHAProxy: {false, false}} {
+	for name, want := range map[string][2]bool{EngineNginx: {true, true}, EngineEdge: {true, true}, EngineHAProxy: {false, false}, EngineBalancer: {false, false}} {
 		e := engineFactories[name](a)
 		if e.alwaysOn() != want[0] || e.proxy() != want[1] {
 			t.Errorf("%s: alwaysOn=%v proxy=%v", name, e.alwaysOn(), e.proxy())
@@ -117,6 +119,17 @@ func TestEngineRegistryAndPolicy(t *testing.T) {
 	}
 	if IsProxyEngine(EngineHAProxy) || !IsProxyEngine(EngineEdge) || NormalizeProxyEngine("") != EngineNginx || NormalizeProxyEngine("edge") != EngineEdge {
 		t.Fatal("proxy engine helpers")
+	}
+	if IsLBEngine(EngineEdge) || !IsLBEngine(EngineHAProxy) || !IsLBEngine(EngineBalancer) || NormalizeLBEngine("") != EngineHAProxy ||
+		NormalizeLBEngine("bogus") != EngineHAProxy || NormalizeLBEngine("balancer") != EngineBalancer {
+		t.Fatal("load balancer engine helpers")
+	}
+	b := &balancerEngine{a: &Agent{}}
+	if err := b.checkFiles(Files{"haproxy.cfg": ""}); err == nil {
+		t.Fatal("balancer.json must be required")
+	}
+	if b.stopSignal() != syscall.SIGTERM || b.mainFile() != "balancer.json" || b.bootstrap() != nil {
+		t.Fatal("balancer engine basics")
 	}
 	e := &edgeEngine{a: &Agent{}}
 	if err := e.checkFiles(Files{"nginx.conf": ""}); err == nil {

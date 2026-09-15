@@ -239,6 +239,8 @@ func (s *Service) runUpgrade(ctx context.Context, cli *client.Client, ops applyO
 	switch {
 	case agent.IsProxyEngine(engine) && !active:
 		s.step("validate", "skipped", name+" isn't the selected proxy engine", 50, "")
+	case agent.IsLBEngine(engine) && s.app.LBEngine(ctx) != engine:
+		s.step("validate", "skipped", name+" isn't the selected load balancer engine", 50, "")
 	case files == nil:
 		s.step("validate", "skipped", "Nothing applied yet", 50, "")
 	case engine == "haproxy" && !running:

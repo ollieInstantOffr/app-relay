@@ -4,7 +4,8 @@ import {
   Badge, Button, Callout, Checkbox, CodeBlock, Dot, Drawer, Field, Icon, IconButton, Input, RadioCard, Segmented, Select,
   ToggleCard, cx, useToast,
 } from '../../components/ui'
-import { useContainers, useEntities, useLBStats, useRole, useSaveEntity, useSettings } from '../../lib/queries'
+import { useContainers, useEntities, useLBEngine, useLBStats, useRole, useSaveEntity, useSettings } from '../../lib/queries'
+import { lbCheckName } from '../../lib/types'
 import type { Backend, HealthCheck, Server } from '../../lib/types'
 import {
   ALGORITHMS, HEALTH_TYPES, applyNowAction, fieldErrors, findServerStats, frontendUsesBackend, newServer, usePreview, useServerActions,
@@ -46,7 +47,8 @@ export default function BackendDrawer({ initial, onClose, onExpose }: { initial:
   const save = useSaveEntity('backends')
   const actions = useServerActions()
   const toast = useToast()
-  const preview = usePreview('/api/preview/haproxy/backend', readOnly ? null : { backend: draft })
+  const lb = useLBEngine()
+  const preview = usePreview('/api/preview/lb/backend', readOnly ? null : { backend: draft })
 
   // drag to reorder
   const [armed, setArmed] = useState<number | null>(null)
@@ -162,7 +164,7 @@ export default function BackendDrawer({ initial, onClose, onExpose }: { initial:
           </span>
         )
       }
-      subtitle="Saved changes are hot-reloaded into HAProxy without dropping connections"
+      subtitle={`Saved changes are hot-reloaded into ${lb.label} without dropping connections`}
       tabs={TABS}
       tab={tab}
       onTab={setTab}
@@ -180,7 +182,7 @@ export default function BackendDrawer({ initial, onClose, onExpose }: { initial:
       {tab === 'servers' && (
         <>
           {isNew && (
-            <Field label="Name" hint="Letters, digits, dots and dashes · used as the backend name in haproxy.cfg" error={err('name')}>
+            <Field label="Name" hint="Letters, digits, dots and dashes · used as the backend name in the generated config" error={err('name')}>
               <Input mono autoFocus placeholder="web-app" value={draft.name} invalid={!!err('name')} disabled={readOnly} onChange={(e) => set({ name: e.target.value })} />
             </Field>
           )}
@@ -301,7 +303,7 @@ export default function BackendDrawer({ initial, onClose, onExpose }: { initial:
                       try {
                         const r = await actions.setState(draft.id, failing.s.id, 'drain')
                         setServer(draft.servers.findIndex((x) => x.id === failing.s.id), { state: 'drain' })
-                        toast.show({ kind: r.runtime ? 'success' : 'info', title: `${failing.s.address} is draining`, message: r.note ?? 'Applied to HAProxy immediately.' })
+                        toast.show({ kind: r.runtime ? 'success' : 'info', title: `${failing.s.address} is draining`, message: r.note ?? `Applied to ${lb.label} immediately.` })
                       } catch (e) {
                         toast.error(e, 'Could not drain server')
                       }
@@ -330,7 +332,7 @@ export default function BackendDrawer({ initial, onClose, onExpose }: { initial:
               onChange={(v) => set(http ? { forwardClientIp: v } : { sendProxy: v })}
             />
           </div>
-          <PreviewBlock title="Generated haproxy.cfg (this backend)" state={preview} readOnly={readOnly} />
+          <PreviewBlock what="backend" state={preview} readOnly={readOnly} />
         </>
       )}
 
@@ -365,7 +367,7 @@ export default function BackendDrawer({ initial, onClose, onExpose }: { initial:
                     disabled={readOnly || !http}
                     onChange={(v) => set({ sticky: { ...draft.sticky, mode: v as Backend['sticky']['mode'] } })}
                     options={[
-                      { value: 'insert', label: 'Insert cookie (HAProxy sets it)' },
+                      { value: 'insert', label: 'Insert cookie (the load balancer sets it)' },
                       { value: 'prefix', label: "Prefix the app's cookie" },
                       { value: 'source', label: 'Source IP (stick table)' },
                     ]}
@@ -436,7 +438,7 @@ export default function BackendDrawer({ initial, onClose, onExpose }: { initial:
               </Callout>
             </>
           )}
-          {hc.type === 'none' && <Callout tone="warn">Without health checks HAProxy keeps sending traffic to servers that are down.</Callout>}
+          {hc.type === 'none' && <Callout tone="warn">Without health checks {lb.label} keeps sending traffic to servers that are down.</Callout>}
         </>
       )}
 
@@ -494,17 +496,17 @@ export default function BackendDrawer({ initial, onClose, onExpose }: { initial:
             </Field>
           </div>
           <Callout>
-            Durations use HAProxy units: <span className="mono">500ms</span>, <span className="mono">5s</span>, <span className="mono">2m</span>, <span className="mono">1h</span>. Raise the server timeout for long-polling or streaming apps.
+            Durations use units like <span className="mono">500ms</span>, <span className="mono">5s</span>, <span className="mono">2m</span>, <span className="mono">1h</span>. Raise the server timeout for long-polling or streaming apps.
           </Callout>
         </>
       )}
 
       {tab === 'config' && (
         <>
-          <PreviewBlock title="Generated haproxy.cfg (this backend)" state={preview} readOnly={readOnly} />
-          {preview.data?.output && (preview.data.checked !== 'haproxy' || !preview.data.valid) && (
+          <PreviewBlock what="backend" state={preview} readOnly={readOnly} />
+          {preview.data?.output && (preview.data.checked === 'local' || !preview.data.checked || !preview.data.valid) && (
             <div className="col gap-6">
-              <div className="lb-preview-title">{preview.data.checked === 'haproxy' ? 'haproxy -c output' : 'Validation'}</div>
+              <div className="lb-preview-title">{preview.data.checked && preview.data.checked !== 'local' ? `${lbCheckName[preview.data.checked]} output` : 'Validation'}</div>
               <CodeBlock code={preview.data.output} wrap />
             </div>
           )}

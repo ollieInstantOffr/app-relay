@@ -191,6 +191,7 @@ func TestInstanceWideToolsNeedUnrestrictedToken(t *testing.T) {
 		"update_settings":    map[string]any{"key": "tls", "changes": map[string]any{"hsts": "on"}},
 		"discard_changes":    map[string]any{},
 		"set_proxy_engine":   map[string]any{"engine": "edge"},
+		"set_lb_engine":      map[string]any{"engine": "balancer"},
 		"engine_action":      map[string]any{"engine": "nginx", "action": "reload"},
 		"upgrade_relay":      map[string]any{},
 		"create_access_list": map[string]any{"config": map[string]any{"name": "x"}},
@@ -240,6 +241,36 @@ func TestSettingsSafeguards(t *testing.T) {
 	}
 	if _, err := f.plan(t, c, "set_proxy_engine", map[string]any{"engine": "nginx"}); err == nil || !strings.Contains(err.Error(), "already") {
 		t.Fatalf("no-op switch: err = %v", err)
+	}
+
+	// Load balancer engine (lbEngine missing from older settings = haproxy).
+	pl, err = f.plan(t, c, "set_lb_engine", map[string]any{"engine": "balancer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pl.Summary, "HAProxy") || !strings.Contains(pl.Summary, "Relay Balancer") {
+		t.Fatalf("summary = %s", pl.Summary)
+	}
+	out, err = pl.Exec(core.WithActor(context.Background(), c.actor))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = nil
+	_ = json.Unmarshal(api.last(http.MethodPut).Body, &body)
+	if body["lbEngine"] != "balancer" || body["proxyEngine"] != "nginx" || body["adminPort"] != float64(81) {
+		t.Fatalf("PUT body = %v", body)
+	}
+	if !strings.Contains(out.Text, "Relay Balancer") || !strings.Contains(out.Text, "apply_changes") {
+		t.Fatalf("text = %s", out.Text)
+	}
+	if _, err := f.plan(t, c, "set_lb_engine", map[string]any{"engine": "haproxy"}); err == nil || !strings.Contains(err.Error(), "already") {
+		t.Fatalf("no-op lb switch: err = %v", err)
+	}
+	if _, err := f.plan(t, c, "set_lb_engine", map[string]any{"engine": "envoy"}); err == nil || !strings.Contains(err.Error(), "haproxy or balancer") {
+		t.Fatalf("unknown lb engine: err = %v", err)
+	}
+	if _, err := f.plan(t, c, "engine_action", map[string]any{"engine": "balancer", "action": "reload"}); err != nil {
+		t.Fatalf("engine_action balancer: %v", err)
 	}
 }
 

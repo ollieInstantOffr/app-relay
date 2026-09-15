@@ -17,11 +17,12 @@ working end-to-end (no fake data in the UI): if a value can't be known, show
 ## Architecture
 
 ```
-docker compose (network_mode: host for all four)
+docker compose (network_mode: host for all five)
 ├─ relay          Go app: REST API /api, SPA, MCP /mcp, SQLite /data/relay.db, ACME, docker discovery
 ├─ relay-nginx    nginx + `relay agent --engine nginx`   (PID 1 supervises nginx)
 ├─ relay-edge     alpine + `relay agent --engine edge`   (PID 1 supervises `relay edge run`, Relay Edge)
-└─ relay-haproxy  haproxy + `relay agent --engine haproxy`
+├─ relay-haproxy  haproxy + `relay agent --engine haproxy`
+└─ relay-balancer alpine + `relay agent --engine balancer` (PID 1 supervises `relay balancer run`, Relay Balancer)
 shared volumes: relay-data:/data (ro in engines), relay-run:/run/relay (agent sockets, proxy-engine),
                 relay-logs:/var/log/relay (proxy engine access/error logs)
                 relay-bin:/opt/relay (relay copies its static binary here; engines run it)
@@ -31,13 +32,21 @@ shared volumes: relay-data:/data (ro in engines), relay-run:/run/relay (agent so
 - The **proxy engine** (`general.proxyEngine`: `nginx` | `edge`) serves the
   HTTP/HTTPS ports and streams; only the selected one runs (`docs/EDGE.md`).
   `app.Proxy(ctx)` returns its agent client, `app.ProxyEngine(ctx)` its name.
+- The **load balancer engine** (`general.lbEngine`: `haproxy` | `balancer`) runs
+  backends and frontends; only the selected one runs (`docs/BALANCER.md`).
+  `app.LBClient(ctx)` returns its agent client, `app.LBEngine(ctx)` its name;
+  both engines answer the same runtime API subset (`/v1/runtime`), so
+  `internal/lb` stats, drain and weights work unchanged. Renderers are
+  registered in `internal/lb/lbengine`. Config versions record `lb_engine`;
+  `haproxy_cfg` / `haproxy_hash` / `haproxy_running` hold the active load
+  balancer engine's main file, hash and run state.
 - Edits are saved immediately and become **pending changes**. **Apply** renders
-  the proxy engine's files + haproxy.cfg, sends them to the agents (validate → atomic swap →
+  the proxy engine's files + the load balancer engine's file (haproxy.cfg | balancer.json), sends them to the agents (validate → atomic swap →
   reload), health-checks for 10 s and rolls back automatically on failure.
   Each apply is a config **version** with a full snapshot (rollback restores it).
 - Agents speak `internal/agent/protocol.go` over unix sockets
-  `/run/relay/nginx.sock`, `/run/relay/edge.sock` and `/run/relay/haproxy.sock`.
-- Because all containers use host networking, HAProxy frontends bound to
+  `/run/relay/nginx.sock`, `/run/relay/edge.sock`, `/run/relay/haproxy.sock` and `/run/relay/balancer.sock`.
+- Because all containers use host networking, load balancer frontends bound to
   `127.0.0.1:10080` are reachable from nginx (Expose wizard).
 
 ## Repository layout & ownership
@@ -133,12 +142,12 @@ All JSON, camelCase, types in `web/src/lib/types.ts`. Errors:
 | `POST /api/apply` `{summary?}` → `Version` | engine | synchronous; progress via `apply.progress` events |
 | `POST /api/pending/discard` | engine | restores live snapshot |
 | `GET /api/versions` → `Version[]`, `GET /api/versions/{id}`, `GET /api/versions/{id}/diff?against=` , `POST /api/versions/{id}/rollback` | engine | |
-| `GET /api/engines` → `EnginesStatus` (`nginx`, `edge`, `haproxy`, `proxy`); `POST /api/engines/{engine}/{start|stop|reload}`; `GET /api/engines/{engine}/logs`; `GET /api/engines/{engine}/listeners` | engine | engine = nginx \| edge \| haproxy |
+| `GET /api/engines` → `EnginesStatus` (`nginx`, `edge`, `haproxy`, `balancer`, `proxy`, `lb`); `POST /api/engines/{engine}/{start|stop|reload}`; `GET /api/engines/{engine}/logs`; `GET /api/engines/{engine}/listeners` | engine | engine = nginx \| edge \| haproxy \| balancer; starting the non-selected proxy / load balancer engine is 409 `not_selected` |
 | `GET /api/engines/updates` → `EngineUpdates`; `POST /api/engines/updates/check` (admin); `POST /api/engines/{engine}/upgrade` `{version}` (admin, 202 → `UpgradeJob`); `GET /api/engines/upgrade-status` → `{job}`; `POST /api/engines/{engine}/keep-image` (admin) | engine | image version check + in-place upgrade (`internal/engines`); progress on `engine.upgrade`; settings key `engines`; see `deploy/UPGRADES.md` |
 | `POST /api/preview/proxy/host` `{host}` → `ConfigPreview` | engine | active proxy engine: renders one host (+ validates the full config with the draft); `engine` in the response; `/api/preview/nginx/host` is an alias |
 | `POST /api/preview/proxy/stream` `{stream}` → `ConfigPreview` | engine | alias `/api/preview/nginx/stream` |
-| `POST /api/preview/haproxy/backend` `{backend}`, `/frontend` `{frontend}` → `ConfigPreview` | lb | |
-| `GET /api/haproxy/config` → `{config}` | lb | full haproxy.cfg (live) |
+| `POST /api/preview/lb/backend` `{backend}`, `/frontend` `{frontend}` → `ConfigPreview` | lb | active load balancer engine; `engine` in the response; `/api/preview/haproxy/*` are aliases |
+| `GET /api/lb/config` → `{config, engine, …}`; `POST /api/lb/validate` → `{valid, checked}` | lb | the active engine's main file (haproxy.cfg or balancer.json, live); `checked` = haproxy \| balancer \| local; `/api/haproxy/config` and `/api/haproxy/validate` are aliases |
 | `GET /api/lb/stats` → `LBStats` | lb | |
 | `POST /api/backends/{id}/servers/{serverId}/state` `{state}` | lb | ready/drain/maint at runtime |
 | `POST /api/lb/expose` → `{host, frontend, version?}` | lb | Expose wizard |

@@ -15,6 +15,7 @@ import (
 	"github.com/instantoffr/relay/internal/agent"
 	"github.com/instantoffr/relay/internal/core"
 	"github.com/instantoffr/relay/internal/httpx"
+	"github.com/instantoffr/relay/internal/lb/lbengine"
 	"github.com/instantoffr/relay/internal/model"
 	"github.com/instantoffr/relay/internal/render/edge"
 	"github.com/instantoffr/relay/internal/render/haproxy"
@@ -80,7 +81,8 @@ func (h *handlers) usedPorts(ctx context.Context) map[int]bool {
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	pc, _ := h.app.Proxy(ctx)
-	for _, c := range []*agent.Client{h.app.HAProxy, pc} {
+	lc, _ := h.app.LBClient(ctx)
+	for _, c := range []*agent.Client{lc, pc} {
 		if c == nil {
 			continue
 		}
@@ -352,10 +354,13 @@ func (h *handlers) expose(w http.ResponseWriter, r *http.Request) {
 type exposePreview struct {
 	// Nginx* describe the active proxy engine's files (see Engine); the field
 	// names are kept for compatibility.
-	Engine        string `json:"engine"` // nginx | edge
-	Nginx         string `json:"nginx"`
-	NginxValid    *bool  `json:"nginxValid"`
-	NginxOutput   string `json:"nginxOutput"`
+	Engine      string `json:"engine"` // nginx | edge
+	Nginx       string `json:"nginx"`
+	NginxValid  *bool  `json:"nginxValid"`
+	NginxOutput string `json:"nginxOutput"`
+	// HAProxy* describe the active load balancer engine's rendering and
+	// validation (see LBEngine); the field names are kept for compatibility.
+	LBEngine      string `json:"lbEngine"` // haproxy | balancer
 	HAProxy       string `json:"haproxy"`
 	HAProxyValid  *bool  `json:"haproxyValid"`
 	HAProxyOutput string `json:"haproxyOutput"`
@@ -394,15 +399,20 @@ func (h *handlers) exposePreview(w http.ResponseWriter, r *http.Request) {
 	}
 	next.Hosts = append(append([]model.ProxyHost{}, p.snap.Hosts...), host)
 
-	// haproxy: the new frontend section + a full-config check
-	out.HAProxy = haproxy.RenderFrontend(&next, &p.frontend) + "\n# backend " + p.backend.Name + " unchanged\n"
-	if err := mergeErrs(p.frontend.Validate(), checkFrontend(h.app, p.snap, &p.frontend)); err != nil {
+	// load balancer: the new frontend section + a full-config check
+	lbEng := h.app.LBEngine(ctx)
+	lr, lrErr := lbengine.For(lbEng)
+	out.LBEngine = lbEng
+	if lrErr == nil {
+		out.HAProxy = lr.Frontend(&next, &p.frontend) + "\n" + lr.Comment + " backend " + p.backend.Name + " unchanged\n"
+	}
+	if err := mergeErrs(lrErr, p.frontend.Validate(), checkFrontend(h.app, p.snap, &p.frontend)); err != nil {
 		f := false
 		out.HAProxyValid, out.HAProxyOutput = &f, err.Error()
-	} else if cfg, err := haproxy.Render(&next, env); err != nil {
+	} else if files, err := lr.Render(&next, env); err != nil {
 		f := false
 		out.HAProxyValid, out.HAProxyOutput = &f, err.Error()
-	} else if v := h.validateConfig(ctx, cfg); v.Checked == "haproxy" {
+	} else if v := h.validateConfig(ctx, lbEng, files); v.Checked == lbEng {
 		out.HAProxyValid, out.HAProxyOutput = &v.Valid, v.Output
 	} else {
 		out.HAProxyOutput = v.Output

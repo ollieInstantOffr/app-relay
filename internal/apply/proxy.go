@@ -8,6 +8,7 @@ import (
 
 	"github.com/instantoffr/relay/internal/agent"
 	"github.com/instantoffr/relay/internal/core"
+	"github.com/instantoffr/relay/internal/lb/lbengine"
 	"github.com/instantoffr/relay/internal/model"
 	"github.com/instantoffr/relay/internal/render"
 	"github.com/instantoffr/relay/internal/render/edge"
@@ -41,8 +42,8 @@ func checkName(engine string) string {
 	switch engine {
 	case agent.EngineEdge:
 		return "relay edge check"
-	case agent.EngineHAProxy:
-		return "haproxy -c"
+	case agent.EngineHAProxy, agent.EngineBalancer:
+		return lbengine.CheckName(engine)
 	}
 	return "nginx -t"
 }
@@ -129,7 +130,17 @@ type proxySwap struct {
 	oldStop bool   // the previous engine was asked to stop
 	started bool   // the new engine was asked to apply its release (switch)
 	swapped bool   // the new release is active on engine
-	haproxy bool   // HAProxy was changed
+
+	lbEngine    string      // load balancer engine of the new version
+	lbFiles     agent.Files // its release
+	lbHash      string
+	lbChanged   bool        // the load balancer engine was changed (same engine)
+	lbFrom      string      // previous load balancer engine when switching ("" otherwise)
+	lbFromFiles agent.Files // its live release (nil before the first apply)
+	lbFromHash  string
+	lbFromRun   bool // it ran the live release
+	lbOldStop   bool // the previous load balancer engine was asked to stop
+	lbStarted   bool // the new load balancer engine was asked to apply its release
 }
 
 func engineLabel(engine string) string { return core.ProxyEngineLabel(engine) }

@@ -11,7 +11,7 @@ Every change is checked ✅, versioned 🗂️ and **rolled back automatically**
 ![Self-hosted](https://img.shields.io/badge/self--hosted-🏠-success)
 ![Docker](https://img.shields.io/badge/runs%20on-Docker-2496ED)
 
-[🚀 Quick start](#-quick-start) · [✨ Features](#-features) · [⚡ Relay Edge](#-relay-edge-the-recommended-proxy-engine) · [🆘 Help](#-troubleshooting) · [📚 Docs](#-documentation)
+[🚀 Quick start](#-quick-start) · [✨ Features](#-features) · [⚡ Relay Edge](#-relay-edge-the-recommended-proxy-engine) · [⚖️ Relay Balancer](#️-relay-balancer-the-built-in-load-balancer-beta) · [🆘 Help](#-troubleshooting) · [📚 Docs](#-documentation)
 
 </div>
 
@@ -57,7 +57,8 @@ Every apply is saved in **Config history**, so you can always see who changed wh
 <td valign="top" width="50%">
 
 ### ⚖️ Load balancing
-- ❤️ HAProxy with health checks and sticky sessions
+- ❤️ Health checks, sticky sessions, weights and routing rules
+- ⚖️ Pick your engine: **HAProxy** or **Relay Balancer** (beta)
 - 🔄 Drain servers for zero-downtime deploys
 - 🪄 *Expose* wizard: backend → public domain in one go
 
@@ -110,6 +111,28 @@ Relay can run your traffic through two engines. You choose in **Settings → Pro
 - Only one engine runs at a time; Relay stops the other one and its container.
 
 </details>
+
+---
+
+## ⚖️ Relay Balancer: the built-in load balancer (beta)
+
+Your load balancer can run on two engines too. **HAProxy stays the default.** Try **Relay Balancer** in **Settings → Load balancer engine** and switch back whenever you like: backends, frontends, rules and stats are shared, and every switch is validated before it goes live.
+
+> 🧪 **Relay Balancer is in beta.** It does everything Relay's load balancer pages do, but HAProxy has many more years in production.
+> Give it a spin on something that isn't mission-critical first. Switching back takes one click. 🙂
+
+| | ⚖️ Relay Balancer | 🐘 HAProxy |
+|---|---|---|
+| **Backends, frontends, rules, Expose** | ✅ Same as HAProxy | ✅ |
+| **Health checks, sticky sessions, weights** | ✅ | ✅ |
+| **Drain & maintenance without an apply** | ✅ | ✅ |
+| **Live stats & Prometheus** | ✅ Own stats page, same numbers | ✅ Classic stats page |
+| **Reloads** | Always seamless | Seamless when the setting is on |
+| **Path regex rules** | RE2 syntax (no lookarounds) | PCRE |
+| **Updates** | Built into Relay: updates together with Relay | Separate container image to keep up to date |
+| **Maturity** | 🧪 Beta | 🏔️ Rock solid |
+
+**In short:** 🟢 pick **Relay Balancer** for one less image to keep up to date and always-seamless reloads. 🐘 Stick with **HAProxy** if you want the most battle-tested option or rely on advanced regex rules.
 
 ---
 
@@ -271,6 +294,7 @@ More answers live in the built-in docs under **Troubleshooting**. 📖
 - 🏗️ [deploy/README.md](deploy/README.md): containers, ports, volumes, how applying works
 - ⬆️ [deploy/UPGRADES.md](deploy/UPGRADES.md): upgrading Relay, nginx and HAProxy
 - ⚡ [docs/EDGE.md](docs/EDGE.md): Relay Edge under the hood
+- ⚖️ [docs/BALANCER.md](docs/BALANCER.md): Relay Balancer under the hood
 
 ### 🤖 Use Relay from your AI assistant
 
@@ -291,7 +315,8 @@ Changes wait for your 👍 in **Logs → Approvals**.
 | `relay` | 🖥️ Web UI, API, AI server, database, certificates, Docker discovery |
 | `relay-edge` | ⚡ Relay Edge, when it's your proxy engine |
 | `relay-nginx` | 🟩 nginx, when it's your proxy engine |
-| `relay-haproxy` | ⚖️ HAProxy, once you add a load balancer backend |
+| `relay-haproxy` | 🐘 HAProxy, once you add a load balancer backend |
+| `relay-balancer` | ⚖️ Relay Balancer, when it's your load balancer engine |
 
 Only what you use is running; Relay stops the rest. 🌱
 

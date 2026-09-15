@@ -401,16 +401,20 @@ func (s *Service) checkPublic(ctx context.Context, g model.GeneralSettings) (set
 		Detail: "Forward 80/443 on your router, or use DNS-01 certs and a VPN instead. Routers without hairpin NAT fail this check even when forwarding works."}, ip
 }
 
+// checkHAProxy checks the active load balancer engine (HAProxy or Relay
+// Balancer); the check keeps the id "haproxy".
 func (s *Service) checkHAProxy(ctx context.Context) setupCheck {
-	if s.app.HAProxy == nil {
-		return setupCheck{ID: "haproxy", Status: "unknown", Title: "HAProxy engine", Detail: "Agent not configured"}
+	c, engine := s.app.LBClient(ctx)
+	name := core.ProxyEngineLabel(engine)
+	if c == nil {
+		return setupCheck{ID: "haproxy", Status: "unknown", Title: name + " engine", Detail: "Agent not configured"}
 	}
 	hctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	st, err := s.app.HAProxy.Status(hctx)
+	st, err := c.Status(hctx)
 	if err != nil {
-		return setupCheck{ID: "haproxy", Status: "warn", Title: "HAProxy agent not reachable",
-			Detail: shortErr(err) + " · is the relay-haproxy container running?"}
+		return setupCheck{ID: "haproxy", Status: "warn", Title: name + " agent not reachable",
+			Detail: shortErr(err) + " · is the relay-" + engine + " container running?"}
 	}
 	detail := "Installed"
 	if st.Version != "" {
@@ -421,7 +425,7 @@ func (s *Service) checkHAProxy(ctx context.Context) setupCheck {
 	} else {
 		detail += " · starts when you create the first backend"
 	}
-	return setupCheck{ID: "haproxy", Status: "ok", Title: "HAProxy engine", Detail: detail}
+	return setupCheck{ID: "haproxy", Status: "ok", Title: name + " engine", Detail: detail}
 }
 
 type networkRequest struct {

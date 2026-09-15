@@ -447,7 +447,7 @@ func portOwner(app *core.App, snap *model.Snapshot, selfID, addr string, port in
 	}
 	if snap.HAProxy.StatsEnabled {
 		if a, p, err := model.SplitBind(snap.HAProxy.StatsBind); err == nil && p == port && addrOverlap(a, addr) {
-			return "the HAProxy stats endpoint"
+			return "the load balancer stats endpoint"
 		}
 	}
 	for _, st := range snap.Streams {

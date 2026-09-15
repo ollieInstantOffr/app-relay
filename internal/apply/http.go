@@ -22,6 +22,7 @@ import (
 	"github.com/instantoffr/relay/internal/core"
 	"github.com/instantoffr/relay/internal/events"
 	"github.com/instantoffr/relay/internal/httpx"
+	"github.com/instantoffr/relay/internal/lb/lbengine"
 	"github.com/instantoffr/relay/internal/model"
 	"github.com/instantoffr/relay/internal/render"
 	"github.com/instantoffr/relay/internal/render/nginx"
@@ -139,7 +140,9 @@ func (h *handlers) pendingDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	newFiles := proxyFileMap(rd.proxyEngine, rd.proxy)
-	newFiles["haproxy.cfg"] = rd.haproxy["haproxy.cfg"]
+	for p, c := range lbFileMap(rd.lbEngine, rd.lb[rd.lbMain]) {
+		newFiles[p] = c
+	}
 	resp.Files, resp.Paths = diffMaps(redactFiles(oldFiles), redactFiles(newFiles), r.URL.Query().Get("file"))
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
@@ -191,19 +194,23 @@ func (h *handlers) discard(w http.ResponseWriter, r *http.Request) {
 
 type versionJSON struct {
 	core.Version
-	FailedEngine   string `json:"failedEngine,omitempty"`
-	FailedStage    string `json:"failedStage,omitempty"`
-	Output         string `json:"output,omitempty"`
-	ProxyEngine    string `json:"proxyEngine"` // nginx | edge
-	ProxyHash      string `json:"proxyHash"`
-	NginxHash      string `json:"nginxHash"` // proxy engine hash (kept for compatibility)
+	FailedEngine string `json:"failedEngine,omitempty"`
+	FailedStage  string `json:"failedStage,omitempty"`
+	Output       string `json:"output,omitempty"`
+	ProxyEngine  string `json:"proxyEngine"` // nginx | edge
+	ProxyHash    string `json:"proxyHash"`
+	NginxHash    string `json:"nginxHash"` // proxy engine hash (kept for compatibility)
+	LBEngine     string `json:"lbEngine"`  // haproxy | balancer
+	// HAProxyHash / HAProxyRunning describe the load balancer engine's release
+	// (see lbEngine); the names are kept for compatibility.
 	HAProxyHash    string `json:"haproxyHash"`
 	HAProxyRunning bool   `json:"haproxyRunning"`
 }
 
 func toVersionJSON(row *store.VersionRow) versionJSON {
 	return versionJSON{Version: toVersion(row), FailedEngine: row.FailedEngine, FailedStage: row.FailedStage, Output: row.Output,
-		ProxyEngine: rowEngine(row), ProxyHash: row.NginxHash, NginxHash: row.NginxHash, HAProxyHash: row.HAProxyHash, HAProxyRunning: row.HAProxyRunning}
+		ProxyEngine: rowEngine(row), ProxyHash: row.NginxHash, NginxHash: row.NginxHash, LBEngine: rowLBEngine(row),
+		HAProxyHash: row.HAProxyHash, HAProxyRunning: row.HAProxyRunning}
 }
 
 func (h *handlers) versions(w http.ResponseWriter, r *http.Request) {
@@ -246,18 +253,20 @@ func (h *handlers) version(w http.ResponseWriter, r *http.Request) {
 		versionJSON
 		// NginxFiles holds the proxy engine's files (see proxyEngine).
 		NginxFiles map[string]string `json:"nginxFiles"`
-		HAProxyCfg string            `json:"haproxyCfg"`
+		// HAProxyCfg holds the load balancer engine's main file (haproxy.cfg
+		// or balancer.json, see lbEngine).
+		HAProxyCfg string `json:"haproxyCfg"`
 	}{toVersionJSON(row), redactFiles(files), row.HAProxyCfg})
 }
 
 // versionFileMap returns a version's files for diffs: proxy engine files
-// (Relay Edge ones under edge/) plus haproxy.cfg.
+// (Relay Edge ones under edge/) plus haproxy.cfg or balancer/balancer.json.
 func versionFileMap(row *store.VersionRow) map[string]string {
 	raw := map[string]string{}
 	json.Unmarshal([]byte(row.NginxFiles), &raw)
 	files := proxyFileMap(rowEngine(row), raw)
-	if row.HAProxyCfg != "" {
-		files["haproxy.cfg"] = row.HAProxyCfg
+	for p, c := range lbFileMap(rowLBEngine(row), row.HAProxyCfg) {
+		files[p] = c
 	}
 	return files
 }
@@ -364,7 +373,7 @@ func (h *handlers) download(w http.ResponseWriter, r *http.Request) {
 		add(engine+"/"+p, files[p])
 	}
 	if row.HAProxyCfg != "" {
-		add("haproxy/haproxy.cfg", row.HAProxyCfg)
+		add(lbengine.ArchivePath(rowLBEngine(row)), row.HAProxyCfg)
 	}
 	meta, _ := json.MarshalIndent(toVersionJSON(row), "", "  ")
 	add("version.json", string(meta)+"\n")
@@ -419,8 +428,10 @@ func (h *handlers) client(r *http.Request) (*agent.Client, string, error) {
 		return h.app.HAProxy, e, nil
 	case agent.EngineEdge:
 		return h.app.Edge, e, nil
+	case agent.EngineBalancer:
+		return h.app.Balancer, e, nil
 	}
-	return nil, "", httpx.Errorf(http.StatusNotFound, "not_found", "unknown engine (nginx | haproxy | edge)")
+	return nil, "", httpx.Errorf(http.StatusNotFound, "not_found", "unknown engine (nginx | haproxy | edge | balancer)")
 }
 
 func (h *handlers) engineAction(w http.ResponseWriter, r *http.Request) {

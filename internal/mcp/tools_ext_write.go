@@ -54,6 +54,11 @@ type defaultHostArgs struct {
 	Reason        string `json:"reason,omitempty" jsonschema:"Why; shown to the person approving it"`
 }
 
+type lbEngineArgs struct {
+	Engine string `json:"engine" jsonschema:"haproxy (default) or balancer (Relay Balancer, beta)"`
+	Reason string `json:"reason,omitempty" jsonschema:"Why; shown to the person approving it"`
+}
+
 type proxyEngineArgs struct {
 	Engine string `json:"engine" jsonschema:"nginx (default, runs custom nginx snippets) or edge (Relay Edge, beta)"`
 	Reason string `json:"reason,omitempty" jsonschema:"Why; shown to the person approving it"`
@@ -148,6 +153,9 @@ func (s *Service) registerExtWriteTools() {
 	addWrite(s, toolInfo{Name: "set_proxy_engine", Title: "Switch the proxy engine",
 		Description: "Select nginx or Relay Edge (beta) as the reverse proxy engine. Saved as a pending change; apply_changes then validates the new engine, stops the old one, starts the new one on the same ports, health-checks every host and rolls back automatically on failure. All configuration is shared by both engines. May wait for human approval."},
 		map[string][]any{"engine": {"nginx", "edge"}}, false, s.planSetProxyEngine)
+	addWrite(s, toolInfo{Name: "set_lb_engine", Title: "Switch the load balancer engine",
+		Description: "Select HAProxy or Relay Balancer (beta) as the load balancer engine that runs backends and frontends. Saved as a pending change; apply_changes then validates the new engine, stops the old one, starts the new one on the same frontends, health-checks hosts and streams routed through backends and rolls back automatically on failure. All backends, frontends and load balancer settings are shared by both engines. May wait for human approval."},
+		map[string][]any{"engine": {"haproxy", "balancer"}}, false, s.planSetLBEngine)
 	addWrite(s, toolInfo{Name: "discard_changes", Title: "Discard pending changes",
 		Description: "Throw away every pending change (not only yours) and return the editable configuration to the live version. Check get_pending_changes first. May wait for human approval."},
 		nil, true, s.planDiscard)
@@ -155,8 +163,8 @@ func (s *Service) registerExtWriteTools() {
 		Description: "Restore an earlier config version (see list_versions). The old version goes through the full apply pipeline (validate, reload, health check) and becomes a new version. May wait for human approval."},
 		nil, true, s.planRollback)
 	addWrite(s, toolInfo{Name: "engine_action", Title: "Start, stop or reload an engine",
-		Description: "Start, stop or reload nginx, Relay Edge or HAProxy through its agent. Stopping the active proxy engine takes every host offline. May wait for human approval."},
-		map[string][]any{"engine": {"nginx", "edge", "haproxy"}, "action": {"start", "stop", "reload"}}, true, s.planEngineAction)
+		Description: "Start, stop or reload nginx, Relay Edge, HAProxy or Relay Balancer through its agent. Stopping the active proxy engine takes every host offline; stopping the active load balancer (HAProxy or Relay Balancer) takes backend-routed hosts and streams offline. May wait for human approval."},
+		map[string][]any{"engine": {"nginx", "edge", "haproxy", "balancer"}, "action": {"start", "stop", "reload"}}, true, s.planEngineAction)
 	addWrite(s, toolInfo{Name: "check_for_updates", Title: "Check for updates now",
 		Description: "Check GitHub for new Relay commits and Docker Hub for new nginx and HAProxy releases, then return the result (same as get_updates, but fresh)."},
 		nil, false, s.planCheckUpdates)
@@ -170,7 +178,7 @@ func (s *Service) registerExtWriteTools() {
 		Description: "Create proxy hosts for containers found by Docker discovery (see list_containers): one host per item with its domain and app port. Stopped local containers get a disabled host that turns on when they start. Saved to pending changes. May wait for human approval."},
 		nil, false, s.planDockerHosts)
 	addWrite(s, toolInfo{Name: "expose_backend", Title: "Expose a backend online",
-		Description: "Put an HTTP load balancer backend on a public domain: creates the reverse proxy host and the local HAProxy frontend, optionally requesting a certificate and adding access control, forward auth or rate limiting. Saved to pending changes; not live until apply_changes. May wait for human approval."},
+		Description: "Put an HTTP load balancer backend on a public domain: creates the reverse proxy host and the local load balancer frontend, optionally requesting a certificate and adding access control, forward auth or rate limiting. Saved to pending changes; not live until apply_changes. May wait for human approval."},
 		nil, false, s.planExpose)
 	addWrite(s, toolInfo{Name: "renew_certificate", Title: "Renew a certificate",
 		Description: "Renew an ACME certificate now (normally automatic). Runs in the background; check list_certificates. May wait for human approval."},
@@ -321,12 +329,50 @@ func (s *Service) planSetProxyEngine(ctx context.Context, c *call, in proxyEngin
 	return pl, nil
 }
 
+func (s *Service) planSetLBEngine(ctx context.Context, c *call, in lbEngineArgs) (*plan, error) {
+	if err := requireUnrestricted(c, "switching the load balancer engine"); err != nil {
+		return nil, err
+	}
+	engine := strings.ToLower(strings.TrimSpace(in.Engine))
+	if engine != "haproxy" && engine != "balancer" {
+		return nil, errors.New("engine must be haproxy or balancer")
+	}
+	var gen map[string]any
+	if err := s.apiCall(core.WithActor(ctx, c.actor), http.MethodGet, "/settings/"+model.SettingsGeneral, nil, &gen); err != nil {
+		return nil, err
+	}
+	cur := mStr(gen["lbEngine"])
+	if cur != "balancer" {
+		cur = "haproxy"
+	}
+	if cur == engine {
+		return nil, fmt.Errorf("%s is already the selected load balancer engine", engineLabel(engine))
+	}
+	pl, err := s.planSettingsPatch(ctx, c, model.SettingsGeneral, map[string]any{"lbEngine": engine},
+		fmt.Sprintf("Switch the load balancer engine from %s to %s", bold(engineLabel(cur)), bold(engineLabel(engine))))
+	if err != nil {
+		return nil, err
+	}
+	exec := pl.Exec
+	pl.Exec = func(ctx context.Context) (*outcome, error) {
+		out, err := exec(ctx)
+		if err == nil {
+			out.Text = fmt.Sprintf("Selected %s as the load balancer engine. The switch is a pending change: apply_changes validates %s, stops %s, starts %s and rolls back automatically if a host or stream stops working.",
+				engineLabel(engine), engineLabel(engine), engineLabel(cur), engineLabel(engine))
+		}
+		return out, err
+	}
+	return pl, nil
+}
+
 func engineLabel(e string) string {
 	switch e {
 	case "edge":
 		return "Relay Edge"
 	case "haproxy":
 		return "HAProxy"
+	case "balancer":
+		return "Relay Balancer"
 	}
 	return "nginx"
 }
@@ -398,8 +444,8 @@ func (s *Service) planEngineAction(ctx context.Context, c *call, in engineAction
 		return nil, err
 	}
 	engine, action := strings.ToLower(in.Engine), strings.ToLower(in.Action)
-	if engine != "nginx" && engine != "edge" && engine != "haproxy" {
-		return nil, errors.New("engine must be nginx, edge or haproxy")
+	if engine != "nginx" && engine != "edge" && engine != "haproxy" && engine != "balancer" {
+		return nil, errors.New("engine must be nginx, edge, haproxy or balancer")
 	}
 	if action != "start" && action != "stop" && action != "reload" {
 		return nil, errors.New("action must be start, stop or reload")

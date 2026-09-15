@@ -1,8 +1,8 @@
 package engines
 
 // Starting and stopping engine containers. Relay stops the container of an
-// engine that isn't needed (the proxy engine that isn't selected, HAProxy
-// when it's stopped or has no backends) and starts it again before the
+// engine that isn't needed (the proxy or load balancer engine that isn't
+// selected, the load balancer when it's stopped or has no backends) and starts it again before the
 // engine is used (internal/apply decides when).
 
 import (
@@ -33,7 +33,7 @@ type cachedContainer struct {
 }
 
 func containerEngine(engine string) bool {
-	return engine == agent.EngineNginx || engine == agent.EngineEdge || engine == agent.EngineHAProxy
+	return engine == agent.EngineNginx || engine == agent.EngineEdge || engine == agent.EngineHAProxy || engine == agent.EngineBalancer
 }
 
 func containerLabel(engine string) string {
@@ -42,6 +42,8 @@ func containerLabel(engine string) string {
 		return "Relay Edge"
 	case agent.EngineHAProxy:
 		return "HAProxy"
+	case agent.EngineBalancer:
+		return "Relay Balancer"
 	}
 	return "nginx"
 }

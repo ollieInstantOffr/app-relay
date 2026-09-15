@@ -31,7 +31,7 @@ var settingsLabels = map[string]string{
 	model.SettingsGeneral:     "General settings",
 	model.SettingsTLS:         "Default TLS settings",
 	model.SettingsDefaultHost: "Default host",
-	model.SettingsHAProxy:     "HAProxy engine settings",
+	model.SettingsHAProxy:     "Load balancer settings",
 	model.SettingsBlocklist:   "Blocked IPs",
 	model.SettingsErrorPages:  "Error pages",
 }
@@ -104,7 +104,8 @@ func projections(s *model.Snapshot) map[string]entityState {
 		HTTPSPort   int    `json:"httpsPort"`
 		HTTP3       bool   `json:"http3"`
 		ProxyEngine string `json:"proxyEngine"`
-	}{s.General.HTTPPort, s.General.HTTPSPort, s.General.HTTP3, agent.NormalizeProxyEngine(s.General.ProxyEngine)})
+		LBEngine    string `json:"lbEngine"`
+	}{s.General.HTTPPort, s.General.HTTPSPort, s.General.HTTP3, agent.NormalizeProxyEngine(s.General.ProxyEngine), agent.NormalizeLBEngine(s.General.LBEngine)})
 	add("settings", model.SettingsTLS, settingsLabels[model.SettingsTLS], struct {
 		CipherProfile string             `json:"cipherProfile"`
 		HSTS          model.HSTSSettings `json:"hsts"`
@@ -245,21 +246,28 @@ func describeItem(it core.PendingItem, cur, live *model.Snapshot) string {
 	return noun + " " + it.Name + " edited"
 }
 
-// describeEngineSwitch labels a proxy engine switch ("" when the engine is
-// unchanged).
+// describeEngineSwitch labels a proxy and/or load balancer engine switch
+// ("" when both engines are unchanged).
 func describeEngineSwitch(cur, live *model.Snapshot) string {
 	if live == nil {
 		live = defaultSnapshot()
 	}
-	from, to := snapshotEngine(live), snapshotEngine(cur)
-	if from == to {
+	var parts []string
+	if from, to := snapshotEngine(live), snapshotEngine(cur); from != to {
+		parts = append(parts, fmt.Sprintf("proxy engine: %s → %s", engineLabel(from), engineLabel(to)))
+	}
+	if from, to := snapshotLBEngine(live), snapshotLBEngine(cur); from != to {
+		parts = append(parts, fmt.Sprintf("load balancer engine: %s → %s", engineLabel(from), engineLabel(to)))
+	}
+	if len(parts) == 0 {
 		return ""
 	}
+	joined := strings.Join(parts, "; ")
 	c, l := cur.General, live.General
 	if c.HTTPPort == l.HTTPPort && c.HTTPSPort == l.HTTPSPort && c.HTTP3 == l.HTTP3 {
-		return fmt.Sprintf("Proxy engine: %s → %s", engineLabel(from), engineLabel(to))
+		return strings.ToUpper(joined[:1]) + joined[1:]
 	}
-	return fmt.Sprintf("General settings changed (proxy engine: %s → %s)", engineLabel(from), engineLabel(to))
+	return "General settings changed (" + joined + ")"
 }
 
 func countDelta(cur, live int, noun string) string {

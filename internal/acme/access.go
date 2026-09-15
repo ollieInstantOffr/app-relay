@@ -132,7 +132,7 @@ func (h *handlers) accessUsage(ctx context.Context) (map[string]*accessUsage, er
 		addOther(s.DefaultAccessListID, "Docker discovery defaults")
 	}
 	if s, err := store.LoadSettings[model.HAProxySettings](ctx, h.app.Store, model.SettingsHAProxy); err == nil {
-		addOther(s.StatsAccessList, "HAProxy stats page")
+		addOther(s.StatsAccessList, "load balancer stats page")
 	}
 	if s, err := store.LoadSettings[model.GeneralSettings](ctx, h.app.Store, model.SettingsGeneral); err == nil {
 		addOther(s.Defaults.AccessListID, "new host defaults")

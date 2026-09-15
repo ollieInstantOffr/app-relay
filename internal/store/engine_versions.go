@@ -19,7 +19,14 @@ type VersionRow struct {
 	ProxyEngine string
 	// NginxFiles / NginxHash hold the proxy engine's files (columns nginx_files
 	// and nginx_hash, whichever engine it is).
-	NginxFiles     string // JSON map path → content (only with blobs)
+	NginxFiles string // JSON map path → content (only with blobs)
+	// LBEngine is the load balancer engine the version was rendered for:
+	// haproxy | balancer.
+	LBEngine string
+	// HAProxyCfg / HAProxyHash / HAProxyRunning describe the active load
+	// balancer engine's release (columns haproxy_cfg, haproxy_hash and
+	// haproxy_running, whichever engine it is): its main file content
+	// (haproxy.cfg or balancer.json), the release hash and whether it runs.
 	HAProxyCfg     string // (only with blobs)
 	Changes        string // JSON []core.PendingItem
 	Error          string
@@ -35,7 +42,7 @@ type VersionRow struct {
 }
 
 const versionCols = `id, created_at, actor, summary, status, changes, error, validate_ms, reload_ms, rolled_back_to,
-	nginx_hash, haproxy_hash, haproxy_running, failed_engine, failed_stage, output, proxy_engine`
+	nginx_hash, haproxy_hash, haproxy_running, failed_engine, failed_stage, output, proxy_engine, lb_engine`
 
 func scanVersion(sc interface{ Scan(...any) error }, blobs bool) (*VersionRow, error) {
 	var v VersionRow
@@ -43,7 +50,7 @@ func scanVersion(sc interface{ Scan(...any) error }, blobs bool) (*VersionRow, e
 	var rb sql.NullInt64
 	var running int
 	dest := []any{&v.ID, &at, &v.Actor, &v.Summary, &v.Status, &v.Changes, &v.Error, &v.ValidateMs, &v.ReloadMs, &rb,
-		&v.NginxHash, &v.HAProxyHash, &running, &v.FailedEngine, &v.FailedStage, &v.Output, &v.ProxyEngine}
+		&v.NginxHash, &v.HAProxyHash, &running, &v.FailedEngine, &v.FailedStage, &v.Output, &v.ProxyEngine, &v.LBEngine}
 	if blobs {
 		dest = append(dest, &v.Snapshot, &v.NginxFiles, &v.HAProxyCfg)
 	}
@@ -83,16 +90,19 @@ func (s *Store) InsertVersion(ctx context.Context, v *VersionRow) error {
 	if v.ProxyEngine == "" {
 		v.ProxyEngine = "nginx"
 	}
+	if v.LBEngine == "" {
+		v.LBEngine = "haproxy"
+	}
 	running := 0
 	if v.HAProxyRunning {
 		running = 1
 	}
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO config_versions
 		(id, created_at, actor, summary, status, snapshot, nginx_files, haproxy_cfg, changes, error, validate_ms, reload_ms, rolled_back_to,
-		 nginx_hash, haproxy_hash, haproxy_running, failed_engine, failed_stage, output, proxy_engine)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 nginx_hash, haproxy_hash, haproxy_running, failed_engine, failed_stage, output, proxy_engine, lb_engine)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		v.ID, FormatTime(v.CreatedAt), v.Actor, v.Summary, v.Status, v.Snapshot, v.NginxFiles, v.HAProxyCfg, v.Changes, v.Error,
-		v.ValidateMs, v.ReloadMs, v.RolledBackTo, v.NginxHash, v.HAProxyHash, running, v.FailedEngine, v.FailedStage, v.Output, v.ProxyEngine)
+		v.ValidateMs, v.ReloadMs, v.RolledBackTo, v.NginxHash, v.HAProxyHash, running, v.FailedEngine, v.FailedStage, v.Output, v.ProxyEngine, v.LBEngine)
 	if err != nil && isUniqueErr(err) {
 		return ErrConflict
 	}

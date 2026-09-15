@@ -21,14 +21,14 @@ import (
 )
 
 type Options struct {
-	Engine  string // nginx | haproxy | edge
+	Engine  string // nginx | haproxy | edge | balancer
 	RunDir  string // socket directory (also holds the proxy-engine selection file)
 	LogDir  string
 	DataDir string
 	Log     *slog.Logger
 	// ConfigRoot defaults to $RELAY_CONFIG_ROOT or /etc/relay/<engine>.
 	ConfigRoot string
-	// Version is the relay binary version (reported by the edge engine).
+	// Version is the relay binary version (reported by the edge and balancer engines).
 	Version string
 }
 
@@ -515,9 +515,9 @@ func (a *Agent) routes() http.Handler {
 		writeJSON(w, 200, ListenersResponse{Listeners: listListeners("/proc")})
 	})
 	mux.HandleFunc("POST "+PathRuntime, func(w http.ResponseWriter, r *http.Request) {
-		h, ok := a.eng.(*haproxyEngine)
+		h, ok := a.eng.(runtimeEngine)
 		if !ok {
-			http.Error(w, "runtime API is only available on the haproxy agent", http.StatusNotFound)
+			http.Error(w, "runtime API is only available on load balancer agents (haproxy, balancer)", http.StatusNotFound)
 			return
 		}
 		var req RuntimeRequest
@@ -531,12 +531,18 @@ func (a *Agent) routes() http.Handler {
 		}
 		out, err := unixCommand(h.runtimeSocket(), cmd, 15*time.Second)
 		if err != nil {
-			http.Error(w, "haproxy runtime API: "+err.Error(), http.StatusServiceUnavailable)
+			http.Error(w, a.o.Engine+" runtime API: "+err.Error(), http.StatusServiceUnavailable)
 			return
 		}
 		writeJSON(w, 200, RuntimeResponse{Output: out})
 	})
 	return mux
+}
+
+// runtimeEngine is implemented by engines that answer the HAProxy runtime API
+// subset Relay uses (show stat, show info, set server …) on a unix socket.
+type runtimeEngine interface {
+	runtimeSocket() string
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

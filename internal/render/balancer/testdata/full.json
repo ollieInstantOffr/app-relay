@@ -1,0 +1,301 @@
+{
+  "schema": 1,
+  "runtimeSocket": "/run/relay/balancer-runtime.sock",
+  "maxConn": 20000,
+  "timeouts": {
+    "connectMs": 5000,
+    "clientMs": 50000,
+    "serverMs": 50000
+  },
+  "check": {
+    "intervalMs": 2000,
+    "rise": 2,
+    "fall": 3
+  },
+  "caFile": "/etc/ssl/certs/ca-certificates.crt",
+  "stats": {
+    "bind": "127.0.0.1:8404",
+    "prometheus": true,
+    "access": [
+      {
+        "allow": false,
+        "cidr": "10.8.0.99"
+      },
+      {
+        "allow": true,
+        "cidr": "10.8.0.0/24"
+      },
+      {
+        "allow": true,
+        "cidr": "127.0.0.1"
+      },
+      {
+        "allow": false,
+        "cidr": "all"
+      }
+    ]
+  },
+  "frontends": [
+    {
+      "id": "f1",
+      "name": "http-in",
+      "mode": "http",
+      "bind": "127.0.0.1:10080",
+      "forwardFor": true,
+      "forwardForExcept": [
+        "127.0.0.0/8"
+      ],
+      "compression": true,
+      "rules": [
+        {
+          "conditions": [
+            {
+              "type": "host",
+              "match": "exact",
+              "values": [
+                "s3.home.lan"
+              ]
+            },
+            {
+              "type": "path_beg",
+              "values": [
+                "/v1"
+              ]
+            },
+            {
+              "type": "path_reg",
+              "values": [
+                "^/api/(a|b) x$"
+              ],
+              "negate": true
+            }
+          ],
+          "backend": "b3"
+        },
+        {
+          "conditions": [
+            {
+              "type": "host",
+              "match": "suffix",
+              "values": [
+                ".s3.home.lan"
+              ]
+            },
+            {
+              "type": "header",
+              "name": "X-Debug",
+              "match": "found"
+            },
+            {
+              "type": "src",
+              "values": [
+                "10.0.0.0/8",
+                "192.168.1.0/24"
+              ]
+            },
+            {
+              "type": "path",
+              "values": [
+                "/exact"
+              ]
+            },
+            {
+              "type": "header",
+              "name": "X-Env",
+              "match": "exact",
+              "values": [
+                "staging"
+              ]
+            }
+          ],
+          "backend": "b3"
+        }
+      ],
+      "defaultBackend": "b1",
+      "timeouts": {}
+    },
+    {
+      "id": "f2",
+      "name": "tls-passthrough",
+      "mode": "tcp",
+      "bind": "0.0.0.0:8443",
+      "acceptProxy": true,
+      "inspectDelayMs": 5000,
+      "rules": [
+        {
+          "conditions": [
+            {
+              "type": "sni",
+              "match": "exact",
+              "values": [
+                "redis.home.lan"
+              ]
+            }
+          ],
+          "backend": "b4"
+        }
+      ],
+      "defaultBackend": "b2",
+      "timeouts": {}
+    }
+  ],
+  "backends": [
+    {
+      "id": "b1",
+      "name": "web-app",
+      "mode": "http",
+      "algorithm": "roundrobin",
+      "servers": [
+        {
+          "id": "s1",
+          "name": "web-app-1",
+          "address": "10.0.0.71",
+          "port": 8080,
+          "weight": 100,
+          "check": true,
+          "state": "ready",
+          "cookie": "web-app-1"
+        },
+        {
+          "id": "s2",
+          "name": "web-app-2",
+          "address": "10.0.0.72",
+          "port": 8080,
+          "weight": 100,
+          "check": true,
+          "state": "drain",
+          "cookie": "web-app-2"
+        },
+        {
+          "id": "s3",
+          "name": "web-3",
+          "address": "10.0.0.73",
+          "port": 8080,
+          "weight": 50,
+          "backup": true,
+          "check": true,
+          "state": "maint",
+          "cookie": "web-3"
+        }
+      ],
+      "check": {
+        "type": "http",
+        "method": "GET",
+        "path": "/health",
+        "host": "app.home.lan",
+        "expect": "200",
+        "intervalMs": 5000,
+        "rise": 2,
+        "fall": 3
+      },
+      "sticky": {
+        "mode": "insert",
+        "cookie": "SRVID"
+      },
+      "forwardFor": true,
+      "tls": true,
+      "tlsVerify": true,
+      "retries": 3,
+      "redispatch": true,
+      "timeouts": {
+        "connectMs": 3000,
+        "serverMs": 30000,
+        "queueMs": 10000
+      }
+    },
+    {
+      "id": "b2",
+      "name": "postgres-ro",
+      "mode": "tcp",
+      "algorithm": "leastconn",
+      "servers": [
+        {
+          "id": "p1",
+          "name": "pg-1",
+          "address": "10.0.0.31",
+          "port": 5432,
+          "weight": 100,
+          "check": true,
+          "state": "ready"
+        },
+        {
+          "id": "p2",
+          "name": "pg-2",
+          "address": "fd00::32",
+          "port": 5432,
+          "weight": 100,
+          "state": "ready"
+        }
+      ],
+      "check": {
+        "type": "pgsql",
+        "user": "relay",
+        "intervalMs": 2000,
+        "rise": 1,
+        "fall": 2
+      },
+      "sticky": {
+        "mode": "source",
+        "expireMs": 1800000,
+        "tableSize": 200000
+      },
+      "sendProxy": true,
+      "retries": 3,
+      "redispatch": true,
+      "timeouts": {}
+    },
+    {
+      "id": "b3",
+      "name": "minio",
+      "mode": "http",
+      "algorithm": "source",
+      "servers": [
+        {
+          "id": "m1",
+          "name": "minio-1",
+          "address": "minio.lan",
+          "port": 9000,
+          "weight": 10,
+          "check": true,
+          "state": "ready"
+        }
+      ],
+      "check": {
+        "type": "http",
+        "method": "HEAD",
+        "path": "/minio/health/live",
+        "expect": "2xx",
+        "intervalMs": 2000,
+        "rise": 2,
+        "fall": 3
+      },
+      "retries": 3,
+      "timeouts": {}
+    },
+    {
+      "id": "b4",
+      "name": "redis",
+      "mode": "tcp",
+      "algorithm": "first",
+      "servers": [
+        {
+          "id": "r1",
+          "name": "redis-1",
+          "address": "10.0.0.50",
+          "port": 6379,
+          "weight": 1,
+          "check": true,
+          "state": "ready"
+        }
+      ],
+      "check": {
+        "type": "redis",
+        "intervalMs": 2000,
+        "rise": 2,
+        "fall": 3
+      },
+      "retries": 3,
+      "timeouts": {}
+    }
+  ]
+}

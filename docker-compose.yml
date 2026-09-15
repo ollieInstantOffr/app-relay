@@ -1,4 +1,5 @@
-# Relay: reverse proxy (nginx or Relay Edge) + load balancer (HAProxy) manager.
+# Relay: reverse proxy (nginx or Relay Edge) + load balancer (HAProxy or Relay
+# Balancer) manager.
 #
 #   docker compose up -d --build
 #   open http://<host>:8181   (first run starts the setup wizard)
@@ -6,16 +7,20 @@
 # All containers use host networking. The selected proxy engine (Settings →
 # General → Proxy engine: nginx by default, or Relay Edge) binds 80/443
 # (+443/udp for HTTP/3) directly on the host; Relay stops the other one's
-# container (and HAProxy's while it has nothing to run) and starts it when needed.
-# HAProxy frontends created by the Expose wizard bind 127.0.0.1:10080+ and are
-# reached by the proxy engine over loopback.
+# container and starts it when needed. Likewise the selected load balancer
+# engine (Settings → General → Load balancer engine: HAProxy by default, or
+# Relay Balancer, beta) runs while backends exist; Relay stops the other one's
+# container (and the selected one's while it has nothing to run).
+# Load balancer frontends created by the Expose wizard bind 127.0.0.1:10080+ and
+# are reached by the proxy engine over loopback.
 #
 # nginx and HAProxy run the OFFICIAL images. The relay container copies its
 # static binary into the relay-bin volume and each engine container runs it as
 # `relay agent` (PID 1), so engines can be upgraded from the UI
-# (Settings → Engines & updates) without rebuilding anything. Relay Edge is
-# part of the relay binary (`relay edge run`) and runs in a plain Alpine
-# container, so it is upgraded together with Relay.
+# (Settings → Engines & updates) without rebuilding anything. Relay Edge and
+# Relay Balancer are part of the relay binary (`relay edge run`, `relay
+# balancer run`) and run in plain Alpine containers, so they are upgraded
+# together with Relay.
 # Pin versions in .env, e.g. RELAY_NGINX_IMAGE=nginx:1.30.4-alpine.
 # See deploy/README.md (ports, volumes, socket proxy) and deploy/UPGRADES.md.
 
@@ -52,6 +57,7 @@ services:
       - nginx
       - edge
       - haproxy
+      - balancer
 
   nginx:
     image: ${RELAY_NGINX_IMAGE:-nginx:1.30.4-alpine}
@@ -137,6 +143,35 @@ services:
       start_period: 20s
       retries: 3
 
+  # Relay Balancer, the load balancer built into the relay binary. Only the load
+  # balancer engine selected in Settings → Load balancer engine runs (while
+  # backends exist); Relay stops the other container.
+  balancer:
+    image: alpine:3.22
+    container_name: relay-balancer
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # SIGTERM drains open connections before the process exits.
+    stop_signal: SIGTERM
+    labels:
+      relay.engine: balancer
+    entrypoint: ["sh", "-c", "until [ -x /opt/relay/bin/relay ]; do sleep 1; done; exec /opt/relay/bin/relay agent --engine balancer"]
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - relay-bin:/opt/relay:ro
+      - relay-data:/data:ro
+      - relay-run:/run/relay
+      - relay-logs:/var/log/relay
+      - relay-balancer:/etc/relay/balancer
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/relay/balancer.sock"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
 volumes:
   relay-data:     # SQLite database, certificates, ACME webroot, backups
   relay-run:      # agent sockets and the proxy-engine selection shared between the containers
@@ -144,4 +179,5 @@ volumes:
   relay-nginx:    # applied nginx releases (survive engine restarts)
   relay-edge:     # applied Relay Edge releases
   relay-haproxy:  # applied haproxy releases
+  relay-balancer: # applied Relay Balancer releases
   relay-bin:      # relay binary for the engine agents (written by relay)

@@ -20,7 +20,7 @@ cd relay`} />
         </Step>
         <Step title="Start the stack">
           <Example lang="bash" code={`make up`} />
-          <C>make up</C> runs <C>docker compose up -d --build</C> with the version and commit taken from git, so the UI shows the right version. This starts <C>relay</C>, <C>relay-nginx</C>, <C>relay-edge</C> (on standby) and <C>relay-haproxy</C>. Check them with <C>docker compose ps</C>.
+          <C>make up</C> runs <C>docker compose up -d --build</C> with the version and commit taken from git, so the UI shows the right version. This starts <C>relay</C>, <C>relay-nginx</C>, <C>relay-edge</C> (on standby), <C>relay-haproxy</C> and <C>relay-balancer</C> (on standby). Check them with <C>docker compose ps</C>.
         </Step>
         <Step title="Open the UI">
           Browse to <C>http://&lt;server-ip&gt;:8181</C>, e.g. <C>http://192.168.1.10:8181</C>.
@@ -63,8 +63,8 @@ cd relay`} />
       <Example lang="bash" code={`git pull
 make up
 # optional: restart the engines so their agents use the new binary (brief interruption)
-docker compose restart nginx edge haproxy`} />
-      <Note>The engines keep serving the last applied configuration while <C>relay</C> restarts, so updating Relay doesn’t interrupt traffic. Relay Edge ships with Relay and runs the new version once its container restarts; nginx and HAProxy versions are upgraded separately on the same page.</Note>
+docker compose restart nginx edge haproxy balancer`} />
+      <Note>The engines keep serving the last applied configuration while <C>relay</C> restarts, so updating Relay doesn’t interrupt traffic. Relay Edge and Relay Balancer ship with Relay and run the new version once their containers restart; nginx and HAProxy versions are upgraded separately on the same page.</Note>
 
       <H2>What to back up</H2>
       <P>Only the <C>relay-data</C> volume matters: database, certificates and backups. Everything else is rebuilt from it. <See id="backups">Backup &amp; restore →</See></P>

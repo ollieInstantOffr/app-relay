@@ -8,7 +8,8 @@ import {
 } from '../../components/ui'
 import { errorMessage } from '../../lib/api'
 import { useBusEvent } from '../../lib/events'
-import { usePending, useProxyEngine, useRole } from '../../lib/queries'
+import { useLBEngine, usePending, useProxyEngine, useRole } from '../../lib/queries'
+import { lbCheckName } from '../../lib/types'
 import { ago, ms, pluralize } from '../../lib/format'
 import {
   engineLabel, useApplyRunner, usePendingDiff, useVersionDiff, useVersions,
@@ -162,6 +163,18 @@ function EngineBadge({ v, older }: { v: VersionInfo; older?: VersionInfo }) {
   )
 }
 
+/** Load balancer engine badge: every Relay Balancer version, plus the version that switched engines. */
+function LBEngineBadge({ v, older }: { v: VersionInfo; older?: VersionInfo }) {
+  const engine = v.lbEngine ?? 'haproxy'
+  const switched = !!older && (older.lbEngine ?? 'haproxy') !== engine
+  if (engine !== 'balancer' && !switched) return null
+  return (
+    <Badge tone={switched ? 'info' : undefined} title={switched ? `Load balancer engine: ${engineLabel[older?.lbEngine ?? 'haproxy']} → ${engineLabel[engine]}` : 'Rendered for Relay Balancer'}>
+      {switched ? `→ ${engineLabel[engine]}` : engineLabel[engine]}
+    </Badge>
+  )
+}
+
 function VersionRow({ v, older, selected, onSelect }: { v: VersionInfo; older?: VersionInfo; selected: boolean; onSelect: () => void }) {
   return (
     <button type="button" className={cx('hist-row', selected && 'selected')} onClick={onSelect}>
@@ -169,6 +182,7 @@ function VersionRow({ v, older, selected, onSelect }: { v: VersionInfo; older?: 
         <span className="hist-ver">v{v.id}</span>
         <StatusBadge v={v} />
         <EngineBadge v={v} older={older} />
+        <LBEngineBadge v={v} older={older} />
         <span className="spacer" />
         <span className="hist-meta">
           {ago(v.createdAt)} · <ActorLabel actor={v.actor} />
@@ -185,7 +199,8 @@ function VersionRow({ v, older, selected, onSelect }: { v: VersionInfo; older?: 
 // ---------------------------------------------------------------- diff panels
 
 function fileLabel(path: string) {
-  if (path === 'haproxy.cfg' || path === 'nginx.conf') return path
+  if (path === 'haproxy.cfg' || path === 'nginx.conf' || path === 'balancer.json') return path
+  if (path === 'balancer/balancer.json') return 'balancer.json'
   // Relay Edge files: edge/edge.json, edge/htpasswd/<access list id>
   if (path === 'edge/edge.json') return 'edge.json'
   if (path.startsWith('edge/htpasswd/')) return `htpasswd/${path.slice('edge/htpasswd/'.length)}`
@@ -284,6 +299,7 @@ function VersionDiff({ version, versions, against, canWrite, pendingCount }: {
         <span className="hist-diff-title">{title}</span>
         <StatusBadge v={version} />
         {version.proxyEngine && <Badge title="Proxy engine this version was rendered for">{engineLabel[version.proxyEngine]}</Badge>}
+        {version.lbEngine && <Badge title="Load balancer engine this version was rendered for">{engineLabel[version.lbEngine]}</Badge>}
         <span className="faint small">{version.summary}</span>
         <div className="spacer" />
         <a className="btn btn-sm" href={`/api/versions/${version.id}/download`} download>
@@ -304,7 +320,7 @@ function VersionDiff({ version, versions, against, canWrite, pendingCount }: {
           </Callout>
         </div>
       )}
-      <DiffBody data={diff.data} isLoading={diff.isLoading} error={diff.error} emptyText="The rendered proxy and HAProxy configuration is identical to the compared version." />
+      <DiffBody data={diff.data} isLoading={diff.isLoading} error={diff.error} emptyText="The rendered proxy and load balancer configuration is identical to the compared version." />
       {target && (
         <ConfirmDialog
           open={confirm}
@@ -378,7 +394,8 @@ const STEPS: { id: string; label: string; sub?: string }[] = [
 
 function PipelineStrip() {
   const proxy = useProxyEngine().engine
-  const validateSub = `${proxy === 'edge' ? 'relay edge check' : 'nginx -t'} · haproxy -c`
+  const lb = useLBEngine().engine
+  const validateSub = `${proxy === 'edge' ? 'relay edge check' : 'nginx -t'} · ${lbCheckName[lb]}`
   const [active, setActive] = useState<string | null>(null)
   const [result, setResult] = useState<'ok' | 'failed' | null>(null)
   const timer = useRef<number | undefined>(undefined)

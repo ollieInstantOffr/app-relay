@@ -1,22 +1,29 @@
 # Deploying Relay
 
-Relay runs as four containers, all with `network_mode: host`. `relay` is built
+Relay runs as five containers, all with `network_mode: host`. `relay` is built
 from the `Dockerfile`; the engine containers run the official nginx / HAProxy
-images and plain `alpine:3.22` for Relay Edge, each executing the relay binary
-from the `relay-bin` volume:
+images and plain `alpine:3.22` for Relay Edge and Relay Balancer, each
+executing the relay binary from the `relay-bin` volume:
 
 | Container | What it runs |
 |---|---|
 | `relay` | API, web UI, MCP server, SQLite database, ACME client, Docker discovery |
 | `relay-nginx` | `relay agent --engine nginx` as PID 1, supervising nginx (runs while nginx is the proxy engine) |
 | `relay-edge` | `relay agent --engine edge` as PID 1, supervising `relay edge run` (runs while Relay Edge is the proxy engine) |
-| `relay-haproxy` | `relay agent --engine haproxy` as PID 1, supervising HAProxy (only runs once a backend exists) |
+| `relay-haproxy` | `relay agent --engine haproxy` as PID 1, supervising HAProxy (runs while HAProxy is the load balancer engine and a backend exists) |
+| `relay-balancer` | `relay agent --engine balancer` as PID 1, supervising `relay balancer run` (runs while Relay Balancer is the load balancer engine and a backend exists) |
 
 The proxy engine is chosen in Settings → General (nginx by default). Exactly
 one of nginx and Relay Edge binds the HTTP/HTTPS ports and streams: the relay
 app records the selection in `/run/relay/proxy-engine`, a fresh agent of the
 other engine keeps its bootstrap config stopped, and Relay stops the
 non-selected engine whenever it finds it running.
+
+The load balancer engine is chosen the same way (Settings → General → Load
+balancer engine: HAProxy by default, or Relay Balancer, beta). Both render the
+same backends, frontends and load balancer settings and bind the same
+frontends, so only the selected one runs; switching is a pending change that
+stops the old engine before the new one starts and rolls back on failure.
 
 ```sh
 docker compose up -d --build
@@ -35,11 +42,12 @@ Open `http://<host>:8181` and finish the setup wizard.
 | 8181/tcp | relay | Admin UI and API (`RELAY_LISTEN`) |
 | 127.0.0.1:18080 | nginx | `stub_status` for Relay's metrics (`RELAY_NGINX_STATUS_PORT`) |
 | 127.0.0.1:18081 | edge | Relay Edge `/healthz`, `/stub_status`, `/metrics` (`RELAY_EDGE_STATUS_PORT`) |
-| 127.0.0.1:8404 | haproxy | Stats / Prometheus (HAProxy settings) |
-| 127.0.0.1:10080+ | haproxy | Localhost frontends created by the Expose wizard |
+| 127.0.0.1:8404 | load balancer engine | Stats / Prometheus (load balancer settings) |
+| 127.0.0.1:10080+ | load balancer engine | Localhost frontends created by the Expose wizard |
 | stream ports | proxy engine | Whatever TCP/UDP streams you configure |
 
-"Proxy engine" is nginx or Relay Edge, whichever is selected. HTTP and HTTPS
+"Proxy engine" is nginx or Relay Edge, "load balancer engine" HAProxy or Relay
+Balancer, whichever is selected. HTTP and HTTPS
 ports can be changed in Settings → General (for example when another proxy
 already holds 80/443). Until the first apply, the selected engine runs a
 bootstrap config on port 80; set `RELAY_BOOTSTRAP_HTTP_PORT` on the nginx /
@@ -50,9 +58,9 @@ edge container to move it.
 | Volume | Mounted in | Contents |
 |---|---|---|
 | `relay-data` | relay (rw), engines (ro) | `relay.db`, `certs/<id>/{fullchain,privkey}.pem`, `acme/` webroot, `geoip/`, `backups/` |
-| `relay-run` | all | Agent sockets `nginx.sock`, `edge.sock`, `haproxy.sock`, HAProxy runtime socket `haproxy-runtime.sock` and master socket `haproxy-master.sock`, the proxy engine selection `proxy-engine` |
-| `relay-logs` | relay, nginx, edge | `access.log`, `stream-access.log`, `error.log` (written by the active proxy engine) |
-| `relay-nginx`, `relay-edge`, `relay-haproxy` | engines | Applied config releases (`releases/<hash>/`, `current` symlink). Keeps traffic flowing with the last applied config when an engine container restarts; Relay re-pushes the live version if they ever diverge. |
+| `relay-run` | all | Agent sockets `nginx.sock`, `edge.sock`, `haproxy.sock`, `balancer.sock`, HAProxy runtime socket `haproxy-runtime.sock` and master socket `haproxy-master.sock`, Relay Balancer runtime socket `balancer-runtime.sock`, the proxy engine selection `proxy-engine` |
+| `relay-logs` | relay, nginx, edge, balancer | `access.log`, `stream-access.log`, `error.log` (written by the active proxy engine) |
+| `relay-nginx`, `relay-edge`, `relay-haproxy`, `relay-balancer` | engines | Applied config releases (`releases/<hash>/`, `current` symlink). Keeps traffic flowing with the last applied config when an engine container restarts; Relay re-pushes the live version if they ever diverge. |
 
 Back up `relay-data`; everything else is derived from it.
 
@@ -60,11 +68,14 @@ Back up `relay-data`; everything else is derived from it.
 
 Edits are saved immediately and show up as pending changes. **Apply & reload**
 renders the proxy engine's files (nginx config or Relay Edge `edge.json`) and
-`haproxy.cfg`, validates them inside the engine containers (`nginx -t` /
-`relay edge check`, `haproxy -c`), atomically swaps the `current` symlink,
-reloads (`SIGHUP`, HAProxy master CLI `reload`), then health-checks changed
-hosts for 10 s. Switching the proxy engine stops the old engine, starts the new
-one and health-checks every routable host; on failure the new engine is
+the load balancer engine's file (`haproxy.cfg` or Relay Balancer
+`balancer.json`), validates them inside the engine containers (`nginx -t` /
+`relay edge check`, `haproxy -c` / `relay balancer check`), atomically swaps
+the `current` symlink, reloads (`SIGHUP`, HAProxy master CLI `reload`), then
+health-checks changed hosts for 10 s. Switching the proxy engine stops the old
+engine, starts the new one and health-checks every routable host; switching
+the load balancer engine does the same for hosts routed through backends and
+the frontends that accepted connections before. On failure the new engine is
 stopped and the old one started again. If a host that was healthy before starts returning
 502/503/504, or an engine fails to start, the previous release is restored
 automatically and the edit stays as a draft. Every apply is a config version

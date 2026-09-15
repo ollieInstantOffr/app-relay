@@ -7,7 +7,7 @@ import { keys } from '../../lib/queries'
 import { useBusEvent } from '../../lib/events'
 import { ms } from '../../lib/format'
 import { useToast } from '../../components/ui'
-import type { Pending, Version } from '../../lib/types'
+import type { LBEngineName, Pending, Version } from '../../lib/types'
 
 export interface VersionInfo extends Version {
   failedEngine?: EngineName
@@ -17,6 +17,8 @@ export interface VersionInfo extends Version {
   /** Proxy engine this version was rendered for (older versions: absent = nginx). */
   proxyEngine?: 'nginx' | 'edge'
   proxyHash?: string
+  /** Load balancer engine this version was rendered for (absent = haproxy). */
+  lbEngine?: LBEngineName
   haproxyHash: string
   haproxyRunning: boolean
 }
@@ -41,8 +43,8 @@ export interface ApplyFinished { version: number; status: string; error: string;
 export interface EngineLogLine { at: string; stream: 'stdout' | 'stderr'; text: string }
 export interface EngineListener { proto: 'tcp' | 'udp'; address: string; port: number; process?: string }
 
-export type EngineName = 'nginx' | 'haproxy' | 'edge'
-export const engineLabel: Record<EngineName, string> = { nginx: 'nginx', haproxy: 'HAProxy', edge: 'Relay Edge' }
+export type EngineName = 'nginx' | 'haproxy' | 'edge' | 'balancer'
+export const engineLabel: Record<EngineName, string> = { nginx: 'nginx', haproxy: 'HAProxy', edge: 'Relay Edge', balancer: 'Relay Balancer' }
 
 export function useVersions(limit = 100) {
   return useQuery({

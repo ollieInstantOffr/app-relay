@@ -6,25 +6,32 @@ import { keys } from '../../lib/queries'
 import { rid } from '../../lib/format'
 import type {
   Backend, BackendStats, Certificate, Condition, ConditionType, ConfigPreview, ForwardAuth, Frontend, GeoBlock,
-  HAProxySettings, ProxyHost, RateLimit, Server, ServerStats, Version,
+  HAProxySettings, LBEngineName, ProxyHost, RateLimit, Server, ServerStats, Version,
 } from '../../lib/types'
+import { lbCheckName, lbEngineLabel } from '../../lib/types'
 
 // ---------------------------------------------------------------- API types
 
+/** Who validated a load balancer config: the engine itself, or Relay when the engine's agent is offline. */
+export type LBChecked = LBEngineName | 'local'
+
 export interface PreviewResult extends ConfigPreview {
-  checked?: 'haproxy' | 'local'
+  checked?: LBChecked
   fields?: Record<string, string>
 }
 
 export interface ValidationResult {
   valid: boolean
   output: string
-  checked: 'haproxy' | 'local'
+  checked: LBChecked
   durationMs: number
   lines: number
 }
 
+/** GET /api/lb/config: haproxy.cfg (HAProxy) or balancer.json (Relay Balancer). */
 export interface HAProxyConfig {
+  /** Engine the config is rendered for (absent on older servers = haproxy). */
+  engine?: LBEngineName
   config: string
   rendered: string
   live?: string
@@ -79,6 +86,8 @@ export interface ExposePreview {
   nginx: string
   nginxValid: boolean | null
   nginxOutput: string
+  /** haproxy* fields hold the active load balancer engine's config (see lbEngine). */
+  lbEngine?: LBEngineName
   haproxy: string
   haproxyValid: boolean | null
   haproxyOutput: string
@@ -124,8 +133,20 @@ export function useLBSeries(range: string, backendId?: string, refetchMs = 10_00
   })
 }
 
-export function useHAProxyConfig(enabled: boolean) {
-  return useQuery({ queryKey: ['haproxy', 'config'], queryFn: () => api.get<HAProxyConfig>('/api/haproxy/config'), enabled })
+/** Full config of the active load balancer engine (live and rendered). */
+export function useLBConfig(enabled: boolean) {
+  return useQuery({ queryKey: ['haproxy', 'config'], queryFn: () => api.get<HAProxyConfig>('/api/lb/config'), enabled })
+}
+
+/** True when the engine itself checked the config (not Relay's local fallback). */
+export const checkedByEngine = (c?: LBChecked): c is LBEngineName => c === 'haproxy' || c === 'balancer'
+
+/** "haproxy -c passed · 12 ms" / "Checked by Relay · Relay Balancer agent offline". */
+export function validationSummary(v: { valid: boolean; checked?: LBChecked; durationMs?: number }, engine: LBEngineName): string {
+  if (checkedByEngine(v.checked)) {
+    return `${lbCheckName[v.checked]} ${v.valid ? 'passed' : 'failed'}${v.valid && v.durationMs !== undefined ? ` · ${v.durationMs} ms` : ''}`
+  }
+  return v.valid ? `Checked by Relay · ${lbEngineLabel[engine]} agent offline` : 'Invalid'
 }
 
 export function useInvalidateLB() {

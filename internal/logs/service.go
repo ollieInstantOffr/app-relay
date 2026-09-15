@@ -1,5 +1,5 @@
 // Package logs implements Relay's observability backend (slice observe):
-// nginx log ingestion, HAProxy engine log polling, per-minute traffic metrics,
+// nginx log ingestion, load balancer (HAProxy / Relay Balancer) engine log polling, per-minute traffic metrics,
 // retention, and the REST endpoints for logs, audit, activity, metrics,
 // health and the global blocklist.
 package logs
@@ -21,7 +21,6 @@ const (
 	tailInterval       = 250 * time.Millisecond
 	haproxyPollEvery   = 5 * time.Second
 	kvTailPrefix       = "observe.tail."
-	kvHAProxyCursor    = "observe.haproxy.since"
 	retentionFirstRun  = time.Minute
 	retentionInterval  = time.Hour
 	accessRetention    = 7 * 24 * time.Hour
@@ -56,8 +55,8 @@ func (s *Service) Start(ctx context.Context) error {
 		go s.tail(ctx, filepath.Join(dir, nginx.StreamAccessLogFile), srcStream)
 		go s.tail(ctx, filepath.Join(dir, nginx.ErrorLogFile), srcNginxError)
 	}
-	if s.app.HAProxy != nil {
-		go s.pollHAProxy(ctx)
+	if s.app.HAProxy != nil || s.app.Balancer != nil {
+		go s.pollLB(ctx)
 	}
 	go s.retentionLoop(ctx)
 	return nil
@@ -104,15 +103,12 @@ func (s *Service) tail(ctx context.Context, path string, src source) {
 	}
 }
 
-// pollHAProxy copies HAProxy engine output (alerts, warnings, notices) into
-// error_log. The cursor is committed with the rows so restarts don't duplicate.
-func (s *Service) pollHAProxy(ctx context.Context) {
-	since := time.Now()
-	if b, err := s.app.Store.GetKV(ctx, kvHAProxyCursor); err == nil {
-		if t, err := time.Parse(time.RFC3339Nano, string(b)); err == nil {
-			since = t
-		}
-	}
+// pollLB copies the active load balancer engine's output (HAProxy alerts,
+// warnings and notices, or Relay Balancer's HAProxy-format lines) into
+// error_log with the engine as the source. Each engine has its own cursor,
+// committed with the rows so restarts don't duplicate.
+func (s *Service) pollLB(ctx context.Context) {
+	cursors := map[string]time.Time{}
 	tick := time.NewTicker(haproxyPollEvery)
 	defer tick.Stop()
 	for {
@@ -121,34 +117,58 @@ func (s *Service) pollHAProxy(ctx context.Context) {
 			return
 		case <-tick.C:
 		}
-		cctx, cancel := context.WithTimeout(ctx, 4*time.Second)
-		resp, err := s.app.HAProxy.Logs(cctx, since, 1000)
-		cancel()
-		if err != nil || resp == nil {
-			continue // agent not running (dev) or restarting
+		s.pollLBOnce(ctx, cursors)
+	}
+}
+
+// kvLBCursor is the poll cursor of a load balancer engine
+// ("observe.haproxy.since", "observe.balancer.since").
+func kvLBCursor(engine string) string { return "observe." + engine + ".since" }
+
+// pollLBOnce fetches new output of the active load balancer engine and hands
+// it to the ingester. cursors holds the per-engine positions.
+func (s *Service) pollLBOnce(ctx context.Context, cursors map[string]time.Time) {
+	c, engine := s.app.LBClient(ctx)
+	if c == nil {
+		return
+	}
+	since, ok := cursors[engine]
+	if !ok {
+		since = time.Now()
+		if b, err := s.app.Store.GetKV(ctx, kvLBCursor(engine)); err == nil {
+			if t, err := time.Parse(time.RFC3339Nano, string(b)); err == nil {
+				since = t
+			}
 		}
-		last := since
-		var recs []store.ErrorRecord
-		for _, l := range resp.Lines {
-			if !l.At.After(since) {
-				continue
-			}
-			if l.At.After(last) {
-				last = l.At
-			}
-			if rec, ok := ParseHAProxyLine(l); ok {
-				recs = append(recs, rec)
-			}
-		}
-		if !last.After(since) {
+		cursors[engine] = since
+	}
+	cctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	resp, err := c.Logs(cctx, since, 1000)
+	cancel()
+	if err != nil || resp == nil {
+		return // agent not running (dev), restarting or its container stopped
+	}
+	last := since
+	var recs []store.ErrorRecord
+	for _, l := range resp.Lines {
+		if !l.At.After(since) {
 			continue
 		}
-		since = last
-		select {
-		case s.ing.in <- chunk{src: srcHAProxy, errs: recs, kvKey: kvHAProxyCursor, kvVal: []byte(since.UTC().Format(time.RFC3339Nano))}:
-		case <-ctx.Done():
-			return
+		if l.At.After(last) {
+			last = l.At
 		}
+		if rec, ok := ParseHAProxyLine(l); ok {
+			rec.Source = engine
+			recs = append(recs, rec)
+		}
+	}
+	if !last.After(since) {
+		return
+	}
+	cursors[engine] = last
+	select {
+	case s.ing.in <- chunk{src: srcHAProxy, errs: recs, kvKey: kvLBCursor(engine), kvVal: []byte(last.UTC().Format(time.RFC3339Nano))}:
+	case <-ctx.Done():
 	}
 }
 

@@ -205,6 +205,15 @@ export interface HostDefaults {
 }
 export type ProxyEngineName = 'nginx' | 'edge'
 export const proxyEngineLabel: Record<ProxyEngineName, string> = { nginx: 'nginx', edge: 'Relay Edge' }
+/** Load balancer engine: HAProxy (default) or Relay Balancer (beta, built into Relay). */
+export type LBEngineName = 'haproxy' | 'balancer'
+export const lbEngineLabel: Record<LBEngineName, string> = { haproxy: 'HAProxy', balancer: 'Relay Balancer' }
+/** Command that validates the engine's config. */
+export const lbCheckName: Record<LBEngineName, string> = { haproxy: 'haproxy -c', balancer: 'relay balancer check' }
+/** File the engine's config is rendered to. */
+export const lbConfigFile: Record<LBEngineName, string> = { haproxy: 'haproxy.cfg', balancer: 'balancer.json' }
+/** Normalizes an API value to a load balancer engine (absent/unknown = HAProxy). */
+export const asLBEngine = (v: unknown): LBEngineName => (v === 'balancer' ? 'balancer' : 'haproxy')
 
 export interface GeneralSettings {
   instanceName: string
@@ -218,6 +227,8 @@ export interface GeneralSettings {
   lanCidr: string
   /** Reverse proxy engine for the HTTP/HTTPS ports and streams. */
   proxyEngine: ProxyEngineName
+  /** Load balancer engine for backends and frontends (default haproxy). */
+  lbEngine?: LBEngineName
   defaults: HostDefaults
   setupDone: boolean
 }
@@ -457,7 +468,7 @@ export interface Version {
 }
 
 /** GET /api/engines (slice engine) */
-export type EngineKind = ProxyEngineName | 'haproxy'
+export type EngineKind = ProxyEngineName | LBEngineName
 export interface EngineState {
   engine: EngineKind
   reachable: boolean
@@ -484,8 +495,11 @@ export interface EnginesStatus {
   nginx: EngineState
   haproxy: EngineState
   edge: EngineState
+  balancer?: EngineState
   /** Active proxy engine: the live version's, or the General setting before the first apply. */
   proxy: ProxyEngineName
+  /** Active load balancer engine, same rules as proxy. */
+  lb?: LBEngineName
 }
 
 /** Settings → Updates (slice engine). GET/PUT /api/settings/engines */
@@ -520,7 +534,7 @@ export interface EngineUpdateInfo {
   changesUrl: string
   modules: string[]
   missingModules: string[]
-  /** nginx only: true while Relay Edge is the selected proxy engine. */
+  /** True while the other engine is selected: Relay Edge (for nginx) or Relay Balancer (for HAProxy). */
   inactive?: boolean
   standby?: boolean
 }
@@ -601,7 +615,7 @@ export interface UpgradeJob {
   finishedAt?: string
 }
 
-/** POST /api/preview/* (proxy: host/stream on the active proxy engine; lb: haproxy backend/frontend) */
+/** POST /api/preview/* (proxy: host/stream on the active proxy engine; lb: backend/frontend on the active load balancer engine) */
 export interface ConfigPreview { config: string; valid: boolean; output: string; engine?: EngineKind }
 
 /** GET /api/health (slice observe) → Record<target, HealthStatus>; target = host:<id> | stream:<id> */

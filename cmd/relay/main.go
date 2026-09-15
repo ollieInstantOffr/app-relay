@@ -1,9 +1,11 @@
 // Command relay is the Relay reverse proxy + load balancer manager.
 //
 //	relay [serve]                         run the API, UI and MCP server
-//	relay agent --engine nginx|haproxy|edge  supervise an engine (engine containers)
+//	relay agent --engine nginx | haproxy | edge | balancer  supervise an engine (engine containers)
 //	relay edge run --config FILE          run Relay Edge, the built-in reverse proxy
 //	relay edge check DIR                  validate a Relay Edge config release
+//	relay balancer run --config FILE      run Relay Balancer, the built-in load balancer
+//	relay balancer check DIR              validate a Relay Balancer config release
 //	relay users reset-password <name>     reset a user's password
 //	relay mcp-stdio --url URL --token T   MCP over stdio for local clients
 //	relay version
@@ -29,6 +31,7 @@ import (
 	"github.com/instantoffr/relay/internal/apply"
 	"github.com/instantoffr/relay/internal/auth"
 	"github.com/instantoffr/relay/internal/backup"
+	"github.com/instantoffr/relay/internal/balancer"
 	"github.com/instantoffr/relay/internal/core"
 	"github.com/instantoffr/relay/internal/docker"
 	"github.com/instantoffr/relay/internal/edge"
@@ -73,7 +76,7 @@ func main() {
 		err = serve(ctx, log)
 	case "agent":
 		fs := flag.NewFlagSet("agent", flag.ExitOnError)
-		engine := fs.String("engine", "", "nginx | haproxy | edge")
+		engine := fs.String("engine", "", "nginx | haproxy | edge | balancer")
 		runDir := fs.String("run-dir", envOr("RELAY_RUN_DIR", "/run/relay"), "socket directory")
 		logDir := fs.String("log-dir", envOr("RELAY_LOG_DIR", "/var/log/relay"), "log directory")
 		dataDir := fs.String("data-dir", envOr("RELAY_DATA_DIR", "/data"), "data directory")
@@ -81,6 +84,8 @@ func main() {
 		err = agent.Run(ctx, agent.Options{Engine: *engine, RunDir: *runDir, LogDir: *logDir, DataDir: *dataDir, Log: log.With("engine", *engine), Version: version})
 	case "edge":
 		err = edge.RunCLI(ctx, args, os.Stdout, os.Stderr)
+	case "balancer":
+		err = balancer.RunCLI(ctx, args, os.Stdout, os.Stderr)
 	case "users":
 		if len(args) != 2 || args[0] != "reset-password" {
 			err = errors.New("usage: relay users reset-password <username>")

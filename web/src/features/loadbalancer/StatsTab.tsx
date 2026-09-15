@@ -3,7 +3,7 @@ import {
   Badge, Card, EmptyState, NoMatches, Pagination, SearchInput, Select, Skeleton, Sparkline, StatCard, Status, TableToolbar, Tooltip, cx, matchesSearch,
   useFitRows, usePagination, type Tone,
 } from '../../components/ui'
-import { useEntities, useLBStats } from '../../lib/queries'
+import { useEntities, useLBEngine, useLBStats } from '../../lib/queries'
 import { compact, duration, ms } from '../../lib/format'
 import type { Backend, BackendStats, ServerStats } from '../../lib/types'
 import { useLBSeries } from './lbApi'
@@ -45,6 +45,7 @@ export default function StatsTab({ onEdit }: { onEdit: (id: string) => void }) {
   const [status, setStatus] = useState('')
   const [mode, setMode] = useState('')
   const statsQ = useLBStats(2_000)
+  const lb = useLBEngine()
   const series = useLBSeries(range, undefined, range === '1h' ? 10_000 : 60_000).data
   const backends = useEntities('backends').data ?? []
   const cardRef = useRef<HTMLDivElement>(null)
@@ -96,7 +97,7 @@ export default function StatsTab({ onEdit }: { onEdit: (id: string) => void }) {
     <>
       <div className="row between">
         <Status tone={running ? 'ok' : 'muted'} pulse={running}>
-          {running ? 'Live · 2 s refresh' : 'HAProxy is not running'}
+          {running ? `Live · 2 s refresh · ${lb.label}` : `${lb.label} is not running`}
         </Status>
         <div style={{ width: 140 }}>
           <Select inputSize="sm" value={range} options={RANGES} onChange={setRange} />
@@ -131,8 +132,8 @@ export default function StatsTab({ onEdit }: { onEdit: (id: string) => void }) {
             title="No live statistics"
             description={
               backends.length
-                ? 'HAProxy is not running or not reachable. Stats appear once the load balancer config is applied and the engine is up.'
-                : 'HAProxy starts once you create the first backend and apply.'
+                ? `${lb.label} is not running or not reachable. Stats appear once the load balancer config is applied and the engine is up.`
+                : `${lb.label} starts once you create the first backend and apply.`
             }
           />
         </Card>
@@ -165,7 +166,7 @@ export default function StatsTab({ onEdit }: { onEdit: (id: string) => void }) {
                       </Tooltip>
                     </th>
                     <th className="num">
-                      <Tooltip content="95th percentile of HAProxy's rolling response-time average (last 1024 requests), sampled every 2 s over the last hour">
+                      <Tooltip content="95th percentile of the load balancer's rolling response-time average (last 1024 requests), sampled every 2 s over the last hour">
                         <span>Resp p95 ≈</span>
                       </Tooltip>
                     </th>

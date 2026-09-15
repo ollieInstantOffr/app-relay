@@ -144,6 +144,7 @@ export const ERROR_SOURCE_OPTIONS = [
   { value: 'nginx', label: 'nginx' },
   { value: 'edge', label: 'Relay Edge' },
   { value: 'haproxy', label: 'haproxy' },
+  { value: 'balancer', label: 'Relay Balancer' },
   { value: 'relay', label: 'relay' },
 ]
 

@@ -1,7 +1,8 @@
 package apply
 
-// Engine containers. An engine that isn't needed (the proxy engine that
-// isn't selected, HAProxy stopped by an admin or without backends) doesn't
+// Engine containers. An engine that isn't needed (the proxy or load balancer
+// engine that isn't selected, the load balancer stopped by an admin or
+// without backends) doesn't
 // only stop its process: Relay stops its container too, and starts it again
 // before the engine is used. Without Docker access (app.Containers nil or
 // the Docker API unreachable) engines are only stopped inside their containers.
@@ -19,7 +20,7 @@ import (
 	"github.com/instantoffr/relay/internal/store"
 )
 
-// kvStoppedEngines records engines an admin stopped (HAProxy), so their
+// kvStoppedEngines records engines an admin stopped (HAProxy, Relay Balancer), so their
 // stopped container reads as standby and PushLive keeps them stopped.
 const kvStoppedEngines = "apply.stoppedEngines"
 
@@ -47,12 +48,7 @@ func (s *Service) setStoppedEngine(ctx context.Context, engine string, stopped b
 	}
 }
 
-func anyEngineLabel(engine string) string {
-	if engine == agent.EngineHAProxy {
-		return "HAProxy"
-	}
-	return engineLabel(engine)
-}
+func anyEngineLabel(engine string) string { return engineLabel(engine) }
 
 // ensureEngine starts an engine's stopped container. It does nothing when the
 // agent answers or the container isn't stopped (the usual "unreachable" error
@@ -81,7 +77,7 @@ func (s *Service) engineIdle(ctx context.Context, engine, selected string, live 
 	if agent.IsProxyEngine(engine) {
 		return engine != selected
 	}
-	return live == nil || !live.HAProxyRunning || st.Stopped || s.stoppedEngines(ctx)[engine]
+	return live == nil || rowLBEngine(live) != engine || !live.HAProxyRunning || st.Stopped || s.stoppedEngines(ctx)[engine]
 }
 
 // manageContainers stops the containers of idle engines and starts the
@@ -89,26 +85,30 @@ func (s *Service) engineIdle(ctx context.Context, engine, selected string, live 
 // with the apply lock held; stoppedNow lists engines it just stopped.
 func (s *Service) manageContainers(ctx context.Context, st *core.EnginesStatus, live *store.VersionRow, selected string, stoppedNow map[string]bool) {
 	ctrs := s.app.Containers
-	if ctrs == nil || st == nil || s.switching() != "" {
+	if ctrs == nil || st == nil || s.anySwitching() {
 		return
 	}
-	states := map[string]core.EngineState{agent.EngineNginx: st.Nginx, agent.EngineEdge: st.Edge, agent.EngineHAProxy: st.HAProxy}
+	states := map[string]core.EngineState{agent.EngineNginx: st.Nginx, agent.EngineEdge: st.Edge, agent.EngineHAProxy: st.HAProxy, agent.EngineBalancer: st.Balancer}
 	if ps := states[selected]; !ps.Reachable && ctrs.ContainerState(ctx, selected) == "stopped" {
 		s.log.Info("the selected proxy engine's container is stopped, starting it", "engine", selected)
 		if err := ctrs.StartContainer(ctx, selected); err != nil {
 			s.log.Warn("start "+selected+" container", "err", err)
 		}
 	}
-	for _, engine := range []string{agent.EngineNginx, agent.EngineEdge, agent.EngineHAProxy} {
+	lbSelected := rowLBEngine(live)
+	for _, engine := range []string{agent.EngineNginx, agent.EngineEdge, agent.EngineHAProxy, agent.EngineBalancer} {
 		es := states[engine]
 		if engine == selected || !es.Reachable || (es.Running && !stoppedNow[engine]) || !s.engineIdle(ctx, engine, selected, live, es) {
 			continue
 		}
-		reason := "HAProxy is stopped"
-		if agent.IsProxyEngine(engine) {
+		reason := engineLabel(engine) + " is stopped"
+		switch {
+		case agent.IsProxyEngine(engine):
 			reason = engineLabel(selected) + " is the selected proxy engine"
-		} else if live != nil && !live.HAProxyRunning {
-			reason = "HAProxy has no backends or frontends"
+		case live != nil && engine != lbSelected:
+			reason = engineLabel(lbSelected) + " is the selected load balancer engine"
+		case live != nil && !live.HAProxyRunning:
+			reason = engineLabel(engine) + " has no backends or frontends"
 		}
 		if err := ctrs.StopContainer(ctx, engine, reason); err != nil {
 			s.log.Warn("stop idle "+engine+" container", "err", err)
@@ -126,7 +126,7 @@ func (s *Service) annotateContainers(ctx context.Context, out *core.EnginesStatu
 	for _, e := range []struct {
 		name string
 		st   *core.EngineState
-	}{{agent.EngineNginx, &out.Nginx}, {agent.EngineEdge, &out.Edge}, {agent.EngineHAProxy, &out.HAProxy}} {
+	}{{agent.EngineNginx, &out.Nginx}, {agent.EngineEdge, &out.Edge}, {agent.EngineHAProxy, &out.HAProxy}, {agent.EngineBalancer, &out.Balancer}} {
 		if e.st.Reachable {
 			continue
 		}
@@ -140,21 +140,23 @@ func (s *Service) annotateContainers(ctx context.Context, out *core.EnginesStatu
 			continue
 		}
 		live, _ := s.app.Store.LiveVersion(ctx, false)
-		e.st.Standby = live == nil || !live.HAProxyRunning || s.stoppedEngines(ctx)[e.name]
+		e.st.Standby = live == nil || !live.HAProxyRunning || s.stoppedEngines(ctx)[e.name] || e.name != out.LB
 	}
 }
 
 // EngineAction starts, stops or reloads an engine (admin UI / API). Start
 // brings a stopped container back and pushes the live version first; stopping
-// HAProxy or a proxy engine that isn't selected stops its container too.
+// a load balancer engine or a proxy engine that isn't selected stops its
+// container too.
 func (s *Service) EngineAction(ctx context.Context, engine, action string) (*agent.ActionResponse, error) {
 	c := s.app.Client(engine)
 	if c == nil {
-		return nil, httpx.Errorf(http.StatusNotFound, "not_found", "unknown engine (nginx | haproxy | edge)")
+		return nil, httpx.Errorf(http.StatusNotFound, "not_found", "unknown engine (nginx | haproxy | edge | balancer)")
 	}
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 	selected := s.app.ProxyEngine(ctx)
+	lbSelected := s.app.LBEngine(ctx)
 	ctrs := s.app.Containers
 	containerStopped := func() bool { return ctrs != nil && ctrs.ContainerState(ctx, engine) == "stopped" }
 	label := anyEngineLabel(engine)
@@ -163,6 +165,9 @@ func (s *Service) EngineAction(ctx context.Context, engine, action string) (*age
 	case "start":
 		if agent.IsProxyEngine(engine) && engine != selected {
 			return nil, httpx.Errorf(http.StatusConflict, "not_selected", fmt.Sprintf("%s isn't the selected proxy engine; switch engines in Settings → Proxy engine.", label))
+		}
+		if agent.IsLBEngine(engine) && engine != lbSelected {
+			return nil, httpx.Errorf(http.StatusConflict, "not_selected", fmt.Sprintf("%s isn't the selected load balancer engine. Switch in Settings → Load balancer engine.", label))
 		}
 		if err := s.ensureEngine(ctx, engine, nil); err != nil {
 			return nil, httpx.Errorf(http.StatusServiceUnavailable, "engine_unavailable", err.Error())
@@ -177,7 +182,7 @@ func (s *Service) EngineAction(ctx context.Context, engine, action string) (*age
 		resp, err := c.Stop(ctx)
 		if err != nil {
 			if containerStopped() {
-				if engine == agent.EngineHAProxy {
+				if agent.IsLBEngine(engine) {
 					s.setStoppedEngine(ctx, engine, true)
 				}
 				return &agent.ActionResponse{OK: true, Output: "already stopped"}, nil
@@ -187,10 +192,10 @@ func (s *Service) EngineAction(ctx context.Context, engine, action string) (*age
 		if !resp.OK {
 			return resp, nil
 		}
-		if engine == agent.EngineHAProxy {
+		if agent.IsLBEngine(engine) {
 			s.setStoppedEngine(ctx, engine, true)
 		}
-		if ctrs != nil && (engine == agent.EngineHAProxy || engine != selected) {
+		if ctrs != nil && (agent.IsLBEngine(engine) || engine != selected) {
 			if err := ctrs.StopContainer(ctx, engine, "stopped by "+core.ActorFrom(ctx).Label()); err != nil {
 				s.log.Warn("stop "+engine+" container", "err", err)
 			}

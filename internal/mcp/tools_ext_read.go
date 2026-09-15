@@ -49,7 +49,7 @@ func (s *Service) registerExtReadTools() {
 		Description: "Get one access list by id or name: IP rules in order, basic auth realm and usernames (never passwords), satisfy-any and which hosts use it."},
 		nil, s.toolGetAccessList)
 	addRead(s, toolInfo{Name: "list_frontends", Title: "List load balancer frontends",
-		Description: "List HAProxy frontends: bind address, mode, routing rules with their conditions and target backends, default backend, PROXY protocol and compression."},
+		Description: "List load balancer frontends (HAProxy or Relay Balancer): bind address, mode, routing rules with their conditions and target backends, default backend, PROXY protocol and compression."},
 		nil, s.apiReadTool("/frontends", "frontends", true))
 	addRead(s, toolInfo{Name: "get_default_host", Title: "Get the default host",
 		Description: "What requests for unknown domains or the bare IP get: close, 404, redirect or a proxy host, and the certificate presented to unknown TLS names."},
@@ -58,7 +58,7 @@ func (s *Service) registerExtReadTools() {
 		Description: "List applied configuration versions, newest first: id, status (live, superseded, rolled_back, failed), who applied it, when, the changes it contained, the proxy engine and any error. Use get_config_diff to see a version's changes and rollback_version to restore one."},
 		nil, s.toolListVersions)
 	addRead(s, toolInfo{Name: "get_config_diff", Title: "Show a config diff",
-		Description: "Show the rendered configuration diff of a version (against the previous one or another version), or of the pending changes (pending: true) — the exact nginx / Relay Edge and HAProxy lines that change. Secrets are redacted."},
+		Description: "Show the rendered configuration diff of a version (against the previous one or another version), or of the pending changes (pending: true) — the exact nginx / Relay Edge and HAProxy / Relay Balancer lines that change. Secrets are redacted."},
 		nil, s.toolConfigDiff)
 	addRead(s, toolInfo{Name: "get_health", Title: "Get health of hosts and streams",
 		Description: "Health of every proxy host, stream and backend server from Relay's checks: healthy, degraded, down, disabled or unknown, with the last error and when it was checked."},
@@ -67,11 +67,11 @@ func (s *Service) registerExtReadTools() {
 		Description: "The Overview dashboard numbers: requests, 5xx rate, p50/p95 latency and bandwidth for the last 24 hours with the previous-period change, requests to unknown hosts, the active proxy engine's state and certificates expiring soon."},
 		nil, s.apiReadTool("/metrics/overview", "overview", true))
 	addRead(s, toolInfo{Name: "get_engine_status", Title: "Get engine status",
-		Description: "Status of the nginx, Relay Edge and HAProxy engines: which proxy engine is active, whether each agent is reachable and running, version, config hash, last reload and last error."},
+		Description: "Status of the nginx, Relay Edge, HAProxy and Relay Balancer engines: which proxy engine (proxy) and load balancer engine (lb) are active, whether each agent is reachable and running, version, config hash, last reload and last error."},
 		nil, s.apiReadTool("/engines", "engines", false))
 	addRead(s, toolInfo{Name: "get_engine_logs", Title: "Get engine output",
-		Description: "Recent output of an engine's process (nginx, Relay Edge or HAProxy): startup messages, reload results and errors such as ports already in use."},
-		map[string][]any{"engine": {"nginx", "edge", "haproxy"}}, s.toolEngineLogs)
+		Description: "Recent output of an engine's process (nginx, Relay Edge, HAProxy or Relay Balancer): startup messages, reload results and errors such as ports already in use."},
+		map[string][]any{"engine": {"nginx", "edge", "haproxy", "balancer"}}, s.toolEngineLogs)
 	addRead(s, toolInfo{Name: "get_updates", Title: "Get update status",
 		Description: "Cached update status: Relay's running version vs the newest on its update branch (with new commits), and the running vs latest nginx and HAProxy versions. Use check_for_updates for a fresh check."},
 		nil, s.apiReadTool("/engines/updates", "updates", false))
@@ -88,7 +88,7 @@ func (s *Service) registerExtReadTools() {
 		Description: "Backups on this instance: file, size, trigger (manual, scheduled, before-upgrade), time and whether it was copied to S3 (remoteStatus)."},
 		nil, s.apiReadTool("/backups", "backups", true))
 	addRead(s, toolInfo{Name: "get_ports", Title: "Get port usage",
-		Description: "Which ports the configuration uses and who owns them (reverse proxy HTTP/HTTPS/HTTP3 and streams, HAProxy frontends and stats, the admin UI), with conflicts against ports already in use on the host."},
+		Description: "Which ports the configuration uses and who owns them (reverse proxy HTTP/HTTPS/HTTP3 and streams, load balancer frontends and stats, the admin UI), with conflicts against ports already in use on the host."},
 		nil, s.apiReadTool("/ports", "ports", false))
 }
 
@@ -195,8 +195,8 @@ func (s *Service) toolEngineLogs(ctx context.Context, c *call, in engineLogsArgs
 		return nil, err
 	}
 	engine := strings.ToLower(strings.TrimSpace(in.Engine))
-	if engine != "nginx" && engine != "edge" && engine != "haproxy" {
-		return nil, fmt.Errorf("engine must be nginx, edge or haproxy")
+	if engine != "nginx" && engine != "edge" && engine != "haproxy" && engine != "balancer" {
+		return nil, fmt.Errorf("engine must be nginx, edge, haproxy or balancer")
 	}
 	limit := in.Limit
 	if limit <= 0 {

@@ -17,7 +17,7 @@ const (
 	srcAccess source = iota
 	srcStream
 	srcNginxError
-	srcHAProxy
+	srcHAProxy // load balancer engine output (HAProxy or Relay Balancer)
 )
 
 // chunk is a unit of work handed from a tailer/poller to the ingester.

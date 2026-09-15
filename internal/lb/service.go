@@ -1,5 +1,7 @@
-// Package lb implements the load balancer slice: HAProxy runtime stats,
-// server admin states, the Expose wizard and the related REST API.
+// Package lb implements the load balancer slice: runtime stats, server admin
+// states, the Expose wizard and the related REST API. It talks to the active
+// load balancer engine (HAProxy or Relay Balancer); both answer the same
+// runtime API subset (show stat, show info, set server …) in HAProxy's format.
 package lb
 
 import (
@@ -74,13 +76,24 @@ func (s *Service) watchApply(ctx context.Context) {
 	}
 }
 
-// reapplyStates sets persisted drain/maint admin states on the running
-// haproxy (reloads start every server in the state rendered in the config:
-// maint is rendered as `disabled`, drain has no config keyword).
+// runtime runs one command on the active load balancer engine's runtime API
+// and returns its output and the engine name.
+func (s *Service) runtime(ctx context.Context, command string) (string, string, error) {
+	c, engine := s.app.LBClient(ctx)
+	if c == nil {
+		return "", engine, agent.ErrUnavailable{Err: errors.New("agent client not configured")}
+	}
+	out, err := c.Runtime(ctx, command)
+	return out, engine, err
+}
+
+// reapplyStates sets persisted drain/maint admin states on the running load
+// balancer (reloads start every server in the state rendered in the config:
+// maint is rendered as disabled, drain has no config keyword).
 func (s *Service) reapplyStates(ctx context.Context, reason string) {
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	out, err := s.app.HAProxy.Runtime(cctx, "show stat")
+	out, _, err := s.runtime(cctx, "show stat")
 	if err != nil {
 		return
 	}
@@ -114,7 +127,7 @@ func (s *Service) reapplyStates(ctx context.Context, reason string) {
 			default:
 				continue
 			}
-			if res, err := s.app.HAProxy.Runtime(cctx, fmt.Sprintf("set server %s/%s state %s", b.Name, name, want)); err == nil && strings.TrimSpace(res) == "" {
+			if res, _, err := s.runtime(cctx, fmt.Sprintf("set server %s/%s state %s", b.Name, name, want)); err == nil && strings.TrimSpace(res) == "" {
 				n++
 			}
 		}
@@ -129,7 +142,7 @@ func (s *Service) reapplyStates(ctx context.Context, reason string) {
 func (s *Service) Stats(ctx context.Context) (*core.LBStats, error) {
 	ls, _ := s.smp.snapshot(3 * time.Second)
 	if ls == nil {
-		out, err := s.app.HAProxy.Runtime(ctx, "show stat")
+		out, _, err := s.runtime(ctx, "show stat")
 		if err != nil {
 			return &core.LBStats{Backends: []core.BackendStats{}, Frontends: []core.FrontendStats{}}, nil
 		}
@@ -304,7 +317,7 @@ func (s *Service) SetServerState(ctx context.Context, backendID, serverID, state
 // StateResult reports what SetServerStateGrace did.
 type StateResult struct {
 	State   string `json:"state"`
-	Runtime bool   `json:"runtime"`        // applied to the running haproxy
+	Runtime bool   `json:"runtime"`        // applied to the running load balancer
 	Note    string `json:"note,omitempty"` // why not applied at runtime
 }
 
@@ -460,18 +473,19 @@ func (s *Service) SetServerWeight(ctx context.Context, backendID, serverID strin
 }
 
 // runtimeServerCmd runs `set server <backend>/<server> <args>`. A missing
-// agent/haproxy or a server that is not in the live config yet is not an
-// error: the change is persisted and takes effect on the next apply.
+// agent / load balancer or a server that is not in the live config yet is not
+// an error: the change is persisted and takes effect on the next apply.
 func (s *Service) runtimeServerCmd(ctx context.Context, backend, server, args string, res *StateResult) error {
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := s.app.HAProxy.Runtime(cctx, fmt.Sprintf("set server %s/%s %s", backend, server, args))
+	out, engine, err := s.runtime(cctx, fmt.Sprintf("set server %s/%s %s", backend, server, args))
+	label := core.ProxyEngineLabel(engine)
 	if err != nil {
 		var ua agent.ErrUnavailable
 		if errors.As(err, &ua) {
-			res.Note = "HAProxy is not reachable; takes effect on the next apply"
+			res.Note = label + " is not reachable; takes effect on the next apply"
 		} else {
-			res.Note = "HAProxy is not running; takes effect on the next apply"
+			res.Note = label + " is not running; takes effect on the next apply"
 			s.app.Log.Debug("lb: runtime command", "err", err)
 		}
 		return nil
@@ -483,7 +497,7 @@ func (s *Service) runtimeServerCmd(ctx context.Context, backend, server, args st
 	case strings.Contains(out, "No such"):
 		res.Note = "not in the live config yet; takes effect on the next apply"
 	default:
-		return httpx.Errorf(502, "runtime_error", "HAProxy: "+out)
+		return httpx.Errorf(502, "runtime_error", label+": "+out)
 	}
 	return nil
 }

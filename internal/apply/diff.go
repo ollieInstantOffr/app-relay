@@ -61,12 +61,14 @@ func diffFileSets(old, new map[string]string) []FileDiff {
 	return out
 }
 
-// pathRank orders files: haproxy.cfg, nginx.conf / edge.json, hosts,
-// redirects, streams, the rest (htpasswd/…).
+// pathRank orders files: haproxy.cfg / balancer.json, nginx.conf / edge.json,
+// hosts, redirects, streams, the rest (htpasswd/…).
 func pathRank(p string) string {
 	switch {
 	case p == "haproxy.cfg":
 		return "0"
+	case p == "balancer/balancer.json":
+		return "0" + p
 	case p == "nginx.conf":
 		return "1"
 	case p == "edge/edge.json" || p == "edge.json":

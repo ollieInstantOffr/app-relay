@@ -56,11 +56,12 @@ func (e *testEnv) selectEngine(t *testing.T, engine string) {
 }
 
 func (e *testEnv) resetCalls() {
-	for _, f := range []*fakeAgent{e.nginx, e.edge} {
+	all := []*fakeAgent{e.nginx, e.edge, e.haproxy, e.balancer}
+	for _, f := range all {
 		f.mu.Lock()
 	}
 	e.calls = nil
-	for _, f := range []*fakeAgent{e.nginx, e.edge} {
+	for _, f := range all {
 		f.mu.Unlock()
 	}
 }

@@ -9,6 +9,7 @@ import PublicDNSSettings from '../../features/settings/PublicDNSSettings'
 import TLSSettings from '../../features/settings/TLSSettings'
 import ErrorPagesSettings from '../../features/settings/ErrorPagesSettings'
 import ProxyEngineSettings from '../../features/settings/ProxyEngineSettings'
+import LBEngineSettings from '../../features/settings/LBEngineSettings'
 import HAProxySettings from '../../features/settings/HAProxySettings'
 import EnginesSettings from '../../features/settings/EnginesSettings'
 import MCPSettings from '../../features/settings/MCPSettings'
@@ -33,7 +34,8 @@ export const SETTINGS_GROUPS: { label: string; sections: SettingsSection[] }[] =
     label: 'Traffic',
     sections: [
       { id: 'proxy', label: 'Proxy engine', icon: 'hosts', component: ProxyEngineSettings },
-      { id: 'haproxy', label: 'HAProxy engine', icon: 'load-balancer', component: HAProxySettings },
+      { id: 'lb-engine', label: 'Load balancer engine', icon: 'power', component: LBEngineSettings },
+      { id: 'load-balancer', label: 'Load balancer', icon: 'load-balancer', component: HAProxySettings },
       { id: 'tls', label: 'Default TLS', icon: 'certificates', component: TLSSettings },
       { id: 'error-pages', label: 'Error pages', icon: 'warning', component: ErrorPagesSettings },
     ],
@@ -58,8 +60,12 @@ export const SETTINGS_GROUPS: { label: string; sections: SettingsSection[] }[] =
 
 export const SETTINGS_SECTIONS: SettingsSection[] = SETTINGS_GROUPS.flatMap((g) => g.sections)
 
+/** Old section ids that still work as links. */
+const SECTION_ALIASES: Record<string, string> = { haproxy: 'load-balancer' }
+
 export default function SettingsLayout() {
   const { section } = useParams()
+  if (section && SECTION_ALIASES[section]) return <Navigate to={`/settings/${SECTION_ALIASES[section]}`} replace />
   const current = SETTINGS_SECTIONS.find((s) => s.id === section)
   if (!current) return <Navigate to="/settings/general" replace />
   const Page = current.component

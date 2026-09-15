@@ -1,4 +1,4 @@
-// Owner: slice observe — Error log tab (nginx / Relay Edge error.log, HAProxy engine output).
+// Owner: slice observe — Error log tab (nginx / Relay Edge error.log, HAProxy / Relay Balancer engine output).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery } from '@tanstack/react-query'
@@ -21,7 +21,7 @@ function levelClass(level: string): string {
   return 'st-muted'
 }
 
-const sourceTone: Record<string, 'info' | 'dark' | undefined> = { haproxy: 'info', relay: 'dark' }
+const sourceTone: Record<string, 'info' | 'dark' | undefined> = { haproxy: 'info', balancer: 'info', relay: 'dark' }
 
 export default function ErrorTab({ live }: { live: boolean }) {
   const [sp, setSp] = useSearchParams()
@@ -158,7 +158,7 @@ export default function ErrorTab({ live }: { live: boolean }) {
               description={
                 filtered
                   ? 'Widen the time range or remove a filter.'
-                  : 'Reverse proxy and HAProxy warnings and errors show up here — a quiet log is a good log.'
+                  : 'Reverse proxy and load balancer warnings and errors show up here — a quiet log is a good log.'
               }
               actions={
                 filtered ? (

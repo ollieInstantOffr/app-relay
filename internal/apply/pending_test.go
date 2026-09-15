@@ -130,3 +130,32 @@ func TestPendingProxyEngineSwitch(t *testing.T) {
 		t.Fatalf("summary = %q", s)
 	}
 }
+
+func TestPendingLBEngineSwitch(t *testing.T) {
+	live := baseSnap()
+	live.General.LBEngine = "" // versions applied before Relay Balancer existed
+	cur := baseSnap()
+	cur.General.LBEngine = "haproxy"
+	if got := computePending(cur, live); len(got) != 0 {
+		t.Fatalf("empty lb engine must equal haproxy: %+v", got)
+	}
+	cur.General.LBEngine = "balancer"
+	items := computePending(cur, live)
+	if len(items) != 1 || items[0].Kind != "settings" || items[0].ID != model.SettingsGeneral {
+		t.Fatalf("items = %+v", items)
+	}
+	if s := summarize(items, cur, live); s != "Load balancer engine: HAProxy → Relay Balancer" {
+		t.Fatalf("summary = %q", s)
+	}
+	cur.General.ProxyEngine = "edge"
+	if s := summarize(items, cur, live); s != "Proxy engine: nginx → Relay Edge; load balancer engine: HAProxy → Relay Balancer" {
+		t.Fatalf("summary = %q", s)
+	}
+	cur.General.HTTP3 = true
+	if s := summarize(items, cur, live); s != "General settings changed (proxy engine: nginx → Relay Edge; load balancer engine: HAProxy → Relay Balancer)" {
+		t.Fatalf("summary = %q", s)
+	}
+	if settingsLabels[model.SettingsHAProxy] != "Load balancer settings" {
+		t.Fatal("settings label")
+	}
+}

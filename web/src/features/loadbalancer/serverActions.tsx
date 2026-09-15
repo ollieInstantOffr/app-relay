@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, ConfirmDialog, Dialog, Field, Input, Select, useToast, type MenuEntry } from '../../components/ui'
-import { useSaveEntity } from '../../lib/queries'
+import { useLBEngine, useSaveEntity } from '../../lib/queries'
 import { pluralize } from '../../lib/format'
 import type { Backend, Server, ServerStats } from '../../lib/types'
 import { applyNowAction, useServerActions, type StateResult } from './lbApi'
@@ -12,12 +12,13 @@ export function useServerMenu(backend: Backend) {
   const toast = useToast()
   const actions = useServerActions()
   const save = useSaveEntity('backends')
+  const lb = useLBEngine()
   const [drain, setDrain] = useState<{ server: Server; stats?: ServerStats } | null>(null)
   const [weight, setWeight] = useState<Server | null>(null)
   const [remove, setRemove] = useState<Server | null>(null)
 
   const report = (res: StateResult, title: string) => {
-    if (res.runtime) toast.show({ kind: 'success', title, message: 'Applied to HAProxy immediately and saved to the backend.' })
+    if (res.runtime) toast.show({ kind: 'success', title, message: `Applied to ${lb.label} immediately and saved to the backend.` })
     else toast.show({ kind: 'info', title, message: res.note ?? 'Saved · takes effect on the next apply.', actions: [applyNowAction] })
   }
 
@@ -135,6 +136,7 @@ export function DrainDialog({ server, stats, onClose, onConfirm }: {
 }) {
   const [grace, setGrace] = useState('300')
   const [busy, setBusy] = useState(false)
+  const lbLabel = useLBEngine().label
   return (
     <Dialog
       open
@@ -164,7 +166,7 @@ export function DrainDialog({ server, stats, onClose, onConfirm }: {
         <Field label="Grace timeout">
           <Select options={GRACE} value={grace} onChange={setGrace} />
         </Field>
-        <Field label="Active sessions" hint={stats ? (stats.current ? 'switches to MAINT once these finish' : 'idle · goes to MAINT right away') : 'HAProxy not reporting this server'}>
+        <Field label="Active sessions" hint={stats ? (stats.current ? 'switches to MAINT once these finish' : 'idle · goes to MAINT right away') : `${lbLabel} isn't reporting this server`}>
           <div className="mono" style={{ fontSize: 22, fontWeight: 600, lineHeight: '40px' }}>
             {stats ? pluralize(stats.current, 'session') : '—'}
           </div>
@@ -177,6 +179,7 @@ export function DrainDialog({ server, stats, onClose, onConfirm }: {
 function WeightDialog({ server, onClose, onConfirm }: { server: Server; onClose: () => void; onConfirm: (w: number) => Promise<void> }) {
   const [value, setValue] = useState(String(server.weight))
   const [busy, setBusy] = useState(false)
+  const lbLabel = useLBEngine().label
   const n = Number(value)
   const valid = Number.isInteger(n) && n >= 1 && n <= 256
   const submit = async () => {
@@ -197,7 +200,7 @@ function WeightDialog({ server, onClose, onConfirm }: { server: Server; onClose:
       onClose={onClose}
       width={420}
       title={`Set weight for ${server.address}`}
-      description="Share of new sessions relative to the other servers. Applied to HAProxy immediately and saved."
+      description={`Share of new sessions relative to the other servers. Applied to ${lbLabel} immediately and saved.`}
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>

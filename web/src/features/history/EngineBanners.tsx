@@ -1,5 +1,6 @@
 // Engine banners (design 22c/22d): the active proxy engine (nginx or Relay Edge)
-// not running, HAProxy failed after apply (auto-restored), and unreachable agents.
+// and the active load balancer engine (HAProxy or Relay Balancer) not running,
+// an engine that failed after apply (auto-restored), and unreachable agents.
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
@@ -111,11 +112,12 @@ export default function EngineBanners() {
       banners.push(notRunning(proxy, ps, detail))
     }
     const live = versions?.find((v) => v.status === 'live')
-    const hp = data.haproxy
-    const hpStopped = hp.container === 'stopped'
-    if (hasBackends && !hp.reachable && !hpStopped) banners.push(unreachable('haproxy', hp))
-    else if (hasBackends && !hp.running && !hp.standby && live?.haproxyRunning && (hpStopped || (hp.reachable && hp.configured))) {
-      banners.push(notRunning('haproxy', data.haproxy, `${backends?.length ?? 0} backend${backends?.length === 1 ? '' : 's'} unavailable`))
+    const lb: EngineName = data.lb === 'balancer' ? 'balancer' : 'haproxy'
+    const ls = data[lb]
+    const lsStopped = ls?.container === 'stopped'
+    if (ls && hasBackends && !ls.reachable && !lsStopped) banners.push(unreachable(lb, ls))
+    else if (ls && hasBackends && !ls.running && !ls.standby && live?.haproxyRunning && (lsStopped || (ls.reachable && ls.configured))) {
+      banners.push(notRunning(lb, ls, `${backends?.length ?? 0} backend${backends?.length === 1 ? '' : 's'} unavailable`))
     }
   }
 
@@ -155,7 +157,7 @@ export default function EngineBanners() {
     }
     const code = failed.failedStage === 'health' ? '' : firstErrorLine(failed.output)
     const port = bindFailurePort(code)
-    const stream = engine === 'haproxy' ? streamOnPort(streams, port) : undefined
+    const stream = engine === 'haproxy' || engine === 'balancer' ? streamOnPort(streams, port) : undefined
     const against = failed.rolledBackTo ?? liveVersion
     const dismiss = () => {
       sessionStorage.setItem(DISMISS_KEY, String(failed.id))

@@ -1,10 +1,10 @@
 // Shared TanStack Query hooks for entities, settings and cross-slice resources.
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query'
 import { api } from './api'
-import { proxyEngineLabel } from './types'
+import { asLBEngine, lbEngineLabel, proxyEngineLabel } from './types'
 import type {
   Approval, Container, DirectoryUser, EngineKind, EngineState, EnginesStatus, EntityKind, EntityMap, HealthStatus, LBStats, Pending, Session,
-  ProxyEngineName, SettingsKey, SettingsMap,
+  LBEngineName, ProxyEngineName, SettingsKey, SettingsMap,
 } from './types'
 
 export const keys = {
@@ -119,6 +119,18 @@ export function useProxyEngine(): { engine: ProxyEngineName; label: string; stat
   const { data } = useEngines()
   const engine: ProxyEngineName = data?.proxy === 'edge' ? 'edge' : 'nginx'
   return { engine, label: proxyEngineLabel[engine], state: data?.[engine], loaded: !!data }
+}
+
+/** The load balancer engine chosen in Settings → Load balancer engine (used from the next apply). */
+export function useSelectedLBEngine(): LBEngineName {
+  return asLBEngine(useSettings('general').data?.lbEngine)
+}
+
+/** The active load balancer engine (HAProxy or Relay Balancer) and its state. */
+export function useLBEngine(): { engine: LBEngineName; label: string; state: EngineState | undefined; loaded: boolean } {
+  const { data } = useEngines()
+  const engine = asLBEngine(data?.lb)
+  return { engine, label: lbEngineLabel[engine], state: data?.[engine], loaded: !!data }
 }
 
 export function useHealth() {

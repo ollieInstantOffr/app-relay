@@ -394,10 +394,15 @@ type GeneralSettings struct {
 	HTTP3        bool   `json:"http3"`
 	// ProxyEngine serves the HTTP/HTTPS ports and streams: "nginx" (default)
 	// or "edge" (Relay Edge). Switching is a pending change.
-	ProxyEngine string       `json:"proxyEngine"`
-	LANCIDR     string       `json:"lanCidr"`
-	Defaults    HostDefaults `json:"defaults"`
-	SetupDone   bool         `json:"setupDone"`
+	ProxyEngine string `json:"proxyEngine"`
+	// LBEngine runs the load balancer (backends and frontends): "haproxy"
+	// (default) or "balancer" (Relay Balancer, beta). Both render the same
+	// stored backends, frontends and load balancer settings and bind the same
+	// frontends; switching is a pending change.
+	LBEngine  string       `json:"lbEngine"`
+	LANCIDR   string       `json:"lanCidr"`
+	Defaults  HostDefaults `json:"defaults"`
+	SetupDone bool         `json:"setupDone"`
 }
 
 type SecuritySettings struct {

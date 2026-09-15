@@ -94,6 +94,10 @@ func (s *Service) generalBeforeSave(r *http.Request, prev, next any) error {
 	if n.ProxyEngine == "" {
 		n.ProxyEngine = "nginx"
 	}
+	n.LBEngine = strings.ToLower(strings.TrimSpace(n.LBEngine))
+	if n.LBEngine == "" {
+		n.LBEngine = "haproxy"
+	}
 
 	e := model.Errs{}
 	switch {
@@ -147,6 +151,13 @@ func (s *Service) generalBeforeSave(r *http.Request, prev, next any) error {
 		// skipped by Relay Edge and apply again with nginx.
 	default:
 		e.Add("proxyEngine", "Pick nginx or Relay Edge")
+	}
+	switch n.LBEngine {
+	case "haproxy", "balancer":
+		// Both load balancers render the same backends, frontends and load
+		// balancer settings, so switching keeps everything.
+	default:
+		e.Add("lbEngine", "Pick HAProxy or Relay Balancer")
 	}
 	if id := n.Defaults.AccessListID; id != "" {
 		if _, err := s.app.Store.AccessLists().Get(ctx, id); errors.Is(err, store.ErrNotFound) {

@@ -241,3 +241,25 @@ func TestValidSummary(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestInactiveEngine(t *testing.T) {
+	cases := []struct {
+		engine, proxy, lb string
+		want              bool
+	}{
+		{"nginx", "nginx", "haproxy", false},
+		{"nginx", "edge", "haproxy", true},
+		{"haproxy", "nginx", "haproxy", false},
+		{"haproxy", "nginx", "", false},
+		{"haproxy", "nginx", "balancer", true},
+		{"balancer", "nginx", "balancer", false},
+	}
+	for _, c := range cases {
+		if got := inactiveEngine(c.engine, c.proxy, c.lb); got != c.want {
+			t.Errorf("inactiveEngine(%s, %s, %s) = %v", c.engine, c.proxy, c.lb, got)
+		}
+	}
+	if !containerEngine("balancer") || containerLabel("balancer") != "Relay Balancer" {
+		t.Fatal("balancer container engine")
+	}
+}

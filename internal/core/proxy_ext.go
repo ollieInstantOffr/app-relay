@@ -1,7 +1,8 @@
 package core
 
 // Proxy engine selection (slice: engine). Exactly one of nginx and Relay Edge
-// serves the HTTP/HTTPS ports and streams; see docs/EDGE.md.
+// serves the HTTP/HTTPS ports and streams; see docs/EDGE.md. Likewise exactly
+// one of HAProxy and Relay Balancer runs the load balancer; see docs/BALANCER.md.
 
 import (
 	"context"
@@ -15,13 +16,16 @@ import (
 
 const proxyEngineTTL = 3 * time.Second
 
-// ProxyEngineLabel returns the display name of an engine.
+// ProxyEngineLabel returns the display name of an engine (any engine, not
+// only proxy engines).
 func ProxyEngineLabel(engine string) string {
 	switch engine {
 	case agent.EngineEdge:
 		return "Relay Edge"
 	case agent.EngineHAProxy:
 		return "HAProxy"
+	case agent.EngineBalancer:
+		return "Relay Balancer"
 	}
 	return "nginx"
 }
@@ -77,6 +81,8 @@ func (a *App) Client(engine string) *agent.Client {
 		return a.HAProxy
 	case agent.EngineEdge:
 		return a.Edge
+	case agent.EngineBalancer:
+		return a.Balancer
 	}
 	return nil
 }
@@ -115,4 +121,56 @@ func (a *App) writeProxyEngineFile(engine string) {
 	a.proxyMu.Lock()
 	a.proxyFile = engine
 	a.proxyMu.Unlock()
+}
+
+// LBEngine returns the active load balancer engine (haproxy | balancer): the
+// engine of the live config version, or the one selected in General settings
+// before the first apply. The result is cached for a few seconds.
+func (a *App) LBEngine(ctx context.Context) string {
+	a.lbMu.Lock()
+	if a.lbEngine != "" && time.Since(a.lbAt) < proxyEngineTTL {
+		e := a.lbEngine
+		a.lbMu.Unlock()
+		return e
+	}
+	a.lbMu.Unlock()
+	e := agent.EngineHAProxy
+	if a.Store != nil {
+		row, err := a.Store.LiveVersion(ctx, false)
+		switch {
+		case err == nil:
+			e = agent.NormalizeLBEngine(row.LBEngine)
+		case errors.Is(err, store.ErrNotFound):
+			if g, gerr := store.LoadSettings[model.GeneralSettings](ctx, a.Store, model.SettingsGeneral); gerr == nil {
+				e = agent.NormalizeLBEngine(g.LBEngine)
+			}
+		default:
+			a.lbMu.Lock()
+			cached := a.lbEngine
+			a.lbMu.Unlock()
+			if cached != "" {
+				return cached
+			}
+		}
+	}
+	a.lbMu.Lock()
+	a.lbEngine, a.lbAt = e, time.Now()
+	a.lbMu.Unlock()
+	return e
+}
+
+// SetLBEngine records a new active load balancer engine (after an apply).
+func (a *App) SetLBEngine(engine string) {
+	engine = agent.NormalizeLBEngine(engine)
+	a.lbMu.Lock()
+	a.lbEngine, a.lbAt = engine, time.Now()
+	a.lbMu.Unlock()
+}
+
+// LBClient returns the agent client and name of the active load balancer
+// engine. Stats, server admin states and weights, and engine logs go through
+// it: both engines answer the same runtime API subset.
+func (a *App) LBClient(ctx context.Context) (*agent.Client, string) {
+	e := a.LBEngine(ctx)
+	return a.Client(e), e
 }

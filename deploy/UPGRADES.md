@@ -12,16 +12,20 @@ relay           relay:latest            copies /usr/local/bin/relay → relay-bi
 relay-nginx     nginx:1.30.4-alpine     entrypoint: wait for /opt/relay/bin/relay, exec `relay agent --engine nginx`
 relay-edge      alpine:3.22             same, `relay agent --engine edge` (Relay Edge is part of the relay binary)
 relay-haproxy   haproxy:3.4.4-alpine    same, `relay agent --engine haproxy`, user root
+relay-balancer  alpine:3.22             same, `relay agent --engine balancer` (Relay Balancer is part of the relay binary)
 ```
 
-Relay Edge has no image to upgrade: it is updated together with Relay. While
-Relay Edge is the selected proxy engine the nginx card is marked inactive
-(`inactive: true` in `GET /api/engines/updates`); nginx can still be upgraded,
-but its container stays stopped and no health check waits for it.
+Relay Edge and Relay Balancer have no image to upgrade: they are updated
+together with Relay. While Relay Edge is the selected proxy engine the nginx
+card is marked inactive, and while Relay Balancer is the selected load balancer
+engine the HAProxy card is (`inactive: true` in `GET /api/engines/updates`,
+which also reports `proxyEngine` and `lbEngine`). An inactive engine can still
+be upgraded, but its container stays stopped, the live configuration isn't
+validated on the new image and no health check waits for it.
 
 - The relay binary is static, so the agent runs unchanged on any official
   image. The agent is PID 1 and supervises nginx/HAProxy exactly as before.
-- Engine containers carry the label `relay.engine=nginx|haproxy`. Relay only
+- Engine containers carry the label `relay.engine=nginx|edge|haproxy|balancer`. Relay only
   touches containers with that label **in its own compose project**
   (`RELAY_COMPOSE_PROJECT`, set from `${COMPOSE_PROJECT_NAME}` in
   docker-compose.yml).

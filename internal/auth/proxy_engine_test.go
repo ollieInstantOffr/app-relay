@@ -58,3 +58,36 @@ func TestOwnedByProxy(t *testing.T) {
 		}
 	}
 }
+
+func TestGeneralSettingsLBEngine(t *testing.T) {
+	s, _ := newTestService(t)
+	req := httptest.NewRequest("PUT", "/api/settings/general", nil)
+	prev := store.DefaultGeneral()
+	if prev.LBEngine != "haproxy" {
+		t.Fatalf("default lb engine = %q", prev.LBEngine)
+	}
+
+	empty := prev
+	empty.LBEngine = ""
+	if err := s.generalBeforeSave(req, &prev, &empty); err != nil || empty.LBEngine != "haproxy" {
+		t.Fatalf("empty lb engine: %v (%q)", err, empty.LBEngine)
+	}
+
+	var ve *model.ValidationError
+	bad := prev
+	bad.LBEngine = "envoy"
+	if err := s.generalBeforeSave(req, &prev, &bad); !errors.As(err, &ve) || ve.Fields["lbEngine"] != "Pick HAProxy or Relay Balancer" {
+		t.Fatalf("unknown lb engine: %v", err)
+	}
+
+	bal := prev
+	bal.LBEngine = " Balancer "
+	if err := s.generalBeforeSave(req, &prev, &bal); err != nil || bal.LBEngine != "balancer" {
+		t.Fatalf("balancer: %v (%q)", err, bal.LBEngine)
+	}
+	back := bal
+	back.LBEngine = "haproxy"
+	if err := s.generalBeforeSave(req, &bal, &back); err != nil || back.LBEngine != "haproxy" {
+		t.Fatalf("back to haproxy: %v", err)
+	}
+}

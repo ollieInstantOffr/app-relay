@@ -211,10 +211,10 @@ func (s *Service) registerReadTools() {
 		Description: "Search reverse proxy (nginx or Relay Edge) access logs, newest first. Filter by host, status (502, 5xx, >=500), client IP, free text and time window (since: 15m, 1h, 7d). Returns method, path, status, upstream status, client IP, request time and user agent; at most 200 entries."},
 		nil, s.toolQueryLogs)
 	addRead(s, toolInfo{Name: "list_backends", Title: "List load balancer backends",
-		Description: "List HAProxy backends with mode, balancing algorithm, health check and each server's address, weight, role and admin state (ready/drain/maint), merged with live status when HAProxy is running."},
+		Description: "List load balancer backends with mode, balancing algorithm, health check and each server's address, weight, role and admin state (ready/drain/maint), merged with live status when the load balancer (HAProxy or Relay Balancer) is running."},
 		nil, s.toolListBackends)
 	addRead(s, toolInfo{Name: "get_backend_status", Title: "Get backend status",
-		Description: "Live HAProxy statistics for one backend (or all): backend status, sessions per second, queue, errors, p95 response time and per-server status (UP/DOWN/DRAIN/MAINT), check detail, traffic share and uptime."},
+		Description: "Live load balancer statistics (HAProxy or Relay Balancer) for one backend (or all): backend status, sessions per second, queue, errors, p95 response time and per-server status (UP/DOWN/DRAIN/MAINT), check detail, traffic share and uptime."},
 		nil, s.toolBackendStatus)
 	addRead(s, toolInfo{Name: "list_certificates", Title: "List TLS certificates",
 		Description: "List TLS certificates with domains, provider, status (valid/pending/failed/expired), expiry date, days left, auto-renew and last error. Filter by domain, status or expiringWithinDays."},
@@ -516,7 +516,7 @@ func (s *Service) toolBackendStatus(ctx context.Context, c *call, in backendStat
 		return nil, unavailable(err, "load balancer statistics")
 	}
 	if st == nil || !st.Running {
-		return &readResult{Text: "HAProxy is not running, so there are no live statistics.", Structured: map[string]any{"running": false, "backends": []core.BackendStats{}}, Target: in.Backend, Detail: "haproxy not running"}, nil
+		return &readResult{Text: "The load balancer is not running, so there are no live statistics.", Structured: map[string]any{"running": false, "backends": []core.BackendStats{}}, Target: in.Backend, Detail: "haproxy not running"}, nil
 	}
 	backends := []core.BackendStats{}
 	for _, bs := range st.Backends {

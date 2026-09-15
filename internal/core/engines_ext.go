@@ -26,8 +26,9 @@ type EngineDrift struct {
 
 type EngineUpdateInfo struct {
 	Engine string `json:"engine"` // nginx | haproxy
-	// Inactive: nginx while Relay Edge is the selected proxy engine (the
-	// container may be stopped or absent; nothing is an error).
+	// Inactive: nginx while Relay Edge is the selected proxy engine, HAProxy
+	// while Relay Balancer is the selected load balancer engine (the container
+	// may be stopped or absent; nothing is an error).
 	Inactive bool `json:"inactive,omitempty"`
 	// Standby: Relay stopped the container because the engine isn't needed.
 	Standby         bool                      `json:"standby,omitempty"`
@@ -56,7 +57,10 @@ type EngineUpdates struct {
 	HAProxy EngineUpdateInfo `json:"haproxy"`
 	// ProxyEngine is the active proxy engine (nginx | edge). Relay Edge ships
 	// with the relay binary and has no image to upgrade.
-	ProxyEngine string     `json:"proxyEngine"`
+	ProxyEngine string `json:"proxyEngine"`
+	// LBEngine is the active load balancer engine (haproxy | balancer). Relay
+	// Balancer ships with the relay binary and has no image to upgrade.
+	LBEngine    string     `json:"lbEngine"`
 	AutoCheck   bool       `json:"autoCheck"`
 	CheckedAt   *time.Time `json:"checkedAt,omitempty"`
 	NextCheckAt *time.Time `json:"nextCheckAt,omitempty"`

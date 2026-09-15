@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/instantoffr/relay/internal/agent"
+	"github.com/instantoffr/relay/internal/lb/lbengine"
 	"github.com/instantoffr/relay/internal/model"
 	"github.com/instantoffr/relay/internal/store"
 )
@@ -25,7 +26,8 @@ func (s *Service) TryLockApply() (func(), bool) {
 }
 
 // LiveRelease returns the live version's files for an engine (nil when
-// nothing was applied yet, or for the proxy engine that isn't selected).
+// nothing was applied yet, or for the proxy / load balancer engine that isn't
+// selected).
 func (s *Service) LiveRelease(ctx context.Context, engine string) (agent.Files, string, bool, int64, error) {
 	live, err := s.app.Store.LiveVersion(ctx, true)
 	if errors.Is(err, store.ErrNotFound) {
@@ -34,9 +36,12 @@ func (s *Service) LiveRelease(ctx context.Context, engine string) (agent.Files, 
 	if err != nil {
 		return nil, "", false, 0, err
 	}
-	if engine == agent.EngineHAProxy {
-		running := live.HAProxyRunning && !s.stoppedEngines(ctx)[agent.EngineHAProxy]
-		return agent.Files{"haproxy.cfg": live.HAProxyCfg}, live.HAProxyHash, running, live.ID, nil
+	if agent.IsLBEngine(engine) {
+		if rowLBEngine(live) != engine {
+			return nil, "", false, live.ID, nil
+		}
+		running := live.HAProxyRunning && !s.stoppedEngines(ctx)[engine]
+		return lbengine.Files(engine, live.HAProxyCfg), live.HAProxyHash, running, live.ID, nil
 	}
 	if rowEngine(live) != engine {
 		return nil, "", false, live.ID, nil

@@ -12,9 +12,9 @@ import (
 	"github.com/instantoffr/relay/internal/agent"
 	"github.com/instantoffr/relay/internal/core"
 	"github.com/instantoffr/relay/internal/httpx"
+	"github.com/instantoffr/relay/internal/lb/lbengine"
 	"github.com/instantoffr/relay/internal/model"
 	"github.com/instantoffr/relay/internal/render"
-	"github.com/instantoffr/relay/internal/render/haproxy"
 	"github.com/instantoffr/relay/internal/store"
 )
 
@@ -33,6 +33,12 @@ func Routes(app *core.App, r chi.Router) {
 	r.Post("/backends/{id}/servers/{serverId}/weight", h.serverWeight)
 	r.Post("/backends/{id}/servers/{serverId}/check", h.serverCheck)
 	r.Post("/backends/from-host/{hostId}", h.fromHost)
+	// The active load balancer engine (HAProxy or Relay Balancer); the
+	// /haproxy paths are kept for older clients.
+	r.Get("/lb/config", h.config)
+	r.Post("/lb/validate", h.validate)
+	r.Post("/preview/lb/backend", h.previewBackend)
+	r.Post("/preview/lb/frontend", h.previewFrontend)
 	r.Get("/haproxy/config", h.config)
 	r.Post("/haproxy/validate", h.validate)
 	r.Post("/preview/haproxy/backend", h.previewBackend)
@@ -155,8 +161,17 @@ func (h *handlers) config(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	rendered, renderErr := haproxy.Render(snap, h.env(ctx))
-	resp := map[string]any{"rendered": rendered, "pending": false}
+	engine := h.app.LBEngine(ctx)
+	lr, err := lbengine.For(engine)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	files, renderErr := lr.Render(snap, h.env(ctx))
+	rendered := files[lr.MainFile]
+	// config / live / rendered hold the active engine's main file
+	// (haproxy.cfg or balancer.json).
+	resp := map[string]any{"rendered": rendered, "pending": false, "engine": engine, "file": lr.MainFile}
 	if renderErr != nil {
 		resp["renderError"] = renderErr.Error()
 	}
@@ -180,29 +195,37 @@ func (h *handlers) config(w http.ResponseWriter, r *http.Request) {
 type validation struct {
 	Valid      bool   `json:"valid"`
 	Output     string `json:"output"`
-	Checked    string `json:"checked"` // haproxy | local
+	Checked    string `json:"checked"` // haproxy | balancer | local
+	Engine     string `json:"engine"`  // active load balancer engine
 	DurationMs int64  `json:"durationMs"`
 	Lines      int    `json:"lines"`
 }
 
-// validateConfig runs `haproxy -c` through the agent when reachable.
-func (h *handlers) validateConfig(ctx context.Context, cfg string) validation {
-	v := validation{Lines: strings.Count(cfg, "\n")}
+// validateConfig runs `haproxy -c` / `relay balancer check` through the
+// engine's agent when reachable.
+func (h *handlers) validateConfig(ctx context.Context, engine string, files agent.Files) validation {
+	label := core.ProxyEngineLabel(engine)
+	v := validation{Engine: engine, Lines: strings.Count(files[lbengine.MainFile(engine)], "\n")}
 	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	resp, err := h.app.HAProxy.Validate(cctx, agent.Files{"haproxy.cfg": cfg})
+	c := h.app.Client(engine)
+	if c == nil {
+		v.Valid, v.Checked, v.Output = true, "local", label+" agent not configured — checked by Relay only"
+		return v
+	}
+	resp, err := c.Validate(cctx, files)
 	if err != nil {
 		v.Valid = true
 		v.Checked = "local"
 		var ua agent.ErrUnavailable
 		if errors.As(err, &ua) {
-			v.Output = "HAProxy agent not reachable — checked by Relay only"
+			v.Output = label + " agent not reachable — checked by Relay only"
 		} else {
-			v.Output = "HAProxy validation unavailable — checked by Relay only (" + err.Error() + ")"
+			v.Output = label + " validation unavailable — checked by Relay only (" + err.Error() + ")"
 		}
 		return v
 	}
-	v.Valid, v.Output, v.Checked, v.DurationMs = resp.OK, strings.TrimSpace(resp.Output), "haproxy", resp.DurationMs
+	v.Valid, v.Output, v.Checked, v.DurationMs = resp.OK, strings.TrimSpace(resp.Output), engine, resp.DurationMs
 	return v
 }
 
@@ -213,19 +236,26 @@ func (h *handlers) validate(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	cfg, err := haproxy.Render(snap, h.env(ctx))
+	engine := h.app.LBEngine(ctx)
+	lr, err := lbengine.For(engine)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusOK, validation{Valid: false, Output: err.Error(), Checked: "local"})
+		httpx.Fail(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, h.validateConfig(ctx, cfg))
+	files, err := lr.Render(snap, h.env(ctx))
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusOK, validation{Valid: false, Output: err.Error(), Checked: "local", Engine: engine})
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, h.validateConfig(ctx, engine, files))
 }
 
 type preview struct {
 	Config  string            `json:"config"`
 	Valid   bool              `json:"valid"`
 	Output  string            `json:"output"`
-	Checked string            `json:"checked"`
+	Checked string            `json:"checked"` // haproxy | balancer | local
+	Engine  string            `json:"engine"`  // load balancer engine that rendered it
 	Fields  map[string]string `json:"fields,omitempty"`
 }
 
@@ -287,7 +317,13 @@ func (h *handlers) previewBackend(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	verr := mergeErrs(b.Validate(), e.Err())
-	out := preview{Config: haproxy.RenderBackend(snap, &b), Fields: fieldsOf(verr)}
+	engine := h.app.LBEngine(ctx)
+	lr, err := lbengine.For(engine)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	out := preview{Config: lr.Backend(snap, &b), Fields: fieldsOf(verr), Engine: engine}
 	if verr != nil {
 		out.Output, out.Checked = verr.Error(), "local"
 		httpx.WriteJSON(w, http.StatusOK, out)
@@ -331,7 +367,13 @@ func (h *handlers) previewFrontend(w http.ResponseWriter, r *http.Request) {
 	}
 	normalizeFrontend(prev, &f)
 	verr := mergeErrs(f.Validate(), checkFrontend(h.app, snap, &f))
-	out := preview{Config: haproxy.RenderFrontend(snap, &f), Fields: fieldsOf(verr)}
+	engine := h.app.LBEngine(ctx)
+	lr, err := lbengine.For(engine)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	out := preview{Config: lr.Frontend(snap, &f), Fields: fieldsOf(verr), Engine: engine}
 	if verr != nil {
 		out.Output, out.Checked = verr.Error(), "local"
 		httpx.WriteJSON(w, http.StatusOK, out)
@@ -349,13 +391,17 @@ func (h *handlers) previewFrontend(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) finishPreview(ctx context.Context, w http.ResponseWriter, snap *model.Snapshot, out *preview) {
-	cfg, err := haproxy.Render(snap, h.env(ctx))
+	lr, err := lbengine.For(out.Engine)
+	var files agent.Files
+	if err == nil {
+		files, err = lr.Render(snap, h.env(ctx))
+	}
 	if err != nil {
 		out.Valid, out.Output, out.Checked = false, err.Error(), "local"
 		httpx.WriteJSON(w, http.StatusOK, out)
 		return
 	}
-	v := h.validateConfig(ctx, cfg)
+	v := h.validateConfig(ctx, out.Engine, files)
 	out.Valid, out.Output, out.Checked = v.Valid, v.Output, v.Checked
 	httpx.WriteJSON(w, http.StatusOK, out)
 }

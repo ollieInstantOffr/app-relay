@@ -15,6 +15,7 @@ func DefaultGeneral() model.GeneralSettings {
 		AdminPort:    8181,
 		HTTP3:        false,
 		ProxyEngine:  "nginx",
+		LBEngine:     "haproxy",
 		LANCIDR:      "192.168.0.0/16",
 		Defaults: model.HostDefaults{
 			ForceHTTPS:    true,
@@ -136,6 +137,7 @@ var MCPTools = map[string]string{
 	"set_default_host":         model.ToolConfirm,
 	"update_settings":          model.ToolConfirm,
 	"set_proxy_engine":         model.ToolConfirm,
+	"set_lb_engine":            model.ToolConfirm,
 	"discard_changes":          model.ToolConfirm,
 	"engine_action":            model.ToolConfirm,
 	"upgrade_engine":           model.ToolConfirm,

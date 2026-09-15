@@ -3,7 +3,7 @@ import {
   Badge, Button, Card, ConfirmDialog, Dot, EmptyState, IconButton, ListPager, Menu, NoMatches, SearchInput, Select, Skeleton, StatCard, TableToolbar, cx,
   matchesSearch, useFitGrid, usePagination, useToast, type MenuEntry,
 } from '../../components/ui'
-import { useDeleteEntity, useEntities, useLBStats, useRole, useSettings } from '../../lib/queries'
+import { useDeleteEntity, useEntities, useLBEngine, useLBStats, useRole, useSettings } from '../../lib/queries'
 import { compact, pluralize } from '../../lib/format'
 import type { Backend, BackendStats, Frontend, LBStats, ProxyHost, Server, ServerStats } from '../../lib/types'
 import { algorithmShort, backendDependents, backendRoutes, cloneBackend, findServerStats, healthSummary } from './lbApi'
@@ -22,6 +22,7 @@ export default function BackendsTab({ onNew, onEdit, onExpose, onDuplicate }: {
   const streams = useEntities('streams').data ?? []
   const settings = useSettings('haproxy').data
   const stats = useLBStats(3_000).data
+  const lb = useLBEngine()
   const { canWrite } = useRole()
   const [convert, setConvert] = useState(false)
   const [deleting, setDeleting] = useState<Backend | null>(null)
@@ -69,7 +70,7 @@ export default function BackendsTab({ onNew, onEdit, onExpose, onDuplicate }: {
           <EmptyState
             icon="load-balancer"
             title="No load-balancer backends"
-            description="Group two or more servers into a pool with health checks. HAProxy starts only once you create the first backend."
+            description={`Group two or more servers into a pool with health checks. ${lb.label} starts once you create the first backend.`}
             actions={
               canWrite ? (
                 <>
@@ -93,7 +94,7 @@ export default function BackendsTab({ onNew, onEdit, onExpose, onDuplicate }: {
         <StatCard
           label="Backends"
           value={backends.length}
-          meta={!running ? 'haproxy not running' : counts.down ? `${counts.down} down` : counts.degraded ? `${counts.degraded} degraded` : 'all up'}
+          meta={!running ? `${lb.label} not running` : counts.down ? `${counts.down} down` : counts.degraded ? `${counts.degraded} degraded` : 'all up'}
           metaTone={!running ? 'muted' : counts.down ? 'danger' : counts.degraded ? 'warn' : 'ok'}
         />
         <StatCard
@@ -157,7 +158,7 @@ export default function BackendsTab({ onNew, onEdit, onExpose, onDuplicate }: {
         message={
           deleting && backendDependents(deleting, frontends, hosts, streams).length
             ? `It is still used by ${backendDependents(deleting, frontends, hosts, streams).join(', ')}. Remove those first.`
-            : 'The backend and its servers are removed from haproxy.cfg on the next apply.'
+            : 'The backend and its servers are removed from the load balancer config on the next apply.'
         }
         confirmLabel="Delete backend"
         typeToConfirm={deleting?.name}

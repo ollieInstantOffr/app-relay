@@ -56,9 +56,9 @@ curl -fsS http://127.0.0.1:8181/healthz`} />
       <H2>Uploads fail with 413</H2>
       <P>Raise <UI>Max upload size</UI> on the host’s Advanced tab, for example to 10 GB for a photo library.</P>
 
-      <H2>The HAProxy engine isn’t running</H2>
+      <H2>The load balancer engine isn’t running</H2>
       <P>
-        HAProxy only starts once at least one backend exists and <UI>Run HAProxy</UI> is on (<UI>Settings → HAProxy engine</UI>). The engine banner at the top of the screen links to
+        The load balancer engine (HAProxy or Relay Balancer) only starts once at least one backend exists and <UI>Run HAProxy</UI> or <UI>Run Relay Balancer</UI> is on (<UI>Settings → Load balancer</UI>). The engine banner at the top of the screen links to
         its error log.
       </P>
 
@@ -66,7 +66,8 @@ curl -fsS http://127.0.0.1:8181/healthz`} />
       <Example lang="bash" code={`docker logs relay            # Relay app
 docker logs relay-nginx      # nginx engine + agent
 docker logs relay-edge       # Relay Edge engine + agent
-docker logs relay-haproxy    # HAProxy engine + agent`} />
+docker logs relay-haproxy    # HAProxy engine + agent
+docker logs relay-balancer   # Relay Balancer engine + agent`} />
     </>
   )
 }
@@ -85,8 +86,8 @@ function Reference() {
           ['8181/tcp', 'relay', 'Admin UI, REST API and MCP endpoint (change in Settings → General)'],
           ['127.0.0.1:18080', 'nginx', 'Status for Relay’s metrics'],
           ['127.0.0.1:18081', 'edge', 'Relay Edge status: /healthz, /stub_status, /metrics (Prometheus)'],
-          ['127.0.0.1:8404', 'haproxy', 'Stats and Prometheus metrics'],
-          ['127.0.0.1:10080+', 'haproxy', 'Local frontends created by Expose'],
+          ['127.0.0.1:8404', 'haproxy / balancer', 'Stats and Prometheus metrics'],
+          ['127.0.0.1:10080+', 'haproxy / balancer', 'Local frontends created by Expose'],
           ['(your choice)', 'nginx or edge', 'TCP/UDP streams'],
         ]}
       />
@@ -100,7 +101,7 @@ function Reference() {
           ['relay-run', 'Control sockets between Relay and the engines.'],
           ['relay-logs', 'Access, stream and error logs of the proxy engine.'],
           ['relay-bin', 'The Relay agent binary shared with the engine containers.'],
-          ['relay-nginx · relay-edge · relay-haproxy', 'Applied configuration releases, so engines keep serving after a restart.'],
+          ['relay-nginx · relay-edge · relay-haproxy · relay-balancer', 'Applied configuration releases, so engines keep serving after a restart.'],
         ]}
       />
 
@@ -135,7 +136,7 @@ function Reference() {
           ['relay version', 'Print the version and build commit.'],
           ['relay healthcheck', 'Exit 0 when the admin UI answers (used by the container healthcheck; follows the admin port).'],
           ['relay serve', 'Run the app (what the relay container does).'],
-          ['relay agent --engine nginx|haproxy|edge', 'Run an engine agent (what the engine containers do).'],
+          ['relay agent --engine nginx|haproxy|edge|balancer', 'Run an engine agent (what the engine containers do).'],
           ['relay edge run --config <file>', 'Run Relay Edge with a config file (the edge agent does this).'],
           ['relay edge check <dir>', 'Validate a Relay Edge config release; exit 0 when valid.'],
         ]}

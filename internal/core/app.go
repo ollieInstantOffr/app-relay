@@ -65,6 +65,8 @@ type App struct {
 	Nginx   *agent.Client
 	HAProxy *agent.Client
 	Edge    *agent.Client // Relay Edge (the proxy engine alternative to nginx)
+	// Balancer is Relay Balancer (the load balancer alternative to HAProxy).
+	Balancer *agent.Client
 
 	Auth     Auth
 	Engine   Engine
@@ -94,6 +96,10 @@ type App struct {
 	proxyEngine string // cached ProxyEngine result
 	proxyAt     time.Time
 	proxyFile   string // last value written to the proxy-engine file
+
+	lbMu     sync.Mutex
+	lbEngine string // cached LBEngine result
+	lbAt     time.Time
 }
 
 // AdminListener serves the admin UI/API and moves it to another port at
@@ -110,13 +116,14 @@ type AdminListener interface {
 
 func New(cfg Config, st *store.Store, bus *events.Bus, log *slog.Logger) *App {
 	return &App{
-		Config:  cfg,
-		Store:   st,
-		Bus:     bus,
-		Log:     log,
-		Nginx:   agent.NewClient(agent.EngineNginx, agent.SocketPath(cfg.RunDir, agent.EngineNginx)),
-		HAProxy: agent.NewClient(agent.EngineHAProxy, agent.SocketPath(cfg.RunDir, agent.EngineHAProxy)),
-		Edge:    agent.NewClient(agent.EngineEdge, agent.SocketPath(cfg.RunDir, agent.EngineEdge)),
+		Config:   cfg,
+		Store:    st,
+		Bus:      bus,
+		Log:      log,
+		Nginx:    agent.NewClient(agent.EngineNginx, agent.SocketPath(cfg.RunDir, agent.EngineNginx)),
+		HAProxy:  agent.NewClient(agent.EngineHAProxy, agent.SocketPath(cfg.RunDir, agent.EngineHAProxy)),
+		Edge:     agent.NewClient(agent.EngineEdge, agent.SocketPath(cfg.RunDir, agent.EngineEdge)),
+		Balancer: agent.NewClient(agent.EngineBalancer, agent.SocketPath(cfg.RunDir, agent.EngineBalancer)),
 	}
 }
 

@@ -19,7 +19,7 @@ export default function FrontendDrawer({ initial, onClose }: { initial: Frontend
   const haproxy = useSettings('haproxy').data
   const save = useSaveEntity('frontends')
   const toast = useToast()
-  const preview = usePreview('/api/preview/haproxy/frontend', readOnly ? null : { frontend: draft })
+  const preview = usePreview('/api/preview/lb/frontend', readOnly ? null : { frontend: draft })
   const [armed, setArmed] = useState<number | null>(null)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [overIndex, setOverIndex] = useState<number | null>(null)
@@ -253,7 +253,7 @@ export default function FrontendDrawer({ initial, onClose }: { initial: Frontend
       <div className="grid-2">
         <ToggleCard title="Accept PROXY protocol" description="When fed by a proxy that sends it" checked={draft.acceptProxy} disabled={readOnly} onChange={(v) => set({ acceptProxy: v })} />
         {http && <ToggleCard title="Compression" description="gzip text/* and json" checked={draft.compression} disabled={readOnly} onChange={(v) => set({ compression: v })} />}
-        <ToggleCard title="Enabled" description="Disabled frontends are left out of haproxy.cfg" checked={draft.enabled} disabled={readOnly} onChange={(v) => set({ enabled: v })} />
+        <ToggleCard title="Enabled" description="Disabled frontends are left out of the load balancer config" checked={draft.enabled} disabled={readOnly} onChange={(v) => set({ enabled: v })} />
       </div>
 
       {host && (
@@ -262,8 +262,8 @@ export default function FrontendDrawer({ initial, onClose }: { initial: Frontend
         </Callout>
       )}
 
-      <PreviewBlock title="Generated haproxy.cfg (this frontend)" state={preview} readOnly={readOnly} />
-      {preview.data && preview.data.checked === 'haproxy' && !preview.data.valid && preview.data.output && (
+      <PreviewBlock what="frontend" state={preview} readOnly={readOnly} />
+      {preview.data && (preview.data.checked === 'haproxy' || preview.data.checked === 'balancer') && !preview.data.valid && preview.data.output && (
         <pre className="code wrap" style={{ maxHeight: 200 }}>{preview.data.output}</pre>
       )}
     </Drawer>

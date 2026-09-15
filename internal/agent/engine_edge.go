@@ -75,22 +75,28 @@ func (e *edgeEngine) checkFiles(files Files) error {
 // reload sends SIGHUP and waits for Relay Edge to report the result for the
 // release current points at: "config loaded hash=<hash>" or "reload failed".
 func (e *edgeEngine) reload() (string, error) {
-	p := e.a.sup.current()
+	return hupReload(e.a, "Relay Edge", edgeReloadTimeout)
+}
+
+// hupReload signals the built-in data plane (Relay Edge, Relay Balancer) with
+// SIGHUP and waits for "config loaded hash=<current>" or "reload failed".
+func hupReload(a *Agent, label string, timeout time.Duration) (string, error) {
+	p := a.sup.current()
 	if p == nil {
-		return "", errors.New("Relay Edge is not running")
+		return "", errors.New(label + " is not running")
 	}
-	hash := e.a.rel.current()
-	seq := e.a.logs.mark()
+	hash := a.rel.current()
+	seq := a.logs.mark()
 	if err := syscall.Kill(p.pid, syscall.SIGHUP); err != nil {
-		return "", fmt.Errorf("signal Relay Edge: %w", err)
+		return "", fmt.Errorf("signal %s: %w", label, err)
 	}
 	loaded := "config loaded hash=" + hash
-	deadline := time.Now().Add(edgeReloadTimeout)
+	deadline := time.Now().Add(timeout)
 	for {
-		lines := e.a.logs.after(seq)
+		lines := a.logs.after(seq)
 		for _, l := range lines {
 			if strings.Contains(l.Text, "reload failed") {
-				return joinLines(errorLines(lines)), errors.New("Relay Edge rejected the new configuration")
+				return joinLines(errorLines(lines)), errors.New(label + " rejected the new configuration")
 			}
 			if hasHashMarker(l.Text, loaded) {
 				return joinLines(errorLines(lines)), nil
@@ -98,11 +104,11 @@ func (e *edgeEngine) reload() (string, error) {
 		}
 		select {
 		case <-p.done:
-			return joinLines(e.a.logs.after(seq)), errors.New("Relay Edge exited during reload")
+			return joinLines(a.logs.after(seq)), errors.New(label + " exited during reload")
 		default:
 		}
 		if time.Now().After(deadline) {
-			return joinLines(errorLines(e.a.logs.after(seq))), fmt.Errorf("Relay Edge did not load the new configuration within %s", edgeReloadTimeout)
+			return joinLines(errorLines(a.logs.after(seq))), fmt.Errorf("%s did not load the new configuration within %s", label, timeout)
 		}
 		time.Sleep(40 * time.Millisecond)
 	}

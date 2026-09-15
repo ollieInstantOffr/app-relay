@@ -10,7 +10,7 @@ import (
 )
 
 type errorLogArgs struct {
-	Source string `json:"source,omitempty" jsonschema:"Only this source, e.g. nginx, edge (Relay Edge) or haproxy"`
+	Source string `json:"source,omitempty" jsonschema:"Only this source, e.g. nginx, edge (Relay Edge), haproxy or balancer (Relay Balancer)"`
 	Level  string `json:"level,omitempty" jsonschema:"Minimum level with a trailing + (e.g. warn+, error+) or a comma list (error,crit)"`
 	Search string `json:"search,omitempty" jsonschema:"Only messages containing this text, e.g. a domain or upstream address"`
 	Since  string `json:"since,omitempty" jsonschema:"How far back: a duration like 15m, 6h, 7d or an RFC 3339 time (default: everything kept)"`
@@ -31,7 +31,7 @@ type activityArgs struct {
 
 func (s *Service) registerLogTools() {
 	addRead(s, toolInfo{Name: "query_error_log", Title: "Search the error log",
-		Description: "Search the engine and Relay error log (nginx / Relay Edge / HAProxy errors, upstream connection failures, certificate problems) by source, minimum level, text and time window. Use it to find out why a host returns 502/504 or why an apply failed."},
+		Description: "Search the engine and Relay error log (nginx / Relay Edge / HAProxy / Relay Balancer errors, upstream connection failures, certificate problems) by source, minimum level, text and time window. Use it to find out why a host returns 502/504 or why an apply failed."},
 		nil, s.toolErrorLog)
 	addRead(s, toolInfo{Name: "query_audit_log", Title: "Search the audit log",
 		Description: "Search the audit log of who changed what: logins, config edits, applies, rollbacks, token and MCP actions, with actor, IP, target and result. Admin only."},

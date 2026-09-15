@@ -22,10 +22,10 @@ import (
 	"github.com/instantoffr/relay/internal/agent"
 	"github.com/instantoffr/relay/internal/core"
 	"github.com/instantoffr/relay/internal/events"
+	"github.com/instantoffr/relay/internal/lb/lbengine"
 	"github.com/instantoffr/relay/internal/model"
 	"github.com/instantoffr/relay/internal/render"
 	"github.com/instantoffr/relay/internal/render/edge"
-	"github.com/instantoffr/relay/internal/render/haproxy"
 	"github.com/instantoffr/relay/internal/render/nginx"
 	"github.com/instantoffr/relay/internal/store"
 )
@@ -45,6 +45,7 @@ type Service struct {
 	observed     map[string]engineObs
 	healthWindow time.Duration
 	switchTo     string // proxy engine an apply is switching to
+	lbSwitchTo   string // load balancer engine an apply is switching to
 }
 
 type engineObs struct {
@@ -222,10 +223,12 @@ func fileExists(p string) bool {
 type rendered struct {
 	proxyEngine string      // nginx | edge
 	proxy       agent.Files // the proxy engine's files
-	haproxy     agent.Files
 	proxyHash   string
-	haproxyHash string
-	haproxyRun  bool
+	lbEngine    string      // haproxy | balancer
+	lb          agent.Files // the load balancer engine's release ({lbMain: …})
+	lbMain      string      // haproxy.cfg | balancer.json
+	lbHash      string
+	lbRun       bool // the load balancer engine runs (backends exist)
 }
 
 func (s *Service) renderAll(ctx context.Context, snap *model.Snapshot) (*rendered, error) {
@@ -244,19 +247,17 @@ func (s *Service) renderAll(ctx context.Context, snap *model.Snapshot) (*rendere
 	if err != nil {
 		return nil, err
 	}
-	run := haproxy.HasBackends(rs)
-	cfg, err := haproxy.Render(rs, env)
+	lbEngine := snapshotLBEngine(snap)
+	lr, err := lbRendererFor(lbEngine)
 	if err != nil {
-		return nil, fmt.Errorf("haproxy render: %w", err)
+		return nil, err
 	}
-	if run && strings.TrimSpace(cfg) == "" {
-		return nil, errors.New("haproxy render: the HAProxy renderer produced no configuration")
+	lfiles, err := lr.Render(rs, env)
+	if err != nil {
+		return nil, fmt.Errorf("%s render: %w", lbEngine, err)
 	}
-	if strings.TrimSpace(cfg) == "" {
-		cfg = "# HAProxy is stopped: no load-balancer backends are configured.\n"
-	}
-	hfiles := agent.Files{"haproxy.cfg": cfg}
-	return &rendered{proxyEngine: engine, proxy: files, haproxy: hfiles, proxyHash: agent.HashFiles(files), haproxyHash: agent.HashFiles(hfiles), haproxyRun: run}, nil
+	return &rendered{proxyEngine: engine, proxy: files, proxyHash: agent.HashFiles(files),
+		lbEngine: lbEngine, lb: lfiles, lbMain: lr.MainFile, lbHash: agent.HashFiles(lfiles), lbRun: lr.HasBackends(rs)}, nil
 }
 
 // ---------------------------------------------------------------- pending
@@ -352,10 +353,11 @@ func (s *Service) Status(ctx context.Context) (*core.EnginesStatus, error) {
 		}
 		*dst = core.EngineState{Status: *st, Reachable: true}
 	}
-	wg.Add(3)
+	wg.Add(4)
 	go get(agent.EngineNginx, s.app.Nginx, &out.Nginx)
 	go get(agent.EngineHAProxy, s.app.HAProxy, &out.HAProxy)
 	go get(agent.EngineEdge, s.app.Edge, &out.Edge)
+	go get(agent.EngineBalancer, s.app.Balancer, &out.Balancer)
 	wg.Wait()
 	if out.Nginx.Reachable && len(out.Nginx.Modules) > 0 {
 		s.setModules(ctx, agent.EngineNginx, out.Nginx.Modules, out.Nginx.DynamicModules, true)
@@ -364,6 +366,7 @@ func (s *Service) Status(ctx context.Context) (*core.EnginesStatus, error) {
 		s.setModules(ctx, agent.EngineEdge, out.Edge.Modules, out.Edge.DynamicModules, true)
 	}
 	out.Proxy = s.app.ProxyEngine(ctx)
+	out.LB = s.app.LBEngine(ctx)
 	s.annotateContainers(ctx, &out)
 	return &out, nil
 }
@@ -453,6 +456,17 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 	row.ProxyEngine = engine
 	pc := s.app.Client(engine)
 
+	// The load balancer engine of the new version; switching stops the old
+	// one before the new one starts (they bind the same frontends).
+	lbEngine := snapshotLBEngine(snap)
+	prevLB := agent.EngineHAProxy
+	if liveRow != nil {
+		prevLB = rowLBEngine(liveRow)
+	}
+	lbSwitching := prevLB != lbEngine
+	row.LBEngine = lbEngine
+	lc := s.app.Client(lbEngine)
+
 	// Render.
 	progress("render", fmt.Sprintf("Applying v%d… · rendering config", id), 5)
 	r, err := s.renderAll(ctx, snap)
@@ -461,10 +475,10 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 		return s.failBeforeSwap(ctx, row, engine, "render", err.Error(), "Config could not be rendered")
 	}
 	nf, _ := json.Marshal(r.proxy)
-	row.NginxFiles, row.HAProxyCfg = string(nf), r.haproxy["haproxy.cfg"]
-	row.NginxHash, row.HAProxyHash, row.HAProxyRunning = r.proxyHash, r.haproxyHash, r.haproxyRun
+	row.NginxFiles, row.HAProxyCfg = string(nf), r.lb[r.lbMain]
+	row.NginxHash, row.HAProxyHash, row.HAProxyRunning = r.proxyHash, r.lbHash, r.lbRun
 
-	// A stopped engine container (the standby proxy engine, an idle HAProxy)
+	// A stopped engine container (the standby proxy engine, an idle load balancer)
 	// is started before it's needed.
 	if err := s.ensureEngine(ctx, engine, func() {
 		progress("validate", fmt.Sprintf("Applying v%d… · starting the %s container", id, engineLabel(engine)), 12)
@@ -486,26 +500,27 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 	}
 	warnings := countWarnings(nv.Output)
 	output := nv.Output
-	if r.haproxyRun {
-		if err := s.ensureEngine(ctx, agent.EngineHAProxy, func() {
-			progress("validate", fmt.Sprintf("Applying v%d… · starting the HAProxy container", id), 25)
+	lbLabel := lbengine.Label(lbEngine)
+	if r.lbRun {
+		if err := s.ensureEngine(ctx, lbEngine, func() {
+			progress("validate", fmt.Sprintf("Applying v%d… · starting the %s container", id, lbLabel), 25)
 		}); err != nil {
-			return nil, s.unavailable("haproxy", err)
+			return nil, s.unavailable(lbEngine, err)
 		}
 	}
-	hst, herr := s.app.HAProxy.Status(ctx)
-	haproxyReachable := herr == nil
-	if r.haproxyRun {
-		progress("validate", fmt.Sprintf("Applying v%d… · validating · haproxy -c", id), 30)
+	lst, lerr := lc.Status(ctx)
+	lbReachable := lerr == nil
+	if r.lbRun {
+		progress("validate", fmt.Sprintf("Applying v%d… · validating · %s", id, lbengine.CheckName(lbEngine)), 30)
 		vctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-		hv, err := s.app.HAProxy.Validate(vctx, r.haproxy)
+		hv, err := lc.Validate(vctx, r.lb)
 		cancel()
 		if err != nil {
-			return nil, s.unavailable("haproxy", err)
+			return nil, s.unavailable(lbEngine, err)
 		}
 		row.ValidateMs += hv.DurationMs
 		if !hv.OK {
-			return s.failBeforeSwap(ctx, row, "haproxy", "validate", hv.Output, "haproxy -c failed")
+			return s.failBeforeSwap(ctx, row, lbEngine, "validate", hv.Output, lbengine.CheckName(lbEngine)+" failed")
 		}
 		warnings += countWarnings(hv.Output)
 		output = joinOutput(output, hv.Output)
@@ -518,11 +533,31 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 	if switching {
 		targets = switchTargets(snap)
 	}
+	if lbSwitching {
+		targets = mergeTargets(targets, lbSwitchTargets(snap))
+	}
 	var liveFiles agent.Files
 	liveHash := ""
 	if switching && liveRow != nil {
 		if liveFiles, liveHash, err = s.liveProxyFiles(ctx, liveRow.ID); err != nil {
 			return nil, err
+		}
+	}
+	var liveLB agent.Files
+	liveLBHash := ""
+	var lw *lbWatch
+	if lbSwitching {
+		lw = &lbWatch{engine: lbEngine, run: r.lbRun, blame: !switching}
+		if liveRow != nil {
+			if liveLB, liveLBHash, err = s.liveLBFiles(ctx, liveRow.ID); err != nil {
+				return nil, err
+			}
+			if r.lbRun {
+				lw.fronts = s.watchedFrontends(ctx, liveSnap, snap)
+				if before, err := s.lbUsable(ctx, prevLB); err == nil {
+					lw.before = before
+				}
+			}
 		}
 	}
 	healthyBefore := map[string]bool{}
@@ -537,31 +572,83 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 		return nil, err
 	}
 
-	// Swap + reload: HAProxy first so new localhost frontends exist before
-	// nginx routes to them.
-	sw := &proxySwap{engine: engine, files: r.proxy, hash: r.proxyHash}
-	if haproxyReachable && (hst.ConfigHash != r.haproxyHash || hst.Running != r.haproxyRun) {
-		verb := "reloading haproxy"
-		if !r.haproxyRun {
-			verb = "stopping haproxy"
-		} else if !hst.Running {
-			verb = "starting haproxy"
+	// Swap + reload: the load balancer first so new localhost frontends exist
+	// before the proxy engine routes to them.
+	sw := &proxySwap{engine: engine, files: r.proxy, hash: r.proxyHash, lbEngine: lbEngine, lbFiles: r.lb, lbHash: r.lbHash}
+	switch {
+	case lbSwitching:
+		s.setLBSwitching(lbEngine)
+		defer s.setLBSwitching("")
+		sw.lbFrom = prevLB
+		sw.lbFromFiles, sw.lbFromHash = liveLB, liveLBHash
+		sw.lbFromRun = liveRow != nil && liveRow.HAProxyRunning && !s.stoppedEngines(ctx)[prevLB]
+		progress("reload", fmt.Sprintf("Applying v%d… · validated · stopping %s", id, lbengine.Label(prevLB)), 42)
+		stop := agent.ApplyRequest{Stop: true}
+		if liveLB != nil {
+			stop.Files, stop.Hash = liveLB, liveLBHash
 		}
-		progress("reload", fmt.Sprintf("Applying v%d… · validated · %s", id, verb), 45)
-		resp, err := s.app.HAProxy.Apply(ctx, agent.ApplyRequest{Files: r.haproxy, Hash: r.haproxyHash, Stop: !r.haproxyRun})
+		sw.lbOldStop = true
+		sresp, err := s.app.Client(prevLB).Apply(ctx, stop)
+		var ua agent.ErrUnavailable
+		switch {
+		case errors.As(err, &ua):
+			// An unreachable agent can't be holding the ports (nor restarted).
+			s.log.Warn("previous load balancer engine unreachable, not stopped", "engine", prevLB, "err", err)
+			sw.lbOldStop = false
+		case err != nil:
+			return s.failAfterSwap(ctx, row, liveID, prevLB, "stop", err.Error(), sw)
+		case !sresp.OK:
+			return s.failAfterSwap(ctx, row, liveID, prevLB, "stop", sresp.Output, sw)
+		}
+		if !lbReachable {
+			if r.lbRun {
+				return s.failAfterSwap(ctx, row, liveID, lbEngine, "swap", agentError(lerr), sw)
+			}
+			break
+		}
+		verb := "starting " + lbLabel
+		if !r.lbRun {
+			verb = "recording " + lbLabel + " (no backends, stays stopped)"
+		}
+		progress("reload", fmt.Sprintf("Applying v%d… · validated · %s", id, verb), 46)
+		sw.lbStarted = true
+		resp, err := lc.Apply(ctx, agent.ApplyRequest{Files: r.lb, Hash: r.lbHash, Stop: !r.lbRun})
 		if err != nil {
-			return s.failAfterSwap(ctx, row, liveID, "haproxy", "swap", err.Error(), &proxySwap{})
+			return s.failAfterSwap(ctx, row, liveID, lbEngine, "swap", err.Error(), sw)
 		}
 		row.ReloadMs += resp.ReloadMs
 		if !resp.OK {
-			return s.failAfterSwap(ctx, row, liveID, "haproxy", resp.Stage, resp.Output, &proxySwap{})
+			return s.failAfterSwap(ctx, row, liveID, lbEngine, resp.Stage, resp.Output, sw)
 		}
-		sw.haproxy = true
-		if r.haproxyRun {
-			s.setStoppedEngine(ctx, agent.EngineHAProxy, false)
+		if r.lbRun {
+			s.setStoppedEngine(ctx, lbEngine, false)
 		}
-	} else if !haproxyReachable && r.haproxyRun {
-		return s.failAfterSwap(ctx, row, liveID, "haproxy", "swap", agentError(herr), &proxySwap{})
+	case lbReachable && (lst.ConfigHash != r.lbHash || lst.Running != r.lbRun):
+		name := lbEngine
+		if lbEngine == agent.EngineBalancer {
+			name = lbLabel
+		}
+		verb := "reloading " + name
+		if !r.lbRun {
+			verb = "stopping " + name
+		} else if !lst.Running {
+			verb = "starting " + name
+		}
+		progress("reload", fmt.Sprintf("Applying v%d… · validated · %s", id, verb), 45)
+		resp, err := lc.Apply(ctx, agent.ApplyRequest{Files: r.lb, Hash: r.lbHash, Stop: !r.lbRun})
+		if err != nil {
+			return s.failAfterSwap(ctx, row, liveID, lbEngine, "swap", err.Error(), &proxySwap{})
+		}
+		row.ReloadMs += resp.ReloadMs
+		if !resp.OK {
+			return s.failAfterSwap(ctx, row, liveID, lbEngine, resp.Stage, resp.Output, &proxySwap{})
+		}
+		sw.lbChanged = true
+		if r.lbRun {
+			s.setStoppedEngine(ctx, lbEngine, false)
+		}
+	case !lbReachable && r.lbRun:
+		return s.failAfterSwap(ctx, row, liveID, lbEngine, "swap", agentError(lerr), &proxySwap{})
 	}
 
 	if switching {
@@ -602,8 +689,8 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 	sw.swapped = true
 
 	// Health check.
-	if failure := s.healthCheck(ctx, id, engine, snap, targets, healthyBefore, progress); failure != "" {
-		return s.failAfterSwap(ctx, row, liveID, engine, "health", failure, sw)
+	if failure, failed := s.healthCheck(ctx, id, engine, snap, targets, healthyBefore, lw, progress); failure != "" {
+		return s.failAfterSwap(ctx, row, liveID, failed, "health", failure, sw)
 	}
 
 	// Success.
@@ -621,8 +708,13 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 		delete(s.observed, prevEngine)
 		delete(s.observed, engine)
 	}
+	if lbSwitching {
+		delete(s.observed, prevLB)
+		delete(s.observed, lbEngine)
+	}
 	s.mu.Unlock()
 	s.app.SetProxyEngine(engine)
+	s.app.SetLBEngine(lbEngine)
 	vid := id
 	s.app.Audit(ctx, core.AuditEntry{Action: "config.apply", Target: fmt.Sprintf("v%d", id), Detail: summary, Result: "applied", Version: &vid})
 	reloadDetail := fmt.Sprintf("nginx -s reload · %d ms", resp.ReloadMs)
@@ -636,6 +728,12 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 	if switching {
 		s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": prevEngine, "running": false, "reachable": true})
 		s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": engine, "running": resp.Running, "reachable": true})
+	}
+	if lbSwitching {
+		s.app.Activity(ctx, "engine.switch", "info", fmt.Sprintf("Switched load balancer from %s to %s", lbengine.Label(prevLB), lbLabel), fmt.Sprintf("v%d", id),
+			fmt.Sprintf("%s · %d backend(s)", lbengine.CheckName(lbEngine), len(snap.Backends)))
+		s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": prevLB, "running": false, "reachable": true})
+		s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": lbEngine, "running": r.lbRun, "reachable": lbReachable})
 	}
 	progress("done", fmt.Sprintf("v%d is live", id), 100)
 	v := toVersion(row)
@@ -673,7 +771,7 @@ func joinOutput(parts ...string) string {
 
 func (s *Service) unavailable(engine string, err error) error {
 	name := engine
-	if engine == agent.EngineEdge {
+	if engine == agent.EngineEdge || engine == agent.EngineBalancer {
 		name = engineLabel(engine)
 	}
 	return &ApplyError{Status: http.StatusServiceUnavailable, Code: "engine_unavailable",
@@ -726,11 +824,29 @@ func (s *Service) failAfterSwap(ctx context.Context, row *store.VersionRow, live
 			}
 		}
 	}
-	if sw.haproxy {
-		if resp, err := s.app.HAProxy.Rollback(rbctx); err != nil {
-			rbErrs = append(rbErrs, "haproxy: "+err.Error())
+	switch {
+	case sw.lbFrom != "":
+		// Load balancer switch: stop the new engine, then restore the old
+		// one's live release (they bind the same frontends).
+		if sw.lbStarted {
+			if resp, err := s.app.Client(sw.lbEngine).Apply(rbctx, agent.ApplyRequest{Files: sw.lbFiles, Hash: sw.lbHash, Stop: true}); err != nil {
+				rbErrs = append(rbErrs, sw.lbEngine+": "+err.Error())
+			} else if !resp.OK {
+				rbErrs = append(rbErrs, sw.lbEngine+": "+resp.Output)
+			}
+		}
+		if sw.lbOldStop && sw.lbFromFiles != nil {
+			if resp, err := s.app.Client(sw.lbFrom).Apply(rbctx, agent.ApplyRequest{Files: sw.lbFromFiles, Hash: sw.lbFromHash, Stop: !sw.lbFromRun}); err != nil {
+				rbErrs = append(rbErrs, sw.lbFrom+": "+err.Error())
+			} else if !resp.OK {
+				rbErrs = append(rbErrs, sw.lbFrom+": "+resp.Output)
+			}
+		}
+	case sw.lbChanged:
+		if resp, err := s.app.Client(sw.lbEngine).Rollback(rbctx); err != nil {
+			rbErrs = append(rbErrs, sw.lbEngine+": "+err.Error())
 		} else if !resp.OK {
-			rbErrs = append(rbErrs, "haproxy: "+resp.Output)
+			rbErrs = append(rbErrs, sw.lbEngine+": "+resp.Output)
 		}
 	}
 	row.FailedEngine, row.FailedStage, row.Output = engine, stage, output
@@ -959,22 +1075,46 @@ func (s *Service) probe(ctx context.Context, snap *model.Snapshot, env render.En
 }
 
 // healthCheck probes previously healthy hosts once per second. It returns a
-// failure description when a host failed for the whole window or the proxy
-// engine died.
-func (s *Service) healthCheck(ctx context.Context, id int64, engine string, snap *model.Snapshot, targets []string, healthyBefore map[string]bool, progress progressFn) string {
+// failure description (and the engine to blame) when a host failed for the
+// whole window or an engine died. After a load balancer switch (lw) it also
+// watches the new load balancer engine and the frontends that accepted
+// connections before.
+func (s *Service) healthCheck(ctx context.Context, id int64, engine string, snap *model.Snapshot, targets []string, healthyBefore map[string]bool, lw *lbWatch, progress progressFn) (string, string) {
 	watch := []string{}
 	for _, t := range targets {
 		if healthyBefore[t] {
 			watch = append(watch, t)
 		}
 	}
+	failEngine := engine
+	var fronts []model.Frontend
+	if lw != nil {
+		fronts = lw.fronts
+		if lw.blame {
+			failEngine = lw.engine
+		}
+	}
+	var lbBefore map[string]bool
+	if lw != nil && len(lw.before) > 0 {
+		lbBefore = lw.before
+	}
+	lbPassed := lbBefore == nil
+	var lbLost []string
+	var lbErr error
+	idle := len(watch) == 0 && len(fronts) == 0 && lbPassed
 	window := s.healthWindow
-	if len(watch) == 0 && window > 2*time.Second {
+	if idle && window > 2*time.Second {
 		window = 2 * time.Second
 	}
 	secs := int(window / time.Second)
+	settle := min(checkSettleTicks(snap), secs)
+	if secs < 1 {
+		lbPassed = true
+	}
 	passed := map[string]bool{}
 	last := map[string]probeResult{}
+	frontPassed := map[string]bool{}
+	frontLast := map[string]probeResult{}
 	t0 := time.Now()
 	for i := 1; i <= secs; i++ {
 		if d := time.Until(t0.Add(time.Duration(i) * time.Second)); d > 0 {
@@ -989,7 +1129,19 @@ func (s *Service) healthCheck(ctx context.Context, id int64, engine string, snap
 			if st.ExitError != "" {
 				reason += " (" + st.ExitError + ")"
 			}
-			return reason
+			return reason, engine
+		}
+		if lw != nil && lw.run {
+			sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			lst, err := s.app.Client(lw.engine).Status(sctx)
+			cancel()
+			if err == nil && !lst.Running {
+				reason := engineLabel(lw.engine) + " exited after starting"
+				if lst.ExitError != "" {
+					reason += " (" + lst.ExitError + ")"
+				}
+				return reason, lw.engine
+			}
 		}
 		pending := []string{}
 		for _, t := range watch {
@@ -997,12 +1149,22 @@ func (s *Service) healthCheck(ctx context.Context, id int64, engine string, snap
 				pending = append(pending, t)
 			}
 		}
-		if len(pending) == 0 {
-			if i >= 3 || len(watch) == 0 {
-				if len(watch) == 0 && i < secs {
+		pendingFronts := []model.Frontend{}
+		for _, f := range fronts {
+			if !frontPassed[f.ID] {
+				pendingFronts = append(pendingFronts, f)
+			}
+		}
+		if !lbPassed && i >= settle {
+			lbLost, lbErr = s.lostBackends(ctx, lw.engine, lbBefore)
+			lbPassed = lbErr == nil && len(lbLost) == 0
+		}
+		if len(pending) == 0 && len(pendingFronts) == 0 && lbPassed {
+			if i >= 3 || idle {
+				if idle && i < secs {
 					continue
 				}
-				return ""
+				return "", ""
 			}
 			continue
 		}
@@ -1010,6 +1172,13 @@ func (s *Service) healthCheck(ctx context.Context, id int64, engine string, snap
 			last[t] = res
 			if res.ok {
 				passed[t] = true
+			}
+		}
+		for _, f := range pendingFronts {
+			res := probeFrontend(ctx, f.Bind)
+			frontLast[f.ID] = res
+			if res.ok {
+				frontPassed[f.ID] = true
 			}
 		}
 	}
@@ -1021,10 +1190,21 @@ func (s *Service) healthCheck(ctx context.Context, id int64, engine string, snap
 					name = h.Domains[0]
 				}
 			}
-			return fmt.Sprintf("%s %s for %d s after reload", name, last[t].detail, secs)
+			return fmt.Sprintf("%s %s for %d s after reload", name, last[t].detail, secs), failEngine
 		}
 	}
-	return ""
+	for _, f := range fronts {
+		if !frontPassed[f.ID] {
+			return fmt.Sprintf("frontend %s %s for %d s after reload", f.Name, frontLast[f.ID].detail, secs), lw.engine
+		}
+	}
+	if !lbPassed {
+		if lbErr != nil {
+			return fmt.Sprintf("couldn't read %s statistics after the switch: %v", engineLabel(lw.engine), lbErr), lw.engine
+		}
+		return fmt.Sprintf("backend %s has no usable server on %s, but had one before the switch", strings.Join(lbLost, ", "), engineLabel(lw.engine)), lw.engine
+	}
+	return "", ""
 }
 
 // ---------------------------------------------------------------- rollback & discard
@@ -1100,6 +1280,7 @@ func (s *Service) reconcile(ctx context.Context) {
 	s.observe(ctx, "nginx", st.Nginx)
 	s.observe(ctx, "haproxy", st.HAProxy)
 	s.observe(ctx, "edge", st.Edge)
+	s.observe(ctx, "balancer", st.Balancer)
 
 	if !s.applyMu.TryLock() {
 		return
@@ -1152,17 +1333,37 @@ func (s *Service) reconcile(ctx context.Context) {
 			s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": other, "running": false, "reachable": true})
 		}
 	}
-	wantHAProxy := live.HAProxyRunning && !s.stoppedEngines(ctx)[agent.EngineHAProxy]
-	if st.HAProxy.Reachable && live.HAProxyHash != "" && st.HAProxy.ConfigHash != live.HAProxyHash && (wantHAProxy || st.HAProxy.ConfigHash != "") {
-		files := agent.Files{"haproxy.cfg": live.HAProxyCfg}
-		s.log.Info("haproxy is not running the live version, restoring", "version", live.ID)
-		resp, err := s.app.HAProxy.Apply(ctx, agent.ApplyRequest{Files: files, Hash: live.HAProxyHash, Stop: !wantHAProxy})
+	// The live load balancer engine runs the live release; only it may hold
+	// the frontends.
+	lbEngine := rowLBEngine(live)
+	lst, lbOther, lost := st.HAProxy, agent.EngineBalancer, st.Balancer
+	if lbEngine == agent.EngineBalancer {
+		lst, lbOther, lost = st.Balancer, agent.EngineHAProxy, st.HAProxy
+	}
+	wantLB := live.HAProxyRunning && !s.stoppedEngines(ctx)[lbEngine]
+	if lst.Reachable && live.HAProxyHash != "" && lst.ConfigHash != live.HAProxyHash && (wantLB || lst.ConfigHash != "") {
+		files := lbengine.Files(lbEngine, live.HAProxyCfg)
+		s.log.Info(lbEngine+" is not running the live version, restoring", "version", live.ID)
+		resp, err := s.app.Client(lbEngine).Apply(ctx, agent.ApplyRequest{Files: files, Hash: live.HAProxyHash, Stop: !wantLB})
 		if err == nil && resp.OK {
-			s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": "haproxy", "running": resp.Running, "reachable": true})
+			s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": lbEngine, "running": resp.Running, "reachable": true})
 		} else if err != nil {
-			s.log.Warn("restore live haproxy config", "err", err)
+			s.log.Warn("restore live "+lbEngine+" config", "err", err)
 		} else {
-			s.log.Warn("restore live haproxy config", "err", firstErrorLine(resp.Output))
+			s.log.Warn("restore live "+lbEngine+" config", "err", firstErrorLine(resp.Output))
+		}
+	}
+	if lost.Reachable && lost.Running {
+		s.log.Info("stopping the load balancer engine that isn't selected", "engine", lbOther, "selected", lbEngine)
+		resp, err := s.app.Client(lbOther).Apply(ctx, agent.ApplyRequest{Stop: true})
+		switch {
+		case err != nil:
+			s.log.Warn("stop "+lbOther, "err", err)
+		case !resp.OK:
+			s.log.Warn("stop "+lbOther, "err", firstErrorLine(resp.Output))
+		default:
+			stoppedNow[lbOther] = true
+			s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": lbOther, "running": false, "reachable": true})
 		}
 	}
 	s.manageContainers(ctx, st, live, engine, stoppedNow)
@@ -1180,7 +1381,7 @@ func (s *Service) observe(ctx context.Context, engine string, st core.EngineStat
 	s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": engine, "running": st.Running, "reachable": st.Reachable})
 	// Outage alerts only for the active proxy engine, and not while an apply
 	// is switching engines.
-	if !seen || !agent.IsProxyEngine(engine) || engine != s.app.ProxyEngine(ctx) || s.switching() != "" {
+	if !seen || !agent.IsProxyEngine(engine) || engine != s.app.ProxyEngine(ctx) || s.anySwitching() {
 		return
 	}
 	label := engineLabel(engine)

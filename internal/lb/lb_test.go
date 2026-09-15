@@ -207,7 +207,7 @@ func TestPortOwner(t *testing.T) {
 		{"", "127.0.0.1", 10081, ""},
 		{"", "127.0.0.1", 2457, "stream valheim"},
 		{"", "", 443, "nginx (HTTPS)"},
-		{"", "127.0.0.1", 8404, "the HAProxy stats endpoint"},
+		{"", "127.0.0.1", 8404, "the load balancer stats endpoint"},
 		{"", "127.0.0.1", 8181, "the Relay admin UI"},
 	}
 	for _, c := range cases {

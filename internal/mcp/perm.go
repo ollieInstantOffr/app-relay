@@ -37,6 +37,7 @@ var writeTools = map[string]bool{
 	"set_default_host":         true,
 	"update_settings":          true,
 	"set_proxy_engine":         true,
+	"set_lb_engine":            true,
 	"discard_changes":          true,
 	"engine_action":            true,
 	"upgrade_engine":           true,

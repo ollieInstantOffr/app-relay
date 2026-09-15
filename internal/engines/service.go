@@ -299,6 +299,10 @@ func (s *Service) Updates(ctx context.Context) (*core.EngineUpdates, error) {
 	if out.ProxyEngine == "" {
 		out.ProxyEngine = s.app.ProxyEngine(ctx)
 	}
+	out.LBEngine = statuses.LB
+	if out.LBEngine == "" {
+		out.LBEngine = s.app.LBEngine(ctx)
+	}
 
 	containers := map[string]*engineContainer{}
 	containerErr := map[string]string{}
@@ -327,7 +331,7 @@ func (s *Service) Updates(ctx context.Context) (*core.EngineUpdates, error) {
 	build := func(engine string, st core.EngineState, channel, desired string) core.EngineUpdateInfo {
 		info := core.EngineUpdateInfo{Engine: engine, Channel: channel, Version: st.Version, Reachable: st.Reachable, Running: st.Running,
 			DesiredImage: desired, Channels: map[string]*core.EngineRelease{}, Modules: st.Modules, MissingModules: []string{},
-			Inactive: agent.IsProxyEngine(engine) && engine != out.ProxyEngine, Standby: st.Standby}
+			Inactive: inactiveEngine(engine, out.ProxyEngine, out.LBEngine), Standby: st.Standby}
 		if info.Modules == nil {
 			info.Modules = []string{}
 		}
@@ -361,8 +365,8 @@ func (s *Service) Updates(ctx context.Context) (*core.EngineUpdates, error) {
 		}
 		switch {
 		case info.Inactive && (out.DockerError != "" || containers[engine] == nil || !info.Official):
-			// Not the selected proxy engine: a missing container or image
-			// problem isn't an error.
+			// Not the selected proxy / load balancer engine: a missing
+			// container or image problem isn't an error.
 		case out.DockerError != "":
 			info.UpgradeBlocker = "Relay can't reach the Docker API (mount /var/run/docker.sock into the relay container)."
 		case containers[engine] == nil:
@@ -449,6 +453,19 @@ func (s *Service) UpgradeStatus() *core.UpgradeJob {
 	j := *s.job
 	j.Steps = append([]core.UpgradeStep(nil), s.job.Steps...)
 	return &j
+}
+
+// inactiveEngine reports whether an image engine isn't selected: nginx while
+// Relay Edge is the proxy engine, HAProxy while Relay Balancer is the load
+// balancer engine.
+func inactiveEngine(engine, proxyEngine, lbEngine string) bool {
+	switch {
+	case agent.IsProxyEngine(engine):
+		return engine != proxyEngine
+	case agent.IsLBEngine(engine):
+		return engine != agent.NormalizeLBEngine(lbEngine)
+	}
+	return false
 }
 
 // activeEngine reports whether engine must be running: HAProxy decides by

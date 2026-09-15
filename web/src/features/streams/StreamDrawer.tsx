@@ -13,7 +13,7 @@ import type { PortEntry } from './StreamsPage'
 import { previewCheck, previewTitle } from '../hosts/ConfigPreview'
 import '../certificates/certs.css'
 
-const ownerLabel: Record<PortEntry['owner'], string> = { nginx: 'nginx', edge: 'Relay Edge', haproxy: 'HAProxy', relay: 'Relay', other: 'another process' }
+const ownerLabel: Record<PortEntry['owner'], string> = { nginx: 'nginx', edge: 'Relay Edge', haproxy: 'HAProxy', balancer: 'Relay Balancer', relay: 'Relay', other: 'another process' }
 
 interface PortCheck { free: boolean; conflicts: PortEntry[]; messages: string[]; ports: number; listenersKnown: boolean }
 

@@ -31,7 +31,7 @@ export interface Histogram {
 export interface ErrorEntry {
   id: number
   ts: string
-  source: 'nginx' | 'edge' | 'haproxy' | 'relay' | 'acme' | string
+  source: 'nginx' | 'edge' | 'haproxy' | 'balancer' | 'relay' | 'acme' | string
   level: string
   message: string
 }

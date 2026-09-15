@@ -133,7 +133,7 @@ export default function FrontendsTab({ onNew, onEdit, onDuplicate }: {
 
       <div ref={calloutRef}>
         <Callout tone="info" icon="info">
-          The reverse proxy owns public TLS and domains. HAProxy owns pools and health. Public HTTP traffic always enters through the reverse proxy; only raw TCP/UDP frontends bind to a LAN or public IP directly.
+          The reverse proxy owns public TLS and domains. The load balancer owns pools and health. Public HTTP traffic always enters through the reverse proxy; only raw TCP/UDP frontends bind to a LAN or public IP directly.
         </Callout>
       </div>
 

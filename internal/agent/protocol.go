@@ -1,5 +1,5 @@
 // Package agent is the control plane between the relay app and the nginx /
-// haproxy / edge containers. Each engine container runs `relay agent --engine X` as
+// haproxy / edge / balancer containers. Each engine container runs `relay agent --engine X` as
 // PID 1: it supervises the engine process and serves this protocol as HTTP
 // over a unix socket in the shared /run/relay volume.
 //
@@ -13,6 +13,9 @@ const (
 	EngineNginx   = "nginx"
 	EngineHAProxy = "haproxy"
 	EngineEdge    = "edge" // Relay Edge, the built-in reverse proxy (relay edge run)
+	// EngineBalancer is Relay Balancer, the built-in load balancer (relay
+	// balancer run), selectable instead of HAProxy.
+	EngineBalancer = "balancer"
 )
 
 // IsProxyEngine reports whether engine serves the HTTP/HTTPS ports and
@@ -27,6 +30,18 @@ func NormalizeProxyEngine(engine string) string {
 	return EngineNginx
 }
 
+// IsLBEngine reports whether engine is a load balancer (HAProxy or Relay
+// Balancer; exactly one of them is selected at a time).
+func IsLBEngine(engine string) bool { return engine == EngineHAProxy || engine == EngineBalancer }
+
+// NormalizeLBEngine maps "" and unknown values to haproxy.
+func NormalizeLBEngine(engine string) string {
+	if engine == EngineBalancer {
+		return EngineBalancer
+	}
+	return EngineHAProxy
+}
+
 // SocketPath returns the agent socket for an engine inside runDir.
 func SocketPath(runDir, engine string) string { return runDir + "/" + engine + ".sock" }
 
@@ -34,6 +49,7 @@ func SocketPath(runDir, engine string) string { return runDir + "/" + engine + "
 // nginx: "nginx.conf", "conf.d/hosts/<id>.conf", "htpasswd/<id>", …
 // haproxy: "haproxy.cfg".
 // edge: "edge.json", "htpasswd/<id>".
+// balancer: "balancer.json".
 type Files map[string]string
 
 // Endpoints (all JSON):
@@ -45,7 +61,7 @@ type Files map[string]string
 //	POST /v1/start | /v1/stop | /v1/reload → ActionResponse
 //	GET  /v1/logs?since=<unix-ms>&limit=N → LogsResponse (engine stdout/stderr)
 //	GET  /v1/listeners           → ListenersResponse (sockets bound on the host)
-//	POST /v1/runtime             RuntimeRequest → RuntimeResponse (haproxy runtime API)
+//	POST /v1/runtime             RuntimeRequest → RuntimeResponse (HAProxy runtime API subset; haproxy and balancer agents)
 const (
 	PathStatus    = "/v1/status"
 	PathValidate  = "/v1/validate"
@@ -93,8 +109,8 @@ type ValidateResponse struct {
 type ApplyRequest struct {
 	Files Files  `json:"files"`
 	Hash  string `json:"hash"`
-	// Stop the engine instead of reloading when true (e.g. haproxy with no
-	// backends, or the proxy engine that isn't selected). With no files and no
+	// Stop the engine instead of reloading when true (e.g. the load balancer
+	// with no backends, or the proxy / load balancer engine that isn't selected). With no files and no
 	// hash the current release is kept and only the engine is stopped.
 	Stop bool `json:"stop"`
 }

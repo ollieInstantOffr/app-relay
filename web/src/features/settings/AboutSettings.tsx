@@ -30,10 +30,12 @@ export default function AboutSettings() {
   const days = installedAt ? Math.max(0, Math.floor((Date.now() - new Date(installedAt).getTime()) / 86_400_000)) : undefined
 
   const proxy = engines.data?.proxy === 'edge' ? 'edge' : 'nginx'
-  const rows: { name: string; label: string; state?: EngineState; proxy?: boolean }[] = [
-    { name: 'nginx', label: 'nginx', state: engines.data?.nginx, proxy: true },
-    { name: 'edge', label: 'Relay Edge', state: engines.data?.edge, proxy: true },
-    { name: 'haproxy', label: 'haproxy', state: engines.data?.haproxy },
+  const lb = engines.data?.lb === 'balancer' ? 'balancer' : 'haproxy'
+  const rows: { name: string; label: string; state?: EngineState; group: 'proxy' | 'lb' }[] = [
+    { name: 'nginx', label: 'nginx', state: engines.data?.nginx, group: 'proxy' },
+    { name: 'edge', label: 'Relay Edge', state: engines.data?.edge, group: 'proxy' },
+    { name: 'haproxy', label: 'haproxy', state: engines.data?.haproxy, group: 'lb' },
+    { name: 'balancer', label: 'Relay Balancer', state: engines.data?.balancer, group: 'lb' },
   ]
 
   return (
@@ -55,22 +57,26 @@ export default function AboutSettings() {
       </div>
 
       <Card title="Components">
-        {rows.map(({ name, label, state, proxy: isProxy }) => {
-          const active = isProxy && !!engines.data && proxy === name
-          // The standby proxy engine is stopped on purpose; don't report that as a problem.
-          const st = isProxy && engines.data && !active && (state?.standby || (state?.reachable && !state.running))
-            ? { tone: 'muted' as const, label: 'standby', detail: 'stopped · not the proxy engine · Settings → Proxy engine' }
+        {rows.map(({ name, label, state, group }) => {
+          const active = !!engines.data && (group === 'proxy' ? proxy : lb) === name
+          // The standby engine of each pair is stopped on purpose; don't report that as a problem.
+          const st = engines.data && !active && (!state || state.standby || (state.reachable && !state.running))
+            ? {
+                tone: 'muted' as const,
+                label: 'standby',
+                detail: group === 'proxy' ? 'stopped · not the proxy engine · Settings → Proxy engine' : 'stopped · not the load balancer engine · Settings → Load balancer engine',
+              }
             : engineStatus(state, engines.isLoading)
           return (
             <div key={name} className="comp-row">
               <span className="row gap-6">
                 {label}
-                {name === 'edge' && <Badge tone="info">beta</Badge>}
-                {isProxy && engines.data && (active ? <Badge tone="ok">active</Badge> : <Badge>standby</Badge>)}
+                {(name === 'edge' || name === 'balancer') && <Badge tone="info">beta</Badge>}
+                {engines.data && (active ? <Badge tone="ok">active</Badge> : <Badge>standby</Badge>)}
               </span>
               <span className="mono small row gap-6">
                 {state?.version || '—'}
-                {name !== 'edge' && !(name === 'nginx' && updates?.nginx.inactive) && updates?.[name as 'nginx' | 'haproxy']?.updateAvailable && (
+                {(name === 'nginx' || name === 'haproxy') && !updates?.[name]?.inactive && updates?.[name]?.updateAvailable && (
                   <Link to="/settings/engines" title={`${updates[name as 'nginx' | 'haproxy'].latest?.version} available`}>
                     <Badge tone="info">update</Badge>
                   </Link>

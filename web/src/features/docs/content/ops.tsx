@@ -9,7 +9,7 @@ function Logs() {
       <Defs
         items={[
           ['Access', 'Every request the reverse proxy served: time, host, method, path, status, upstream status, client IP, duration, user agent.'],
-          ['Error', 'Reverse proxy (nginx or Relay Edge) and HAProxy errors, such as upstreams refusing connections, timeouts and TLS problems.'],
+          ['Error', 'Reverse proxy (nginx or Relay Edge) and load balancer (HAProxy or Relay Balancer) errors, such as upstreams refusing connections, timeouts and TLS problems.'],
           ['Audit', 'Who changed what and when, whether through the UI, a REST API token or an AI assistant over MCP.'],
           ['Approvals', <>Changes requested by AI assistants that are waiting for you. <See id="mcp">MCP →</See></>],
         ]}
@@ -73,8 +73,8 @@ function History() {
       <List>
         <li>Select a version to see a per-file diff against the version before it.</li>
         <li>Compare any two versions, for example “what changed between Monday and now?”.</li>
-        <li>Download a version’s rendered proxy (nginx or Relay Edge) and HAProxy files.</li>
-        <li>Each version records its proxy engine; the version that switched engines carries a badge such as <C>→ Relay Edge</C>.</li>
+        <li>Download a version’s rendered proxy (nginx or Relay Edge) and load balancer (HAProxy or Relay Balancer) files.</li>
+        <li>Each version records its proxy and load balancer engine; the version that switched engines carries a badge such as <C>→ Relay Edge</C> or <C>→ Relay Balancer</C>.</li>
       </List>
 
       <H2>Rolling back</H2>
@@ -331,7 +331,7 @@ function Engines() {
           You also get an <C>engine_update_available</C> notification for each new version.
         </Step>
         <Step title="Update">
-          Click <UI>Upgrade to 0.4.2</UI> on the Relay card. Optionally tick <UI>Also restart the proxy and load balancer engines</UI> so the engines pick up the new agent, and Relay Edge its new version (a 1–3 second pause in traffic).
+          Click <UI>Upgrade to 0.4.2</UI> on the Relay card. Optionally tick <UI>Also restart the proxy and load balancer engines</UI> so the engines pick up the new agent, and Relay Edge and Relay Balancer their new version (a 1–3 second pause in traffic).
         </Step>
         <Step title="Watch it run">
           The progress panel shows pull, build and restart. <UI>Show build output</UI> streams the docker build log. Building takes a few minutes the first time and is much faster afterwards thanks to the build cache.
@@ -353,7 +353,7 @@ function Engines() {
         <li>git only fast-forwards and runs as the owner of the folder, so your checkout is never rewritten or left owned by root.</li>
         <li>If the build fails, Relay keeps running the current version.</li>
         <li>If the new version doesn’t become healthy after the restart, the previous image is restored automatically.</li>
-        <li>The proxy engine and HAProxy keep serving traffic throughout (unless you choose to restart them).</li>
+        <li>The proxy and load balancer engines keep serving traffic throughout (unless you choose to restart them).</li>
         <li>The work runs in a short-lived helper container (<C>docker:29.8.0-cli</C>) that survives Relay’s own restart; the restarted Relay reports the result.</li>
       </List>
       <H3>Version numbers</H3>
@@ -385,6 +385,10 @@ function Engines() {
       <Note>
         Relay Edge has no card: it is part of Relay and updates with it. While Relay Edge is the proxy engine, the nginx card shows <C>Not in use</C> and nginx isn’t
         checked for upgrades or problems. <See id="relay-edge">Relay Edge →</See>
+      </Note>
+      <Note>
+        Relay Balancer works the same way: it is part of Relay, and while it is the load balancer engine the HAProxy card shows <C>Not in use</C>.{' '}
+        <See id="relay-balancer">Relay Balancer →</See>
       </Note>
 
       <H2>Update checks</H2>

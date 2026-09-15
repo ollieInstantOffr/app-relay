@@ -71,7 +71,8 @@ type EngineState struct {
 	// unreachable: running | stopped | missing ("" = not checked).
 	Container string `json:"container,omitempty"`
 	// Standby: the container is stopped on purpose because the engine isn't
-	// needed (not the selected proxy engine, or HAProxy stopped or idle).
+	// needed (not the selected proxy / load balancer engine, or the load
+	// balancer stopped or idle).
 	Standby bool `json:"standby,omitempty"`
 }
 
@@ -79,8 +80,12 @@ type EnginesStatus struct {
 	Nginx   EngineState `json:"nginx"`
 	HAProxy EngineState `json:"haproxy"`
 	Edge    EngineState `json:"edge"`
+	// Balancer is Relay Balancer (the load balancer alternative to HAProxy).
+	Balancer EngineState `json:"balancer"`
 	// Proxy is the active proxy engine: nginx | edge.
 	Proxy string `json:"proxy"`
+	// LB is the active load balancer engine: haproxy | balancer.
+	LB string `json:"lb"`
 }
 
 // EngineContainers starts and stops engine containers (internal/engines).

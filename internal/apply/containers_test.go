@@ -58,7 +58,7 @@ func (f *fakeContainers) calls() (starts, stops string) {
 }
 
 func withContainers(e *testEnv) *fakeContainers {
-	fc := &fakeContainers{agents: map[string]*fakeAgent{"nginx": e.nginx, "edge": e.edge, "haproxy": e.haproxy}}
+	fc := &fakeContainers{agents: map[string]*fakeAgent{"nginx": e.nginx, "edge": e.edge, "haproxy": e.haproxy, "balancer": e.balancer}}
 	e.app.Containers = fc
 	return fc
 }
@@ -72,17 +72,17 @@ func TestIdleEngineContainersStopAndStart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Relay Edge isn't selected and HAProxy has nothing to run.
+	// Relay Edge and Relay Balancer aren't selected and HAProxy has nothing to run.
 	e.svc.reconcile(ctx)
-	if starts, stops := fc.calls(); stops != "edge,haproxy" || starts != "" {
+	if starts, stops := fc.calls(); stops != "edge,haproxy,balancer" || starts != "" {
 		t.Fatalf("starts %q stops %q", starts, stops)
 	}
 	st, _ := e.svc.Status(ctx)
-	if !st.Edge.Standby || st.Edge.Container != "stopped" || !st.HAProxy.Standby || st.Nginx.Standby || !st.Nginx.Reachable {
+	if !st.Edge.Standby || st.Edge.Container != "stopped" || !st.HAProxy.Standby || !st.Balancer.Standby || st.Nginx.Standby || !st.Nginx.Reachable {
 		t.Fatalf("status = nginx %+v edge %+v haproxy %+v", st.Nginx, st.Edge, st.HAProxy)
 	}
 	e.svc.reconcile(ctx)
-	if _, stops := fc.calls(); stops != "edge,haproxy" {
+	if _, stops := fc.calls(); stops != "edge,haproxy,balancer" {
 		t.Fatalf("second reconcile stopped again: %q", stops)
 	}
 
@@ -107,7 +107,7 @@ func TestIdleEngineContainersStopAndStart(t *testing.T) {
 		t.Fatalf("starts %q", starts)
 	}
 	e.svc.reconcile(ctx)
-	if _, stops := fc.calls(); stops != "edge,haproxy,nginx" {
+	if _, stops := fc.calls(); stops != "edge,haproxy,balancer,nginx" {
 		t.Fatalf("stops %q", stops)
 	}
 	st, _ = e.svc.Status(ctx)
@@ -135,14 +135,14 @@ func TestHAProxyStartStopManagesContainer(t *testing.T) {
 	}
 	// Running on request: reconcile leaves it alone.
 	e.svc.reconcile(ctx)
-	if _, stops := fc.calls(); stops != "edge,haproxy" {
+	if _, stops := fc.calls(); stops != "edge,haproxy,balancer" {
 		t.Fatalf("stops %q", stops)
 	}
 
 	if resp, err := e.svc.EngineAction(ctx, "haproxy", "stop"); err != nil || !resp.OK {
 		t.Fatalf("stop: %+v %v", resp, err)
 	}
-	if _, stops := fc.calls(); stops != "edge,haproxy,haproxy" {
+	if _, stops := fc.calls(); stops != "edge,haproxy,balancer,haproxy" {
 		t.Fatalf("stops %q", stops)
 	}
 	st, _ := e.svc.Status(ctx)
