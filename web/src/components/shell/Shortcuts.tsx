@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Dialog, Kbd } from '../ui'
 
 const GO: Record<string, string> = {
-  o: '/', h: '/hosts', l: '/load-balancer', c: '/certificates', a: '/access', t: '/streams', g: '/logs', v: '/history', s: '/settings',
+  o: '/', h: '/hosts', l: '/load-balancer', c: '/certificates', a: '/access', t: '/streams', g: '/logs', v: '/history', s: '/settings', d: '/docs',
 }
 
 function typing(e: KeyboardEvent) {
@@ -62,7 +62,7 @@ export function useGlobalShortcuts() {
 
 const SECTIONS: { title: string; rows: [string, string[]][] }[] = [
   { title: 'Global', rows: [['Command palette', ['⌘', 'K']], ['New host', ['N']], ['Apply pending changes', ['⌘', '⏎']], ['Search / filter', ['/']], ['This sheet', ['?']]] },
-  { title: 'Go to', rows: [['Overview', ['G', 'O']], ['Hosts', ['G', 'H']], ['Load balancer', ['G', 'L']], ['Certificates', ['G', 'C']], ['Access lists · Streams', ['G', 'A', '·', 'G', 'T']], ['Logs · History · Settings', ['G', 'G', '·', 'G', 'V', '·', 'G', 'S']]] },
+  { title: 'Go to', rows: [['Overview', ['G', 'O']], ['Hosts', ['G', 'H']], ['Load balancer', ['G', 'L']], ['Certificates', ['G', 'C']], ['Access lists · Streams', ['G', 'A', '·', 'G', 'T']], ['Logs · History · Settings', ['G', 'G', '·', 'G', 'V', '·', 'G', 'S']], ['Documentation', ['G', 'D']]] },
   { title: 'Lists', rows: [['Move · open', ['J', 'K', '·', '⏎']], ['Select · select all', ['X', '·', '⌘', 'A']], ['Edit · delete', ['E', '·', '⌫']], ['Toggle grid / table', ['V']]] },
   { title: 'Drawers', rows: [['Save to pending', ['⌘', 'S']], ['Next / previous tab', ['⌘', ']', '·', '⌘', '[']], ['Close', ['esc']], ['Logs: pause tail', ['space']]] },
 ]

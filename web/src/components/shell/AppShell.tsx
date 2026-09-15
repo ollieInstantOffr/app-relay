@@ -113,6 +113,11 @@ function Rail({ pendingCount, username, role }: { pendingCount: number; username
         </Tooltip>
       ))}
       <div className="spacer" />
+      <Tooltip content="Documentation" shortcut="G D" side="right">
+        <NavLink to="/docs" className={({ isActive }) => cx('rail-item', isActive && 'active')} aria-label="Documentation">
+          <Icon name="docs" size={18} />
+        </NavLink>
+      </Tooltip>
       <Tooltip content="Settings" shortcut="G S" side="right">
         <NavLink to="/settings" className={({ isActive }) => cx('rail-item', isActive && 'active')} aria-label="Settings">
           <Icon name="settings" size={18} />
@@ -125,6 +130,7 @@ function Rail({ pendingCount, username, role }: { pendingCount: number; username
         items={[
           { header: `${username} · ${role}` },
           { label: 'Account & sessions', icon: 'users', onSelect: () => navigate('/settings/users') },
+          { label: 'Documentation', icon: 'docs', onSelect: () => navigate('/docs') },
           { label: 'Keyboard shortcuts', icon: 'terminal', shortcut: '?', onSelect: () => window.dispatchEvent(new CustomEvent('relay:shortcuts')) },
           'separator',
           {
