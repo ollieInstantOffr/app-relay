@@ -4,9 +4,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { TopBar } from '../../components/shell/TopBar'
 import { Button, Dot, EmptyState, Segmented, Skeleton, StatCard, Status, cx, healthTone } from '../../components/ui'
 import { ago, bytes, clock, compact, dateTime, duration, ms } from '../../lib/format'
-import { useContainers, useEntities, useHealth, useProxyEngine, useRole } from '../../lib/queries'
+import { useContainers, useEntities, useHealth, useLBEngine, useLBStats, useProxyEngine, useRole } from '../../lib/queries'
 import { proxyEngineLabel } from '../../lib/types'
-import type { ActivityRow, HealthState, HealthStatus, ProxyHost } from '../../lib/types'
+import type { ActivityRow, BackendStats, HealthState, HealthStatus, ProxyHost } from '../../lib/types'
 import DockerSuggestionsDialog from '../docker/DockerSuggestionsDialog'
 import { OVERVIEW_RANGES, useActivity, useNow, useOverview, type Overview, type OverviewRange } from './api'
 import { TrafficChart } from './TrafficChart'
@@ -88,6 +88,8 @@ export default function OverviewPage() {
     [hosts, health, nginxDown],
   )
   const noHosts = hostsQ.isSuccess && hosts.length === 0
+  const backendsQ = useEntities('backends')
+  const hasBackends = (backendsQ.data?.length ?? 0) > 0
 
   return (
     <>
@@ -101,10 +103,13 @@ export default function OverviewPage() {
       <div className="page overview">
         <StatCards rows={rows} hostsLoaded={hostsQ.isSuccess} ov={ov} nginxDown={nginxDown} />
         {noHosts ? (
-          <div className="ov-grid">
-            <Onboarding canWrite={canWrite} onDocker={() => setDockerOpen(true)} />
-            <ActivityCard />
-          </div>
+          <>
+            <div className="ov-grid">
+              <Onboarding canWrite={canWrite} onDocker={() => setDockerOpen(true)} />
+              <ActivityCard />
+            </div>
+            {hasBackends && <LoadBalancerCard />}
+          </>
         ) : (
           <>
             <div className="ov-grid">
@@ -112,6 +117,7 @@ export default function OverviewPage() {
               <ActivityCard />
             </div>
             <HostHealth rows={rows} loading={!hostsQ.data} />
+            {hasBackends && <LoadBalancerCard />}
           </>
         )}
       </div>
@@ -299,6 +305,88 @@ function HostHealth({ rows, loading }: { rows: HostRow[]; loading: boolean }) {
         )}
         {sorted.length > visible.length && (
           <Link to="/hosts" className="ov-chip more">+{sorted.length - visible.length} more</Link>
+        )}
+      </div>
+    </div>
+  )
+}
+
+const backendTone: Record<string, 'ok' | 'warn' | 'danger'> = { UP: 'ok', DEGRADED: 'warn', DOWN: 'danger' }
+
+/** Load balancer summary: engine, traffic and backend health (from /api/lb/stats). */
+function LoadBalancerCard() {
+  const backends = useEntities('backends').data ?? []
+  const frontends = useEntities('frontends').data ?? []
+  const stats = useLBStats(10_000).data
+  const { label, state } = useLBEngine()
+  const now = useNow(60_000)
+
+  const byId = new Map<string, BackendStats>((stats?.backends ?? []).map((b) => [b.id, b]))
+  const running = !!stats?.running
+  const live = backends.map((b) => ({ b, st: running ? byId.get(b.id) : undefined }))
+  const servers = live.flatMap(({ st }) => st?.servers ?? [])
+  const serversUp = servers.filter((sv) => sv.status === 'UP' || sv.status === 'NOCHECK').length
+  const totalServers = backends.reduce((n, b) => n + b.servers.length, 0)
+  const backendsUp = live.filter(({ st }) => st?.status === 'UP').length
+  const degraded = live.filter(({ st }) => st?.status === 'DEGRADED').length
+  const down = live.filter(({ st }) => st?.status === 'DOWN').length
+  const current = live.reduce((n, { st }) => n + (st?.current ?? 0), 0)
+  const enabledFrontends = frontends.filter((f) => f.enabled).length
+
+  let engineStatus
+  if (!state) engineStatus = null
+  else if (!state.reachable) engineStatus = <Status tone="muted">{label} agent unreachable</Status>
+  else if (!state.running) engineStatus = <Status tone="danger">{label} · not running</Status>
+  else {
+    const up = state.startedAt ? (now - Date.parse(state.startedAt)) / 1000 : null
+    engineStatus = <Status tone="ok">{[label, state.version].filter(Boolean).join(' ')}{up != null && up >= 0 ? ` · uptime ${duration(up)}` : ''}</Status>
+  }
+
+  const sorted = [...live].sort((x, y) => {
+    const rank = (st?: BackendStats) => (!st ? 3 : st.status === 'DOWN' ? 0 : st.status === 'DEGRADED' ? 1 : 2)
+    return rank(x.st) - rank(y.st) || x.b.name.localeCompare(y.b.name)
+  })
+  const visible = sorted.slice(0, HEALTH_CHIPS)
+
+  return (
+    <div className="card ov-card ov-lb">
+      <div className="ov-card-head">
+        <div className="ov-card-title">Load balancer</div>
+        {engineStatus}
+        <Link to="/load-balancer" className="ov-link">Open</Link>
+      </div>
+      <div className="ov-kpis ov-lb-kpis">
+        <Kpi label="Sessions / s" value={running ? compact(stats!.sessRate) : '—'} />
+        <Kpi label="Current sessions" value={running ? compact(current) : '—'} />
+        <Kpi
+          label="Backends up"
+          value={running ? `${backendsUp} / ${backends.length}` : `— / ${backends.length}`}
+        />
+        <Kpi label="Servers up" value={running ? `${serversUp} / ${totalServers}` : `— / ${totalServers}`} />
+        <Kpi label="Frontends" value={String(enabledFrontends)} />
+      </div>
+      {running && (down > 0 || degraded > 0) && (
+        <div className={cx('ov-lb-alert', down > 0 ? 'danger' : 'warn')}>
+          <Dot tone={down > 0 ? 'danger' : 'warn'} />
+          {[down > 0 ? `${down} backend${down === 1 ? '' : 's'} down` : '', degraded > 0 ? `${degraded} degraded` : ''].filter(Boolean).join(' · ')}
+        </div>
+      )}
+      <div className="ov-chips">
+        {visible.map(({ b, st }) => {
+          const up = st?.servers.filter((sv) => sv.status === 'UP' || sv.status === 'NOCHECK').length ?? 0
+          const title = st
+            ? `${b.name} · ${st.status} · ${up}/${b.servers.length} servers up · ${compact(st.sessRate)} sessions/s`
+            : `${b.name} · ${running ? 'not in the running config yet (apply)' : `${label} not running`}`
+          return (
+            <Link key={b.id} to={`/load-balancer/backends?edit=${b.id}`} className={cx('ov-chip', !st && 'dim')} title={title}>
+              <Dot tone={st ? (backendTone[st.status] ?? 'muted') : 'muted'} />
+              {b.name}
+              {st && <span className="ov-chip-meta">{up}/{b.servers.length}</span>}
+            </Link>
+          )
+        })}
+        {sorted.length > visible.length && (
+          <Link to="/load-balancer/backends" className="ov-chip more">+{sorted.length - visible.length} more</Link>
         )}
       </div>
     </div>

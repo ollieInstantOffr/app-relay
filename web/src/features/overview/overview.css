@@ -50,9 +50,17 @@
 .ov-chip.more { color: var(--ink-subtle); }
 .ov-onboarding { justify-content: center; }
 
+.ov-lb .ov-kpis.ov-lb-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); padding-top: 0; border-top: 0; }
+.ov-lb .ov-kpis.ov-lb-kpis + * { border-top: 1px solid var(--hairline); padding-top: 12px; }
+.ov-chip-meta { color: var(--ink-faint); }
+.ov-lb-alert { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.ov-lb-alert.danger { color: var(--danger-text); }
+.ov-lb-alert.warn { color: var(--warn-text); }
+
 @media (max-width: 1180px) {
   .ov-grid { grid-template-columns: minmax(0, 1fr); }
   .overview .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .ov-lb .ov-kpis.ov-lb-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 /* ---------------------------------------------------------------- update banner */
