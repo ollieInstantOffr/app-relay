@@ -25,7 +25,7 @@ export function RelayCard({ info, isAdmin, busy, onUpdate }: { info: RelayUpdate
   const checked = !!info.checkedAt
   const behind = info.behind
   const shown = info.commits.slice(0, 8)
-  const compare = repo && info.commit && info.remoteHead ? `${repo}/compare/${info.commit}...${info.remoteHead}` : repo ? `${repo}/commits/${info.branch}` : ''
+  const compare = repo && behind > 0 && info.commit && info.remoteHead ? `${repo}/compare/${info.commit}...${info.remoteHead}` : ''
 
   return (
     <Card
@@ -125,7 +125,7 @@ export function RelayCard({ info, isAdmin, busy, onUpdate }: { info: RelayUpdate
         {compare && (
           <a href={compare} target="_blank" rel="noreferrer">
             <Icon name="external" size={12} />
-            {behind > 0 ? 'Compare on GitHub' : 'Commits on GitHub'}
+            Compare on GitHub
           </a>
         )}
         <div className="spacer" />
