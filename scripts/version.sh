@@ -3,7 +3,7 @@
 # (default HEAD), derived from history so it never needs editing:
 #
 #   start  the newest reachable vX.Y.Z tag, or 0.1.0 at the first commit
-#   major  a commit with "BREAKING CHANGE" in its body, a "type!:" subject
+#   major  a "BREAKING CHANGE:" footer line in the body, a "type!:" subject
 #          (e.g. "feat!: drop v1 API") or "[major]" in the subject
 #   minor  a subject starting with "feat:" / "feat(scope):" or containing "[minor]"
 #   patch  every other commit
@@ -33,7 +33,7 @@ BEGIN {
 	subject = $1; body = $2
 	sub(/^\n+/, "", subject)
 	if (subject == "" && body == "") next
-	if (body ~ /BREAKING CHANGE/ || subject ~ /^[A-Za-z]+(\([^)]*\))?!:/ || subject ~ /\[major\]/) {
+	if (body ~ /(^|\n)BREAKING[ -]CHANGE:/ || subject ~ /^[A-Za-z]+(\([^)]*\))?!:/ || subject ~ /\[major\]/) {
 		major++; minor = 0; patch = 0
 	} else if (subject ~ /^feat(\([^)]*\))?:/ || subject ~ /\[minor\]/) {
 		minor++; patch = 0

@@ -59,8 +59,9 @@ func TestVersionScript(t *testing.T) {
 		{[]string{"feat(ui): docs page"}, "0.3.0"},
 		{[]string{"Small thing"}, "0.3.1"},
 		{[]string{"Add upgrades [minor]"}, "0.4.0"},
+		{[]string{"Explain rules", "Mentions BREAKING CHANGE / [major] / feat!: in passing"}, "0.4.1"},
 		{[]string{"feat!: new config format"}, "1.0.0"},
-		{[]string{"refactor", "BREAKING CHANGE: settings moved"}, "2.0.0"},
+		{[]string{"refactor", "Moves settings.\n\nBREAKING CHANGE: settings moved"}, "2.0.0"},
 		{[]string{"Big rewrite [major]"}, "3.0.0"},
 	}
 	for _, s := range steps {
