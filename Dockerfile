@@ -24,11 +24,12 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 COPY --from=web /src/internal/webui/dist ./internal/webui/dist
-ARG VERSION=0.1.0
-# Set by the in-app updater (and optionally by you) so Relay knows which commit it runs.
+# Set by `make up` and the in-app upgrader: the version derived from git history
+# (scripts/version.sh) and the commit Relay is built from.
+ARG RELAY_VERSION=
 ARG RELAY_COMMIT=
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${RELAY_COMMIT}" -o /out/relay ./cmd/relay
+    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${RELAY_VERSION:-dev} -X main.commit=${RELAY_COMMIT}" -o /out/relay ./cmd/relay
 
 # ---------------------------------------------------------------- relay (app)
 FROM alpine:3.22 AS relay

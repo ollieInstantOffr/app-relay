@@ -76,7 +76,7 @@ func (s *Service) UpdateRelay(ctx context.Context, restartEngines bool) (*core.R
 	}
 
 	job := &core.RelayUpdateJob{
-		ID: store.NewID(), From: s.app.Config.Commit, Actor: core.ActorFrom(ctx).Label(), RestartEngines: restartEngines,
+		ID: store.NewID(), From: s.app.Config.Commit, FromVersion: s.app.Config.Version, Actor: core.ActorFrom(ctx).Label(), RestartEngines: restartEngines,
 		Status: core.UpgradeRunning, StartedAt: time.Now().UTC(), Steps: append([]core.UpgradeStep(nil), relaySteps...),
 	}
 	for i := range job.Steps {
@@ -168,6 +168,14 @@ func (s *Service) followRelayHelper(ctx context.Context, cli *client.Client, id 
 				}
 				s.mu.Unlock()
 				s.relayStep("pull", "running", d, 0, "")
+			case "version":
+				if r.Version != "" {
+					s.mu.Lock()
+					s.relayJob.ToVersion = r.Version
+					from := s.relayJob.FromVersion
+					s.mu.Unlock()
+					s.relayStep("pull", "running", from+" → "+r.Version, 0, "")
+				}
 			case "":
 				s.mu.Lock()
 				s.relayJob.Output = lastLines(r.Log, relayOutputLines)
@@ -297,6 +305,9 @@ func (s *Service) finalizeRelay(ctx context.Context, cli *client.Client, helperI
 	if r.PulledTo != "" {
 		s.relayJob.To = r.PulledTo
 	}
+	if r.Version != "" {
+		s.relayJob.ToVersion = r.Version
+	}
 	s.relayJob.Output = lastLines(r.Log, relayOutputLines)
 	job := *s.relayJob
 	s.mu.Unlock()
@@ -312,11 +323,11 @@ func (s *Service) finalizeRelay(ctx context.Context, cli *client.Client, helperI
 			s.app.Audit(ctx, core.AuditEntry{Actor: &sys, Action: "relay.update", Target: "relay", Detail: msg, Result: "failed"})
 			return
 		}
-		s.relayStep("verify", "done", "Running "+firstNonEmpty(shortSHA(running), s.app.Config.Version), 98, "")
-		msg := "Relay upgraded to " + shortSHA(to)
+		s.relayStep("verify", "done", "Running "+s.app.Config.Version+" · "+firstNonEmpty(shortSHA(running), "commit unknown"), 98, "")
+		msg := "Relay upgraded to " + firstNonEmpty(job.ToVersion, shortSHA(to))
 		s.finishRelay(ctx, core.UpgradeSucceeded, msg+".", "")
-		s.app.Audit(ctx, core.AuditEntry{Actor: &sys, Action: "relay.update", Target: "relay", Detail: fmt.Sprintf("%s → %s", shortSHA(job.From), shortSHA(to)), Result: "ok"})
-		s.app.Activity(ctx, "relay.update", "ok", msg, "relay", fmt.Sprintf("%s → %s", firstNonEmpty(shortSHA(job.From), "unknown"), shortSHA(to)))
+		s.app.Audit(ctx, core.AuditEntry{Actor: &sys, Action: "relay.update", Target: "relay", Detail: fmt.Sprintf("%s → %s (%s)", job.FromVersion, firstNonEmpty(job.ToVersion, "?"), shortSHA(to)), Result: "ok"})
+		s.app.Activity(ctx, "relay.update", "ok", msg, "relay", fmt.Sprintf("%s → %s · %s", firstNonEmpty(job.FromVersion, "unknown"), firstNonEmpty(job.ToVersion, "?"), shortSHA(to)))
 		go s.checkRelay(context.WithoutCancel(ctx))
 		return
 	}
@@ -371,7 +382,7 @@ func (s *Service) resumeRelayUpdate(ctx context.Context) {
 	}
 	if _, err := cli.ContainerInspect(ctx, job.HelperID); err != nil {
 		if running := s.app.Config.Commit; running != "" && running == job.To {
-			s.finishRelay(ctx, core.UpgradeSucceeded, "Relay upgraded to "+shortSHA(running)+".", "")
+			s.finishRelay(ctx, core.UpgradeSucceeded, "Relay upgraded to "+s.app.Config.Version+".", "")
 			return
 		}
 		s.finishRelay(ctx, core.UpgradeFailed, "Relay restarted during the update and the updater container is gone.", strings.TrimSpace(err.Error()))

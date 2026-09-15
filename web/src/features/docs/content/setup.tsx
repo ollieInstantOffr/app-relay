@@ -19,8 +19,8 @@ function Installation() {
 cd relay`} />
         </Step>
         <Step title="Start the stack">
-          <Example lang="bash" code={`docker compose up -d --build`} />
-          This starts <C>relay</C>, <C>relay-nginx</C> and <C>relay-haproxy</C>. Check them with <C>docker compose ps</C>.
+          <Example lang="bash" code={`make up`} />
+          <C>make up</C> runs <C>docker compose up -d --build</C> with the version and commit taken from git, so the UI shows the right version. This starts <C>relay</C>, <C>relay-nginx</C> and <C>relay-haproxy</C>. Check them with <C>docker compose ps</C>.
         </Step>
         <Step title="Open the UI">
           Browse to <C>http://&lt;server-ip&gt;:8181</C>, e.g. <C>http://192.168.1.10:8181</C>.
@@ -60,7 +60,7 @@ cd relay`} />
         The easiest way is <UI>Settings → Updates → Upgrade</UI>: Relay pulls the newest commits, builds and restarts itself. <See id="engines">How in-app updates work →</See> From a shell:
       </P>
       <Example lang="bash" code={`git pull
-docker compose up -d --build
+make up
 # optional: restart the engines so their agents use the new binary (brief interruption)
 docker compose restart nginx haproxy`} />
       <Note>nginx and HAProxy keep serving the last applied configuration while <C>relay</C> restarts, so updating Relay doesn’t interrupt traffic. nginx and HAProxy versions are upgraded separately on the same page.</Note>

@@ -48,16 +48,17 @@ export function RelayCard({ info, isAdmin, busy, onUpdate }: { info: RelayUpdate
       <div className="eng-grid">
         <div className="eng-mini">
           <div className="k">Running</div>
-          <div className="v">{shortSha(info.commit) || info.version}</div>
-          <div className="sub">{info.commit ? `version ${info.version}` : `version ${info.version} · build commit unknown`}</div>
+          <div className="v">{info.version}</div>
+          <div className="sub">{info.commit ? `commit ${shortSha(info.commit)}` : 'build commit unknown'}</div>
         </div>
         <div className="eng-mini">
           <div className="k">Latest on {info.branch}</div>
           <div className="v">
-            {shortSha(info.remoteHead) || '—'}
+            {info.remoteVersion || shortSha(info.remoteHead) || '—'}
             {info.updateAvailable && <span className="upd-badge-dot" />}
           </div>
           <div className="sub">
+            {info.remoteVersion && info.remoteHead && `commit ${shortSha(info.remoteHead)} · `}
             {!checked ? 'not checked yet' : behind > 0 ? `${behind} new commit${behind === 1 ? '' : 's'}` : info.checkError ? 'check failed' : 'no new commits'}
             {info.checkedAt && ` · checked ${ago(info.checkedAt)}`}
           </div>
@@ -116,7 +117,7 @@ export function RelayCard({ info, isAdmin, busy, onUpdate }: { info: RelayUpdate
       {info.rebuildNeeded && (
         <div className="eng-callout">
           <Callout tone="info">
-            The checkout is at <span className="mono">{shortSha(info.checkoutHead)}</span> but Relay runs <span className="mono">{shortSha(info.commit)}</span>. Upgrade to run the checked-out version.
+            The checkout is at <span className="mono">{info.checkoutVersion || shortSha(info.checkoutHead)}</span> but Relay runs <span className="mono">{info.version}</span>. Upgrade to run the checked-out version.
           </Callout>
         </div>
       )}
@@ -131,7 +132,7 @@ export function RelayCard({ info, isAdmin, busy, onUpdate }: { info: RelayUpdate
         <div className="spacer" />
         {isAdmin && info.canUpdate && (behind > 0 || info.rebuildNeeded) && (
           <Button variant="primary" icon="reload" disabled={busy} onClick={onUpdate}>
-            {behind > 0 ? `Upgrade to ${shortSha(info.remoteHead)}` : 'Upgrade'}
+            {behind > 0 ? `Upgrade to ${info.remoteVersion || shortSha(info.remoteHead)}` : 'Upgrade'}
           </Button>
         )}
       </div>
@@ -144,7 +145,7 @@ export function RelayUpdateDialog({ info, open, onClose }: { info: RelayUpdateIn
   const toast = useToast()
   const [busy, setBusy] = useState(false)
   const [restartEngines, setRestartEngines] = useState(false)
-  const target = info.behind > 0 ? shortSha(info.remoteHead) : shortSha(info.checkoutHead)
+  const target = info.behind > 0 ? info.remoteVersion || shortSha(info.remoteHead) : info.checkoutVersion || shortSha(info.checkoutHead)
 
   const start = async () => {
     setBusy(true)
@@ -168,7 +169,7 @@ export function RelayUpdateDialog({ info, open, onClose }: { info: RelayUpdateIn
       title={`Upgrade Relay to ${target}?`}
       description={
         <>
-          <span className="mono">{shortSha(info.commit) || info.version}</span> → <span className="mono">{target}</span> · {info.branch}
+          <span className="mono">{info.version}</span> → <span className="mono">{target}</span> · {info.branch}
         </>
       }
       footer={
@@ -210,7 +211,7 @@ export function RelayUpdateProgress({ job, onDismiss }: { job: RelayUpdateJob; o
   const running = job.status === 'running'
   const [showLog, setShowLog] = useState(false)
   const title = running
-    ? `Upgrading Relay${job.to ? ` to ${shortSha(job.to)}` : ''}`
+    ? `Upgrading Relay${job.toVersion || job.to ? ` to ${job.toVersion || shortSha(job.to)}` : ''}`
     : job.status === 'succeeded'
       ? job.message || 'Relay upgraded'
       : 'Relay upgrade failed'

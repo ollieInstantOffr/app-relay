@@ -41,7 +41,8 @@ import (
 	"github.com/instantoffr/relay/internal/webui"
 )
 
-var version = "0.1.0"
+// version is MAJOR.MINOR.PATCH from scripts/version.sh (-X main.version=…); "dev" for untagged builds.
+var version = "dev"
 
 // commit is the git commit of the build (-X main.commit=…, set by the in-app updater).
 var commit = ""

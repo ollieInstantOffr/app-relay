@@ -71,13 +71,21 @@ apk add --no-cache git su-exec >/dev/null 2>&1 || fail "Couldn't install git in 
 cd "$RELAY_WORKDIR" 2>/dev/null || fail "The compose project folder $RELAY_WORKDIR doesn't exist on the Docker host."
 [ -e .git ] || fail "$RELAY_WORKDIR is not a git checkout, so Relay can't pull updates. Clone the repository there or update manually."
 OWNER=$(stat -c %u:%g .)
-g() { su-exec "$OWNER" env HOME=/tmp GIT_TERMINAL_PROMPT=0 git -c safe.directory='*' "$@"; }
+as_owner() { su-exec "$OWNER" env HOME=/tmp GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0='*' "$@"; }
+g() { as_owner git "$@"; }
+# relay_version REV prints the version of REV using that revision's scripts/version.sh.
+relay_version() {
+  g show "$1:scripts/version.sh" > /tmp/relay-version.sh 2>/dev/null || return 0
+  as_owner sh /tmp/relay-version.sh "$1" 2>/dev/null || true
+}
 B="$RELAY_BRANCH"
 echo "::url $(g remote get-url origin 2>/dev/null)"
 echo "::ref $(g rev-parse --abbrev-ref HEAD 2>/dev/null)"
-out=$(g fetch --quiet origin "$B" 2>&1) || fail "git fetch from origin failed: $(echo "$out" | tail -n 3 | tr '\n' ' ')"
+out=$(g fetch --quiet --tags --force origin "$B" 2>&1) || fail "git fetch from origin failed: $(echo "$out" | tail -n 3 | tr '\n' ' ')"
 echo "::head $(g rev-parse HEAD)"
 echo "::remote $(g rev-parse "origin/$B")"
+echo "::headversion $(relay_version HEAD)"
+echo "::remoteversion $(relay_version "origin/$B")"
 echo "::behind $(g rev-list --count "HEAD..origin/$B")"
 echo "::ahead $(g rev-list --count "origin/$B..HEAD")"
 echo "::dirty $(g status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
@@ -98,18 +106,20 @@ if [ "$(g rev-list --count "HEAD..origin/$B")" != 0 ]; then
 fi
 TO=$(g rev-parse HEAD)
 echo "::pulled $FROM $TO"
+VERSION=$(relay_version HEAD)
+echo "::version $VERSION"
 
 set --
 OLDIFS=$IFS
 IFS=','
 for f in $RELAY_COMPOSE_FILES; do set -- "$@" -f "$f"; done
 IFS=$OLDIFS
-export COMPOSE_PROJECT_NAME="$RELAY_PROJECT" RELAY_COMMIT="$TO"
+export COMPOSE_PROJECT_NAME="$RELAY_PROJECT" RELAY_COMMIT="$TO" RELAY_VERSION="$VERSION"
 PREV_IMAGE=$(docker inspect -f '{{.Image}}' "$RELAY_CONTAINER" 2>/dev/null || true)
 IMAGE_REF=$(docker inspect -f '{{.Config.Image}}' "$RELAY_CONTAINER" 2>/dev/null || true)
 
 step build
-docker compose --progress plain -p "$RELAY_PROJECT" "$@" build --build-arg RELAY_COMMIT="$TO" 2>&1 || fail "The build failed. Relay keeps running the current version."
+docker compose --progress plain -p "$RELAY_PROJECT" "$@" build --build-arg RELAY_COMMIT="$TO" --build-arg RELAY_VERSION="$VERSION" 2>&1 || fail "The build failed. Relay keeps running the current version."
 
 wait_healthy() {
   i=0
@@ -293,15 +303,17 @@ func waitHelper(ctx context.Context, cli *client.Client, id string, timeout time
 // ---------------------------------------------------------------- output parsing
 
 type helperResult struct {
-	URL, Ref, Head, Remote string
-	Behind, Ahead, Dirty   int
-	Commits                []core.RelayCommit
-	Steps                  []string
-	PulledFrom, PulledTo   string
-	Done                   bool
-	DoneCommit             string
-	Error                  string
-	Log                    []string // lines without a marker
+	URL, Ref, Head, Remote     string
+	HeadVersion, RemoteVersion string
+	Version                    string // version of the pulled commit
+	Behind, Ahead, Dirty       int
+	Commits                    []core.RelayCommit
+	Steps                      []string
+	PulledFrom, PulledTo       string
+	Done                       bool
+	DoneCommit                 string
+	Error                      string
+	Log                        []string // lines without a marker
 }
 
 // feed consumes one output line and returns its marker ("" for plain output).
@@ -324,6 +336,12 @@ func (r *helperResult) feed(line string) string {
 		r.Head = strings.TrimSpace(val)
 	case "remote":
 		r.Remote = strings.TrimSpace(val)
+	case "headversion":
+		r.HeadVersion = strings.TrimSpace(val)
+	case "remoteversion":
+		r.RemoteVersion = strings.TrimSpace(val)
+	case "version":
+		r.Version = strings.TrimSpace(val)
 	case "behind":
 		r.Behind = num()
 	case "ahead":
@@ -461,6 +479,7 @@ func (s *Service) probeRelay(ctx context.Context) core.RelayUpdateInfo {
 	r := parseHelperOutput(out)
 	info.Remote = sanitizeRemote(r.URL)
 	info.CheckoutRef, info.CheckoutHead, info.RemoteHead = r.Ref, r.Head, r.Remote
+	info.CheckoutVersion, info.RemoteVersion = r.HeadVersion, r.RemoteVersion
 	info.Behind, info.Ahead, info.Dirty = r.Behind, r.Ahead, r.Dirty
 	repo := githubRepoURL(r.URL)
 	for _, c := range r.Commits {
@@ -536,17 +555,17 @@ func (s *Service) notifyRelay(ctx context.Context, info *core.RelayUpdateInfo, n
 		return false
 	}
 	notified["relay"] = info.RemoteHead
-	title := fmt.Sprintf("Relay update available · %d new commit", info.Behind)
-	if info.Behind != 1 {
-		title += "s"
+	title := "Relay upgrade available"
+	if info.RemoteVersion != "" {
+		title = fmt.Sprintf("Relay %s is available", info.RemoteVersion)
 	}
-	detail := fmt.Sprintf("%s is %s on %s", shortSHA(info.CheckoutHead), strings.TrimSpace(title[len("Relay update available · "):])+" behind", info.Branch)
+	detail := fmt.Sprintf("Running %s · %d new commit(s) on %s", firstNonEmpty(info.Version, shortSHA(info.Commit)), info.Behind, info.Branch)
 	if len(info.Commits) > 0 {
-		detail = "Latest: " + info.Commits[0].Subject
+		detail += " · latest: " + info.Commits[0].Subject
 	}
 	s.app.Activity(ctx, "relay.update", "info", title, "relay", detail)
 	if s.app.Notify != nil {
-		s.app.Notify.Notify(ctx, core.Notification{Event: model.EventEngineUpdateAvailable, Level: "info", Title: title, Message: detail + ". Update from Settings → Updates.", URL: "/settings/engines"})
+		s.app.Notify.Notify(ctx, core.Notification{Event: model.EventEngineUpdateAvailable, Level: "info", Title: title, Message: detail + ". Upgrade from Settings → Updates.", URL: "/settings/engines"})
 	}
 	return true
 }

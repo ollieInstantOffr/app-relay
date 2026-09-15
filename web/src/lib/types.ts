@@ -450,6 +450,9 @@ export interface RelayUpdateInfo {
   checkoutHead: string
   checkoutRef: string
   remoteHead: string
+  /** versions derived from git history; '' when unknown */
+  checkoutVersion: string
+  remoteVersion: string
   behind: number
   ahead: number
   dirty: number
@@ -468,6 +471,8 @@ export interface RelayUpdateJob {
   to: string
   actor: string
   restartEngines: boolean
+  fromVersion: string
+  toVersion: string
   status: 'running' | 'succeeded' | 'failed'
   message: string
   error?: string

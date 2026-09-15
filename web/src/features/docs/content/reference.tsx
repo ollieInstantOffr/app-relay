@@ -117,7 +117,8 @@ function Reference() {
           ['RELAY_COMPOSE_PROJECT', 'relay', 'Set automatically; which compose project’s engines Relay manages.'],
           ['RELAY_UPDATE_BRANCH', 'relay', 'Branch the in-app updater follows (default main).'],
           ['RELAY_UPDATER_IMAGE', 'relay', 'Helper image for in-app updates (default docker:29.8.0-cli).'],
-          ['RELAY_COMMIT', 'compose', 'Build argument recording the commit Relay is built from; set automatically by in-app updates.'],
+          ['RELAY_VERSION', 'compose', 'Build argument with the version from scripts/version.sh; set by make up and in-app upgrades (otherwise the version shows as dev).'],
+          ['RELAY_COMMIT', 'compose', 'Build argument recording the commit Relay is built from; set by make up and in-app upgrades.'],
         ]}
       />
 

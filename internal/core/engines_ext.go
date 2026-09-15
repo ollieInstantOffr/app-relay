@@ -105,19 +105,22 @@ type RelayCommit struct {
 // RelayUpdateInfo describes Relay's own source checkout and whether a newer
 // version is available on the update branch (GET /api/engines/updates → relay).
 type RelayUpdateInfo struct {
-	Version      string        `json:"version"`      // binary version
-	Commit       string        `json:"commit"`       // commit the running binary was built from ("" = unknown)
-	Branch       string        `json:"branch"`       // update branch (main)
-	Container    string        `json:"container"`    // relay container name
-	WorkingDir   string        `json:"workingDir"`   // compose project folder on the Docker host
-	Remote       string        `json:"remote"`       // origin URL
-	CheckoutHead string        `json:"checkoutHead"` // HEAD of the checkout
-	CheckoutRef  string        `json:"checkoutRef"`  // branch the checkout is on
-	RemoteHead   string        `json:"remoteHead"`   // origin/<branch>
-	Behind       int           `json:"behind"`       // commits on origin not in the checkout
-	Ahead        int           `json:"ahead"`        // local commits not on origin
-	Dirty        int           `json:"dirty"`        // modified tracked files
-	Commits      []RelayCommit `json:"commits"`
+	Version      string `json:"version"`      // binary version
+	Commit       string `json:"commit"`       // commit the running binary was built from ("" = unknown)
+	Branch       string `json:"branch"`       // update branch (main)
+	Container    string `json:"container"`    // relay container name
+	WorkingDir   string `json:"workingDir"`   // compose project folder on the Docker host
+	Remote       string `json:"remote"`       // origin URL
+	CheckoutHead string `json:"checkoutHead"` // HEAD of the checkout
+	CheckoutRef  string `json:"checkoutRef"`  // branch the checkout is on
+	RemoteHead   string `json:"remoteHead"`   // origin/<branch>
+	// Versions derived from git history (scripts/version.sh); "" when unknown.
+	CheckoutVersion string        `json:"checkoutVersion"`
+	RemoteVersion   string        `json:"remoteVersion"`
+	Behind          int           `json:"behind"` // commits on origin not in the checkout
+	Ahead           int           `json:"ahead"`  // local commits not on origin
+	Dirty           int           `json:"dirty"`  // modified tracked files
+	Commits         []RelayCommit `json:"commits"`
 	// RebuildNeeded: the checkout is newer than the running build.
 	RebuildNeeded   bool       `json:"rebuildNeeded"`
 	UpdateAvailable bool       `json:"updateAvailable"`
@@ -132,6 +135,8 @@ type RelayUpdateJob struct {
 	ID             string        `json:"id"`
 	From           string        `json:"from"` // commit before
 	To             string        `json:"to"`   // commit after the pull
+	FromVersion    string        `json:"fromVersion"`
+	ToVersion      string        `json:"toVersion"`
 	Actor          string        `json:"actor"`
 	RestartEngines bool          `json:"restartEngines"`
 	Status         string        `json:"status"` // running | succeeded | failed

@@ -64,12 +64,19 @@ func newE2EProject(t *testing.T, dockerfile, serviceExtra string) *e2eProject {
 	os.MkdirAll(p.origin, 0o755)
 	run(t, p.origin, "git", "init", "-q", "-b", "main")
 	p.write("Dockerfile", dockerfile)
+	script, err := os.ReadFile("../../scripts/version.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(p.origin, "scripts"), 0o755)
+	p.write("scripts/version.sh", string(script))
 	p.write("docker-compose.yml", fmt.Sprintf(`name: %[1]s
 services:
   relay:
     build:
       context: .
       args:
+        RELAY_VERSION: ${RELAY_VERSION:-}
         RELAY_COMMIT: ${RELAY_COMMIT:-}
     image: %[1]s-relay:latest
     container_name: %[1]s-relay
@@ -142,25 +149,25 @@ func (p *e2eProject) inspect(format string) string {
 	return run(p.t, p.work, "docker", "inspect", "-f", format, p.name+"-relay")
 }
 
-const e2eDockerfile = "FROM alpine:3.22\nARG RELAY_COMMIT=\nENV BUILT_FROM=${RELAY_COMMIT}\nRUN echo %s > /version%s\n"
+const e2eDockerfile = "FROM alpine:3.22\nARG RELAY_COMMIT=\nARG RELAY_VERSION=\nENV BUILT_FROM=${RELAY_COMMIT} BUILT_VERSION=${RELAY_VERSION}\nRUN echo %s > /version%s\n"
 
 func TestRelaySelfUpdateE2E(t *testing.T) {
 	p := newE2EProject(t, fmt.Sprintf(e2eDockerfile, "v1", ""), "")
-	newHead := p.commit(fmt.Sprintf(e2eDockerfile, "v2", ""), "Bump to v2")
+	newHead := p.commit(fmt.Sprintf(e2eDockerfile, "v2", ""), "feat: Bump to v2")
 
 	code, check := p.helper("check", relayCheckScript)
-	if code != 0 || check.Error != "" || check.Behind != 1 || len(check.Commits) != 1 || check.Commits[0].Subject != "Bump to v2" || check.Ref != "main" {
+	if code != 0 || check.Error != "" || check.Behind != 1 || len(check.Commits) != 1 || check.Commits[0].Subject != "feat: Bump to v2" || check.Ref != "main" || check.HeadVersion != "0.1.0" || check.RemoteVersion != "0.2.0" {
 		t.Fatalf("check: code %d, %+v", code, check)
 	}
 
 	code, upd := p.helper("update", relayUpdateScript, "RELAY_RESTART_ENGINES=0")
-	if code != 0 || !upd.Done || upd.PulledTo != newHead {
+	if code != 0 || !upd.Done || upd.PulledTo != newHead || upd.Version != "0.2.0" {
 		t.Fatalf("update: code %d, %+v", code, upd)
 	}
 	if head := run(t, p.work, "git", "rev-parse", "HEAD"); head != newHead {
 		t.Fatalf("checkout HEAD = %s, want %s", head, newHead)
 	}
-	if env := p.inspect("{{range .Config.Env}}{{println .}}{{end}}"); !strings.Contains(env, "BUILT_FROM="+newHead) {
+	if env := p.inspect("{{range .Config.Env}}{{println .}}{{end}}"); !strings.Contains(env, "BUILT_FROM="+newHead) || !strings.Contains(env, "BUILT_VERSION=0.2.0") {
 		t.Fatalf("relay container wasn't rebuilt from %s:\n%s", newHead, env)
 	}
 	if v := run(t, p.work, "docker", "exec", p.name+"-relay", "cat", "/version"); v != "v2" {

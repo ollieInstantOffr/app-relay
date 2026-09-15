@@ -306,7 +306,7 @@ function Engines() {
           You also get an <C>engine_update_available</C> notification for each new version.
         </Step>
         <Step title="Update">
-          Click <UI>Upgrade to abc1234</UI> on the Relay card. Optionally tick <UI>Also restart nginx and HAProxy</UI> so the engines pick up the new agent (a 1–3 second pause in traffic).
+          Click <UI>Upgrade to 0.4.2</UI> on the Relay card. Optionally tick <UI>Also restart nginx and HAProxy</UI> so the engines pick up the new agent (a 1–3 second pause in traffic).
         </Step>
         <Step title="Watch it run">
           The progress panel shows pull, build and restart. <UI>Show build output</UI> streams the docker build log. Building takes a few minutes the first time and is much faster afterwards thanks to the build cache.
@@ -331,8 +331,25 @@ function Engines() {
         <li>nginx and HAProxy keep serving traffic throughout (unless you choose to restart them).</li>
         <li>The work runs in a short-lived helper container (<C>docker:29.8.0-cli</C>) that survives Relay’s own restart; the restarted Relay reports the result.</li>
       </List>
+      <H3>Version numbers</H3>
+      <P>
+        Relay’s version (<C>MAJOR.MINOR.PATCH</C>, shown on the Relay card, the About page and the sign-in screen) is worked out from the git history, so it moves with every
+        commit on <C>main</C>:
+      </P>
+      <Table
+        head={['Commit', 'Example', 'Version change']}
+        mono={[1, 2]}
+        rows={[
+          ['Anything else', 'Fix the tabs on the hosts page', '0.4.2 → 0.4.3'],
+          [<>Subject starts with <C>feat:</C> or contains <C>[minor]</C></>, 'feat: Resend email channel', '0.4.3 → 0.5.0'],
+          [<>A <C>type!:</C> subject, <C>BREAKING CHANGE</C> in the body, or <C>[major]</C></>, 'feat!: new config format', '0.5.0 → 1.0.0'],
+          [<>A tag <C>vX.Y.Z</C></>, 'git tag v2.0.0', 'jumps to 2.0.0'],
+        ]}
+      />
+      <P>Run <C>sh scripts/version.sh</C> in the checkout to see the current number. Builds from <C>make up</C> and in-app upgrades record it; a plain <C>docker compose up --build</C> shows <C>dev</C>.</P>
+
       <Note title="Prefer the shell?">
-        The manual way still works: <C>git pull &amp;&amp; docker compose up -d --build</C> in the Relay folder. Set <C>RELAY_UPDATE_BRANCH</C> on the <C>relay</C> service to follow another branch.
+        The manual way still works: <C>git pull &amp;&amp; make up</C> in the Relay folder. Set <C>RELAY_UPDATE_BRANCH</C> on the <C>relay</C> service to follow another branch.
       </Note>
 
       <H2>nginx and HAProxy</H2>

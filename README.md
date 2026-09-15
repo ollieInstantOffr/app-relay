@@ -10,7 +10,7 @@ rolls back automatically if health checks fail.
 ## Run it
 
 ```bash
-docker compose up -d --build
+make up    # = RELAY_VERSION=$(sh scripts/version.sh) RELAY_COMMIT=$(git rev-parse HEAD) docker compose up -d --build
 ```
 
 Open `http://<host>:8181`. A first-run wizard creates the admin account,

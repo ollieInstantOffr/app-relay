@@ -22,6 +22,7 @@ services:
       context: .
       target: relay
       args:
+        RELAY_VERSION: ${RELAY_VERSION:-}
         RELAY_COMMIT: ${RELAY_COMMIT:-}
     image: relay:latest
     container_name: relay
