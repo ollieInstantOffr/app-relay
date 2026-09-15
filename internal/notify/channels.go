@@ -126,7 +126,7 @@ func sendNtfy(ctx context.Context, cfg map[string]string, msg Message) error {
 	req.Header.Set("Title", headerValue(msg.Title))
 	req.Header.Set("Priority", ntfyPriority(cfg, msg.Level))
 	req.Header.Set("Tags", ntfyTags(msg.Level, msg.Event))
-	if msg.URL != "" {
+	if isAbsoluteURL(msg.URL) { // ntfy only opens absolute links
 		req.Header.Set("Click", msg.URL)
 	}
 	if tok := strings.TrimSpace(cfg["token"]); tok != "" {
@@ -286,7 +286,7 @@ func buildEmail(from string, to []string, msg Message) []byte {
 	b.WriteString("\r\n")
 	qp := quotedprintable.NewWriter(&b)
 	body := msg.Message
-	if msg.URL != "" {
+	if isAbsoluteURL(msg.URL) {
 		body += "\n\n" + msg.URL
 	}
 	qp.Write([]byte(strings.ReplaceAll(body, "\n", "\r\n") + "\r\n\r\n-- \r\nRelay\r\n"))

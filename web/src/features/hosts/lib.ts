@@ -216,6 +216,7 @@ export function providerLabel(p: string): string {
   switch (p) {
     case 'letsencrypt': return "Let's Encrypt"
     case 'letsencrypt-staging': return "Let's Encrypt staging"
+    case 'acme': return 'ACME'
     case 'custom': return 'Custom'
     case 'selfsigned': return 'Self-signed'
   }
@@ -226,6 +227,7 @@ export function providerShort(p: string): string {
   switch (p) {
     case 'letsencrypt': return 'LE'
     case 'letsencrypt-staging': return 'LE staging'
+    case 'acme': return 'ACME'
     case 'custom': return 'custom'
     case 'selfsigned': return 'self-signed'
   }
@@ -243,7 +245,7 @@ export function certOptionLabel(c: Certificate): string {
   if (c.status === 'pending' && d === undefined) parts.push('issuing…')
   else if (c.status === 'failed' && d === undefined) parts.push('failed')
   else if (d !== undefined) parts.push(d < 0 ? 'expired' : `${d} ${d === 1 ? 'day' : 'days'}`)
-  if (c.autoRenew && c.provider.startsWith('letsencrypt')) parts.push('auto-renew')
+  if (c.autoRenew && isAcmeProvider(c.provider)) parts.push('auto-renew')
   return parts.join(' · ')
 }
 
@@ -254,9 +256,12 @@ export function certTooltip(c: Certificate): string {
   if (d !== undefined) parts.push(d < 0 ? `expired ${-d} d ago` : `expires in ${d} d`)
   if (c.status === 'pending') parts.push('issuing…')
   if (c.status === 'failed') parts.push(c.lastError ? `renewal failed: ${c.lastError}` : 'renewal failed')
-  if (c.autoRenew && c.provider.startsWith('letsencrypt')) parts.push('auto-renews')
+  if (c.autoRenew && isAcmeProvider(c.provider)) parts.push('auto-renews')
   return parts.join(' · ')
 }
+
+/** Certificates Relay issues and renews itself (Let's Encrypt or a custom ACME server). */
+export const isAcmeProvider = (p: string) => p.startsWith('letsencrypt') || p === 'acme'
 
 /** Certificates covering all domains first (valid, exact before wildcard), then the rest. */
 export function rankCerts(certs: Certificate[], domains: string[]): { matching: Certificate[]; other: Certificate[] } {

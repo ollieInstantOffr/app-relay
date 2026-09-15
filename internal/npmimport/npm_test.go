@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"database/sql"
+	"encoding/json"
 	"encoding/pem"
 	"io"
 	"log/slog"
@@ -207,5 +208,67 @@ func TestNPMImport(t *testing.T) {
 	}
 	if _, err := s.PreviewUpload(ctx, strings.NewReader("not sqlite"), "x"); err == nil {
 		t.Fatal("garbage accepted")
+	}
+}
+
+// TestConvertNPMSemantics covers mappings verified against a real NPM 2.15.1
+// database (field layout, plain-text auth passwords, custom cert meta).
+func TestConvertNPMSemantics(t *testing.T) {
+	// Access list: invalid name, clients only with satisfy_any, pass_auth off.
+	al := convertAccessList(row{"id": int64(3), "name": "Office + staff", "satisfy_any": int64(1), "pass_auth": int64(0)},
+		[]row{{"access_list_id": int64(3), "address": "10.0.0.0/8", "directive": "allow"}}, nil)
+	if al.Name != "Office staff" || al.List.Name != "Office staff" || al.List.SatisfyAny || al.List.BasicAuth.Enabled {
+		t.Fatalf("access list = %+v", al.List)
+	}
+	if err := al.List.Validate(); err != nil {
+		t.Fatalf("imported access list invalid: %v", err)
+	}
+	withUser := convertAccessList(row{"id": int64(4), "name": "staff", "satisfy_any": int64(1), "pass_auth": int64(0)}, nil,
+		[]row{{"access_list_id": int64(4), "username": "bad name", "password": "x"}, {"access_list_id": int64(4), "username": "alice", "password": "alicepass1"}})
+	if len(withUser.List.BasicAuth.Users) != 1 || !withUser.List.SatisfyAny || len(withUser.Warnings) != 2 {
+		t.Fatalf("users = %+v warnings = %v", withUser.List.BasicAuth.Users, withUser.Warnings)
+	}
+	onlyBad := convertAccessList(row{"id": int64(5), "name": "x"}, nil, []row{{"access_list_id": int64(5), "username": "bad name", "password": "x"}})
+	if onlyBad.List.Validate() == nil {
+		t.Fatal("list whose users were all skipped must not validate (it would drop protection)")
+	}
+	if accessListName("+++", 7) != "npm-access-7" {
+		t.Fatal("fallback name")
+	}
+
+	// Locations: path forwards strip the prefix, "/" replaces the upstream, modifiers are skipped.
+	h := convertHost(row{"id": int64(1), "domain_names": `["a.example.com"]`, "forward_host": "app1", "forward_port": int64(8080),
+		"forward_scheme": "http", "hsts_enabled": int64(1), "ssl_forced": int64(0), "trust_forwarded_proto": int64(1),
+		"meta":            `{"nginx_online":false,"nginx_err":"nginx: [emerg] host not found in upstream \"app2\"\nnginx: test failed"}`,
+		"advanced_config": "location / {\n  return 200;\n}",
+		"locations": `[{"path":"/api","forward_scheme":"http","forward_host":"app2/v1","forward_port":8080},
+			{"path":"/","forward_scheme":"https","forward_host":"app3","forward_port":443},
+			{"path":"~ \\.php$","forward_scheme":"http","forward_host":"php","forward_port":9000}]`})
+	if len(h.Host.Locations) != 1 || !h.Host.Locations[0].StripPrefix || h.Host.Upstream.Host != "app3" || h.Host.Upstream.Scheme != "https" || h.Host.HSTS != "inherit" {
+		t.Fatalf("host = %+v", h.Host)
+	}
+	if err := h.Host.Validate(); err != nil {
+		t.Fatalf("imported host invalid: %v", err)
+	}
+	joined := strings.Join(h.Warnings, "\n")
+	for _, want := range []string{"offline ([emerg] host not found", "location /,", "modifier", "forwarded proto"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing warning %q in %s", want, joined)
+		}
+	}
+
+	// Custom certificate from the database only: PEMs from meta, domains from SANs.
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "secure.example.com"},
+		DNSNames: []string{"secure.example.com", "WWW.secure.example.com"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	keyDER, _ := x509.MarshalPKCS8PrivateKey(key)
+	meta, _ := json.Marshal(map[string]string{
+		"certificate":     string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		"certificate_key": string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})),
+	})
+	c := convertCert(row{"id": int64(1), "provider": "other", "nice_name": "Custom", "domain_names": `["secure.example.com"]`, "meta": string(meta)}, "", time.Now())
+	if c.Chain == nil || c.Key == nil || c.Cert.Status != model.CertStatusValid || strings.Join(c.Cert.Domains, ",") != "secure.example.com,www.secure.example.com" {
+		t.Fatalf("custom cert = %+v warnings=%v", c.Cert, c.Warnings)
 	}
 }

@@ -21,10 +21,12 @@ const kvManaged = "ops.docker.managed"
 type managedHost struct {
 	Endpoint  string `json:"endpoint,omitempty"` // endpoint id ("" = legacy local)
 	Container string `json:"container"`
-	Auto      bool   `json:"auto"`    // created from labels (eligible for auto-remove)
-	Sync      bool   `json:"sync"`    // keep upstream in sync (bulk dialog option)
-	Labels    string `json:"labels"`  // label hash last applied
-	Removed   bool   `json:"removed"` // deleted by a user; only recreate when labels change
+	Auto      bool   `json:"auto"`           // created from labels (eligible for auto-remove)
+	Sync      bool   `json:"sync"`           // keep upstream in sync (bulk dialog option)
+	Labels    string `json:"labels"`         // label hash last applied
+	Removed   bool   `json:"removed"`        // deleted by a user; only recreate when labels change
+	Port      int    `json:"port,omitempty"` // chosen container port (0 = unknown)
+	Link      bool   `json:"link,omitempty"` // disabled host waiting for the container to start
 }
 
 type managedServer struct {
@@ -337,6 +339,7 @@ func (s *Service) reconcile(ctx context.Context, conn *endpointConn, ep model.Do
 		if c.State != "running" {
 			continue
 		}
+		changed = s.linkPending(ctx, m, c) || changed
 		spec, ok, err := ParseLabels(c.Labels)
 		if err != nil {
 			s.warnOnce(ctx, sourceRef(c), err.Error())
@@ -462,7 +465,7 @@ func (s *Service) ensureHost(ctx context.Context, m *managedState, g model.Gener
 		s.warnOnce(ctx, sourceRef(c), "could not create host: "+err.Error())
 		return false
 	}
-	m.Hosts[h.ID] = &managedHost{Endpoint: c.EndpointID, Container: c.Name, Auto: true, Sync: set.KeepInSync, Labels: hash}
+	m.Hosts[h.ID] = &managedHost{Endpoint: c.EndpointID, Container: c.Name, Auto: true, Sync: set.KeepInSync, Labels: hash, Port: containerPortFor(c, port)}
 	s.app.Activity(ctx, "host.created", "ok", "Host created from Docker labels", h.Domains[0], "container "+onEndpoint(c.Name, c))
 	return true
 }
@@ -533,13 +536,13 @@ func newServer(b *model.Backend, c core.Container, port int) model.Server {
 
 // syncUpstreams updates hosts/servers of a recreated container (new address).
 func (s *Service) syncUpstreams(ctx context.Context, m *managedState, set model.DockerSettings, c core.Container, spec LabelSpec) bool {
-	if c.UpstreamHost == "" || c.SuggestedPort == 0 {
+	if c.UpstreamHost == "" {
 		return false
 	}
 	changed := false
 	ports := upstreamPorts(c)
 	for id, e := range m.Hosts {
-		if endpointOf(e.Endpoint) != c.EndpointID || e.Container != c.Name || e.Removed {
+		if endpointOf(e.Endpoint) != c.EndpointID || e.Container != c.Name || e.Removed || e.Link {
 			continue
 		}
 		if !(e.Sync || (e.Auto && set.KeepInSync)) {
@@ -550,8 +553,16 @@ func (s *Service) syncUpstreams(ctx context.Context, m *managedState, set model.
 			continue
 		}
 		port := host.Upstream.Port
-		if spec.Port > 0 || !ports[port] {
+		switch {
+		case spec.Port > 0:
 			port = c.SuggestedPort
+		case e.Port > 0 && upstreamPortFor(c, e.Port) > 0:
+			port = upstreamPortFor(c, e.Port) // the port the user picked, re-mapped
+		case !ports[port]:
+			port = c.SuggestedPort
+		}
+		if port == 0 {
+			continue
 		}
 		if host.Upstream.Host == c.UpstreamHost && host.Upstream.Port == port {
 			continue
@@ -586,7 +597,7 @@ func (s *Service) syncUpstreams(ctx context.Context, m *managedState, set model.
 				continue
 			}
 			port := srv.Port
-			if spec.Port > 0 || !ports[port] {
+			if (spec.Port > 0 || !ports[port]) && c.SuggestedPort > 0 {
 				port = c.SuggestedPort
 			}
 			if srv.Address != c.UpstreamHost || srv.Port != port {
@@ -792,6 +803,8 @@ type CreatedHost struct {
 	ContainerID string `json:"containerId"`
 	HostID      string `json:"hostId"`
 	Domain      string `json:"domain"`
+	Enabled     bool   `json:"enabled"`
+	LinkOnStart bool   `json:"linkOnStart,omitempty"` // created disabled; enabled when the container starts
 }
 
 type ItemError struct {
@@ -849,7 +862,7 @@ func (s *Service) CreateHosts(r *http.Request, req CreateRequest) (*CreateResult
 			fail("container no longer exists", nil)
 			continue
 		}
-		if c.UpstreamHost == "" {
+		if c.UpstreamHost == "" && !c.LinkOnStart {
 			reason := c.Reason
 			if reason == "" {
 				reason = "no reachable address"
@@ -881,9 +894,18 @@ func (s *Service) CreateHosts(r *http.Request, req CreateRequest) (*CreateResult
 		}
 		scheme := strings.ToLower(it.Scheme)
 		if scheme != "http" && scheme != "https" {
-			scheme = containerScheme(c)
+			scheme = portScheme(c, port)
 		}
 		h := newHost(g, set, c, []string{domain}, port, scheme)
+		// Stopped local container without an address: create the host disabled
+		// with a placeholder upstream; linkPending enables it on start.
+		link := c.UpstreamHost == ""
+		detail := "from Docker container " + onEndpoint(c.Name, c)
+		if link {
+			h.Enabled = false
+			h.Upstream.Host = placeholderHost(c.Name)
+			detail = "from stopped Docker container " + onEndpoint(c.Name, c) + " · enabled when it starts"
+		}
 		if req.AccessListID != "" {
 			h.AccessListID = req.AccessListID
 		}
@@ -893,7 +915,7 @@ func (s *Service) CreateHosts(r *http.Request, req CreateRequest) (*CreateResult
 		}
 		h.CertificateID = certID
 		h.ForceHTTPS = certID != "" && g.Defaults.ForceHTTPS
-		if err := s.saveHost(r, nil, &h, "from Docker container "+onEndpoint(c.Name, c)); err != nil {
+		if err := s.saveHost(r, nil, &h, detail); err != nil {
 			var fields map[string]string
 			if ve, ok := err.(*model.ValidationError); ok {
 				fields = ve.Fields
@@ -902,8 +924,8 @@ func (s *Service) CreateHosts(r *http.Request, req CreateRequest) (*CreateResult
 			continue
 		}
 		batch[domain] = true
-		m.Hosts[h.ID] = &managedHost{Endpoint: c.EndpointID, Container: c.Name, Auto: false, Sync: req.KeepInSync}
-		res.Created = append(res.Created, CreatedHost{EndpointID: c.EndpointID, ContainerID: c.ID, HostID: h.ID, Domain: domain})
+		m.Hosts[h.ID] = &managedHost{Endpoint: c.EndpointID, Container: c.Name, Auto: false, Sync: req.KeepInSync, Port: containerPortFor(c, port), Link: link}
+		res.Created = append(res.Created, CreatedHost{EndpointID: c.EndpointID, ContainerID: c.ID, HostID: h.ID, Domain: domain, Enabled: h.Enabled, LinkOnStart: link})
 	}
 	if len(res.Created) > 0 {
 		s.saveManaged(ctx, m)

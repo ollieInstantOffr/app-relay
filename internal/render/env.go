@@ -14,6 +14,9 @@ type Env struct {
 	GeoIPCountry  string          // /data/geoip/GeoLite2-Country.mmdb ("" when absent)
 	AdminUpstream string          // 127.0.0.1:8181
 	Modules       map[string]bool // nginx modules reported by the agent: http_v3, stream, geoip2, auth_request
+	// ModulePaths lists modules that need load_module (dynamic) → .so path.
+	// Empty for the official nginx image, where everything used is static.
+	ModulePaths map[string]string
 }
 
 func DefaultEnv(dataDir, runDir, logDir string) Env {

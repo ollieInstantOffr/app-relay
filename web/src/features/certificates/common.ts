@@ -47,13 +47,23 @@ export function providerName(p: string): string {
   switch (p) {
     case 'letsencrypt': return "Let's Encrypt"
     case 'letsencrypt-staging': return "Let's Encrypt staging"
+    case 'acme': return 'Custom ACME'
     case 'custom': return 'Custom'
     case 'selfsigned': return 'Self-signed'
   }
   return p
 }
 
-export const isACME = (c: Pick<Certificate, 'provider'>) => c.provider === 'letsencrypt' || c.provider === 'letsencrypt-staging'
+export const isACME = (c: Pick<Certificate, 'provider'>) => c.provider === 'letsencrypt' || c.provider === 'letsencrypt-staging' || c.provider === 'acme'
+
+/** Host of an ACME directory URL ("ca.internal:9000"). */
+export function directoryHost(url?: string): string {
+  try {
+    return url ? new URL(url).host : ''
+  } catch {
+    return url ?? ''
+  }
+}
 
 /** "Let's Encrypt · DNS-01" */
 export function providerText(c: Certificate): string {
@@ -114,8 +124,21 @@ export function triggerDownload(url: string) {
 }
 
 // ---------------------------------------------------------------- DNS providers
-export interface DNSProviderField { key: string; label: string; secret: boolean; required: boolean; placeholder?: string; hint?: string }
-export interface DNSProviderTypeDef { type: string; label: string; docsUrl: string; fields: DNSProviderField[]; requireOneOf?: string[] }
+export interface DNSFieldOption { value: string; label: string; envPrefix?: string; docsUrl?: string }
+export interface DNSProviderField { key: string; label: string; secret: boolean; required: boolean; placeholder?: string; hint?: string; options?: DNSFieldOption[] }
+export interface DNSProviderTypeDef {
+  type: string
+  label: string
+  docsUrl: string
+  fields: DNSProviderField[]
+  requireOneOf?: string[]
+  /** Caveats / what Test can verify. */
+  note?: string
+  /** Only admins can create or change providers of this type. */
+  adminOnly?: boolean
+  /** Credentials also take lego environment variables (NAME → secret value). */
+  envPairs?: boolean
+}
 export interface DNSTestResult { status: 'ok' | 'failed' | 'unknown'; zones: string[]; error?: string }
 
 export function useDNSProviderTypes() {

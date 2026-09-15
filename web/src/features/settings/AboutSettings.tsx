@@ -1,7 +1,8 @@
 // Settings → About (design 16d). No update check exists, so no "Update to" button.
 import { Link } from 'react-router-dom'
-import { Button, Card, LogoMark, Skeleton, Status } from '../../components/ui'
+import { Badge, Button, Card, LogoMark, Skeleton, Status } from '../../components/ui'
 import { useEngines } from '../../lib/queries'
+import { useEngineUpdates } from './enginesApi'
 import { ago, bytes, pluralize } from '../../lib/format'
 import type { EngineState } from '../../lib/types'
 import { useAbout, useAuthSession } from '../auth/authApi'
@@ -21,6 +22,7 @@ function engineStatus(state: EngineState | undefined, loading: boolean): { tone:
 export default function AboutSettings() {
   const about = useAbout()
   const engines = useEngines()
+  const updates = useEngineUpdates().data
   const { data: session } = useAuthSession()
   const version = about.data?.version ?? session?.version
   const installedAt = about.data?.installedAt
@@ -55,7 +57,14 @@ export default function AboutSettings() {
           return (
             <div key={name} className="comp-row">
               <span>{name}</span>
-              <span className="mono small">{state?.version || '—'}</span>
+              <span className="mono small row gap-6">
+                {state?.version || '—'}
+                {updates?.[name as 'nginx' | 'haproxy']?.updateAvailable && (
+                  <Link to="/settings/engines" title={`${updates[name as 'nginx' | 'haproxy'].latest?.version} available`}>
+                    <Badge tone="info">update</Badge>
+                  </Link>
+                )}
+              </span>
               <Status tone={st.tone}>{st.label}</Status>
               <span className="small faint truncate" title={st.detail}>
                 {st.detail}

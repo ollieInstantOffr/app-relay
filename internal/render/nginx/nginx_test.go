@@ -173,8 +173,10 @@ func TestRenderFileSet(t *testing.T) {
 
 func TestRenderMainConf(t *testing.T) {
 	f := renderRich(t)["nginx.conf"]
+	if strings.Contains(f, "load_module") || strings.Contains(f, "/etc/nginx/modules") {
+		t.Fatal("static modules must not be loaded")
+	}
 	mustContain(t, "nginx.conf", f,
-		"include /etc/nginx/modules/*.conf;",
 		"error_log /var/log/relay/error.log warn;",
 		"log_format relay_json escape=json",
 		"access_log /var/log/relay/access.log relay_json;",

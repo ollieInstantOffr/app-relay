@@ -22,9 +22,19 @@ import (
 	"github.com/aws/smithy-go"
 	"github.com/go-acme/lego/v4/challenge"
 	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
+	"github.com/go-acme/lego/v4/providers/dns/cloudns"
 	"github.com/go-acme/lego/v4/providers/dns/digitalocean"
 	"github.com/go-acme/lego/v4/providers/dns/duckdns"
+	"github.com/go-acme/lego/v4/providers/dns/dynu"
+	legoexec "github.com/go-acme/lego/v4/providers/dns/exec"
+	"github.com/go-acme/lego/v4/providers/dns/gandiv5"
+	"github.com/go-acme/lego/v4/providers/dns/godaddy"
 	"github.com/go-acme/lego/v4/providers/dns/hetzner"
+	"github.com/go-acme/lego/v4/providers/dns/httpreq"
+	"github.com/go-acme/lego/v4/providers/dns/hurricane"
+	"github.com/go-acme/lego/v4/providers/dns/namecheap"
+	"github.com/go-acme/lego/v4/providers/dns/netcup"
+	"github.com/go-acme/lego/v4/providers/dns/pdns"
 	"github.com/go-acme/lego/v4/providers/dns/route53"
 
 	"github.com/instantoffr/relay/internal/model"
@@ -34,7 +44,86 @@ import (
 // (never from environment variables) and returns its propagation timeout.
 func legoDNSProvider(p *model.DNSProvider) (challenge.Provider, time.Duration, error) {
 	c := p.Credentials
+	if p.Type == model.DNSProviderOther {
+		return otherDNSProvider(c)
+	}
+	// NewDefaultConfig reads lego variables (TTL, timeouts): never while an
+	// "Other" provider has temporarily set some (see dnsother.go).
+	envMu.RLock()
+	defer envMu.RUnlock()
 	switch p.Type {
+	case "gandiv5":
+		cfg := gandiv5.NewDefaultConfig()
+		cfg.PersonalAccessToken = c["personalAccessToken"]
+		if cfg.PersonalAccessToken == "" {
+			cfg.APIKey = c["apiKey"]
+		}
+		prov, err := gandiv5.NewDNSProviderConfig(cfg)
+		return prov, cfg.PropagationTimeout, err
+	case "godaddy":
+		cfg := godaddy.NewDefaultConfig()
+		cfg.APIKey, cfg.APISecret = c["apiKey"], c["apiSecret"]
+		prov, err := godaddy.NewDNSProviderConfig(cfg)
+		return prov, cfg.PropagationTimeout, err
+	case "namecheap":
+		cfg := namecheap.NewDefaultConfig()
+		cfg.APIUser, cfg.APIKey, cfg.ClientIP = c["apiUser"], c["apiKey"], c["clientIp"]
+		prov, err := namecheap.NewDNSProviderConfig(cfg) // detects the client IP when empty
+		return prov, cfg.PropagationTimeout, err
+	case "dynu":
+		cfg := dynu.NewDefaultConfig()
+		cfg.APIKey = c["apiKey"]
+		prov, err := dynu.NewDNSProviderConfig(cfg)
+		return prov, cfg.PropagationTimeout, err
+	case "netcup":
+		cfg := netcup.NewDefaultConfig()
+		cfg.Customer, cfg.Key, cfg.Password = c["customerNumber"], c["apiKey"], c["apiPassword"]
+		prov, err := netcup.NewDNSProviderConfig(cfg)
+		return prov, cfg.PropagationTimeout, err
+	case "cloudns":
+		cfg := cloudns.NewDefaultConfig()
+		cfg.AuthID, cfg.SubAuthID, cfg.AuthPassword = c["authId"], c["subAuthId"], c["authPassword"]
+		if cfg.SubAuthID != "" {
+			cfg.AuthID = ""
+		}
+		prov, err := cloudns.NewDNSProviderConfig(cfg)
+		return prov, cfg.PropagationTimeout, err
+	case "hurricane":
+		tokens, err := model.ParseDomainTokens(c["tokens"])
+		if err != nil {
+			return nil, 0, err
+		}
+		cfg := hurricane.NewDefaultConfig()
+		cfg.Credentials = tokens
+		prov, err := hurricane.NewDNSProviderConfig(cfg)
+		return prov, cfg.PropagationTimeout, err
+	case "pdns":
+		u, err := url.Parse(strings.TrimRight(c["apiUrl"], "/"))
+		if err != nil {
+			return nil, 0, err
+		}
+		cfg := pdns.NewDefaultConfig()
+		cfg.Host, cfg.APIKey = u, c["apiKey"]
+		if c["serverName"] != "" {
+			cfg.ServerName = c["serverName"]
+		}
+		cfg.APIVersion = 1 // PowerDNS ≥ 4.0; avoids a detection request at construction
+		prov, err := pdns.NewDNSProviderConfig(cfg)
+		return prov, cfg.PropagationTimeout, err
+	case "httpreq":
+		u, err := url.Parse(c["endpoint"])
+		if err != nil {
+			return nil, 0, err
+		}
+		cfg := httpreq.NewDefaultConfig()
+		cfg.Endpoint, cfg.Mode, cfg.Username, cfg.Password = u, c["mode"], c["username"], c["password"]
+		prov, err := httpreq.NewDNSProviderConfig(cfg)
+		return prov, cfg.PropagationTimeout, err
+	case "exec":
+		cfg := legoexec.NewDefaultConfig()
+		cfg.Program, cfg.Mode = c["program"], c["mode"]
+		prov, err := legoexec.NewDNSProviderConfig(cfg)
+		return prov, cfg.PropagationTimeout, err
 	case "cloudflare":
 		cfg := cloudflare.NewDefaultConfig()
 		cfg.AuthEmail, cfg.AuthKey = "", ""
@@ -127,6 +216,28 @@ func testDNSProvider(ctx context.Context, p *model.DNSProvider) DNSTestResult {
 			return DNSTestResult{Status: "unknown", Zones: []string{}, Error: "Add your DuckDNS subdomain to test the token"}
 		}
 		zones, err = testDuckDNS(ctx, c["token"], c["domain"])
+	case "gandiv5":
+		zones, err = testGandi(ctx, c["personalAccessToken"], c["apiKey"])
+	case "godaddy":
+		zones, err = testGoDaddy(ctx, c["apiKey"], c["apiSecret"])
+	case "namecheap":
+		zones, err = testNamecheap(ctx, c["apiUser"], c["apiKey"], c["clientIp"])
+	case "dynu":
+		zones, err = testDynu(ctx, c["apiKey"])
+	case "netcup":
+		zones, err = testNetcup(ctx, c["customerNumber"], c["apiKey"], c["apiPassword"])
+	case "cloudns":
+		zones, err = testClouDNS(ctx, c["authId"], c["subAuthId"], c["authPassword"])
+	case "hurricane":
+		zones, err = testHurricane(c["tokens"])
+	case "pdns":
+		zones, err = testPowerDNS(ctx, c["apiUrl"], c["apiKey"], c["serverName"])
+	case "httpreq":
+		zones, err = testHTTPReq(ctx, c["endpoint"], c["username"], c["password"])
+	case "exec":
+		zones, err = testExec(c["program"])
+	case model.DNSProviderOther:
+		zones, err = testOther(c)
 	default:
 		err = fmt.Errorf("unsupported DNS provider type %q", p.Type)
 	}
@@ -134,6 +245,10 @@ func testDNSProvider(ctx context.Context, p *model.DNSProvider) DNSTestResult {
 		zones = []string{}
 	}
 	sort.Strings(zones)
+	var nv notVerified
+	if errors.As(err, &nv) {
+		return DNSTestResult{Status: "unknown", Zones: zones, Error: nv.Error()}
+	}
 	if err != nil {
 		return DNSTestResult{Status: "failed", Zones: zones, Error: err.Error()}
 	}

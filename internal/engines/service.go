@@ -38,6 +38,8 @@ type Service struct {
 	lastCheck time.Time
 	job       *core.UpgradeJob
 	checkMu   sync.Mutex
+	// interrupted: relay restarted during an upgrade; recover containers once.
+	interrupted bool
 }
 
 func New(app *core.App) *Service {
@@ -71,7 +73,16 @@ func (s *Service) Start(ctx context.Context) error {
 		var j core.UpgradeJob
 		if json.Unmarshal(b, &j) == nil && j.ID != "" {
 			if j.Status == core.UpgradeRunning { // relay restarted mid-upgrade
-				j.Status, j.Error = core.UpgradeFailed, "Relay restarted while the upgrade was running; check the engine containers."
+				j.Status, j.Error = core.UpgradeFailed, "Relay restarted while the upgrade was running."
+				for i := range j.Steps {
+					switch j.Steps[i].Status {
+					case "running":
+						j.Steps[i].Status = "failed"
+					case "pending":
+						j.Steps[i].Status = "skipped"
+					}
+				}
+				s.interrupted = true
 			}
 			s.job = &j
 		}
@@ -93,6 +104,9 @@ func (s *Service) loop(ctx context.Context) {
 	case <-ctx.Done():
 		return
 	case <-time.After(15 * time.Second):
+	}
+	if s.interrupted {
+		s.recoverInterrupted(ctx)
 	}
 	t := time.NewTicker(10 * time.Minute)
 	defer t.Stop()
@@ -283,6 +297,7 @@ func (s *Service) Updates(ctx context.Context) (*core.EngineUpdates, error) {
 			out.DockerError = "Docker API unreachable: " + err.Error()
 		} else {
 			project := composeProject(dctx, cli)
+			out.ComposeProject = project
 			for _, engine := range []string{"nginx", "haproxy"} {
 				c, err := findEngineContainer(dctx, cli, project, engine)
 				if err != nil {

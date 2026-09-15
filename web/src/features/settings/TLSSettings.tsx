@@ -6,7 +6,7 @@ import { keys, useDeleteEntity, useEntities, useRole, useSaveSettings, useSettin
 import { ago } from '../../lib/format'
 import type { DNSProvider, TLSSettings as TLS } from '../../lib/types'
 import {
-  Button, Callout, Card, Checkbox, ConfirmDialog, Dot, Field, IconButton, Input, Menu, SectionHeader, Segmented, Select, Skeleton, Toggle, Tooltip, cx, useToast,
+  Button, Callout, Card, Checkbox, ConfirmDialog, Dot, Field, IconButton, Input, Menu, PasswordInput, SectionHeader, Segmented, Select, Skeleton, Textarea, Toggle, Tooltip, cx, useToast,
 } from '../../components/ui'
 import DNSProviderDialog from '../certificates/DNSProviderDialog'
 import { dnsSummary, dnsTypeLabel, fieldErrors, pendingToast, toastUnlessFields, useDNSProviderTypes } from '../certificates/common'
@@ -84,6 +84,7 @@ export default function TLSSettings() {
       const res = await api.post<DNSProvider>(`/api/dns-providers/${p.id}/test`)
       qc.invalidateQueries({ queryKey: keys.entities('dns-providers') })
       if (res.status === 'ok') toast.success(`${res.name} credentials work`, res.zones.length ? `Zones: ${res.zones.join(', ')}` : undefined)
+      else if (res.status === 'unknown') toast.show({ kind: 'info', title: `${res.name} not verified`, message: res.lastError })
       else toast.show({ kind: 'error', title: `${res.name} credentials rejected`, message: res.lastError, actions: [{ label: 'Fix credentials', primary: true, onClick: () => setDialog({ open: true, provider: res }) }] })
     } catch (err) {
       toast.error(err, 'Test failed')
@@ -106,12 +107,36 @@ export default function TLSSettings() {
               value={draft.acmeProvider}
               disabled={readOnly}
               onChange={(v) => set({ acmeProvider: v as TLS['acmeProvider'] })}
-              options={[{ value: 'letsencrypt', label: "Let's Encrypt (production)" }, { value: 'letsencrypt-staging', label: "Let's Encrypt (staging · untrusted)" }]}
+              options={[
+                { value: 'letsencrypt', label: "Let's Encrypt (production)" },
+                { value: 'letsencrypt-staging', label: "Let's Encrypt (staging · untrusted)" },
+                { value: 'custom', label: 'Custom ACME server' },
+              ]}
             />
           </Field>
           <Field label="Contact email" error={errors.email} hint="Optional · used for the ACME account">
             <Input type="email" value={draft.email} disabled={readOnly} invalid={!!errors.email} placeholder="you@example.com" onChange={(e) => set({ email: e.target.value })} />
           </Field>
+          {draft.acmeProvider === 'custom' && (
+            <>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <Field label="ACME directory URL" error={errors.acmeDirectoryUrl} hint="step-ca, ZeroSSL, Google Trust Services or an internal CA · must be https://">
+                  <Input mono value={draft.acmeDirectoryUrl ?? ''} disabled={readOnly} invalid={!!errors.acmeDirectoryUrl} placeholder="https://ca.internal:9000/acme/acme/directory" onChange={(e) => set({ acmeDirectoryUrl: e.target.value })} />
+                </Field>
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <Field label="CA bundle (optional)" error={errors.acmeCaBundle} hint="PEM root(s) that sign the directory's TLS certificate, if it isn't publicly trusted">
+                  <Textarea mono rows={4} value={draft.acmeCaBundle ?? ''} disabled={readOnly} invalid={!!errors.acmeCaBundle} placeholder={'-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----'} onChange={(e) => set({ acmeCaBundle: e.target.value })} />
+                </Field>
+              </div>
+              <Field label="EAB key ID (optional)" error={errors.eabKid} hint="External Account Binding · ZeroSSL, Google, some step-ca setups">
+                <Input mono value={draft.eabKid ?? ''} disabled={readOnly} invalid={!!errors.eabKid} autoComplete="off" onChange={(e) => set({ eabKid: e.target.value })} />
+              </Field>
+              <Field label="EAB HMAC key" error={errors.eabHmacKey} hint="base64url · stored as a secret">
+                <PasswordInput mono value={draft.eabHmacKey ?? ''} disabled={readOnly} invalid={!!errors.eabHmacKey} autoComplete="off" placeholder={draft.eabKid ? 'required with a key ID' : 'optional'} onChange={(e) => set({ eabHmacKey: e.target.value })} />
+              </Field>
+            </>
+          )}
           <Field label="Preferred challenge" error={errors.preferredChallenge}>
             <div className="segmented" role="tablist" style={{ display: 'flex', height: 38 }}>
               {(['dns-01', 'http-01'] as const).map((c) => (
@@ -151,7 +176,7 @@ export default function TLSSettings() {
                 <div className="mono small truncate" style={{ marginTop: 2, color: failed ? 'var(--danger-text)' : 'var(--ink-faint)' }}>
                   {failed
                     ? `${p.lastError ?? 'credentials rejected'}${p.lastCheckedAt ? ' ' + ago(p.lastCheckedAt) : ''}`
-                    : dnsSummary(p, types) || (p.status === 'unknown' ? 'Not tested yet' : '—')}
+                    : dnsSummary(p, types) || (p.status === 'unknown' ? p.lastError || 'Not tested yet' : '—')}
                 </div>
               </div>
               {failed ? (

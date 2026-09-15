@@ -55,7 +55,7 @@ func TestClassify(t *testing.T) {
 		{"label port", "redis:7", ports(6379), map[string]string{"relay.port": "8001"}, true, 8001, "http", ""},
 		{"label scheme", "x", ports(8000), map[string]string{"relay.scheme": "https"}, true, 8000, "https", ""},
 		{"no ports hint", "jellyfin/jellyfin", nil, nil, true, 8096, "http", ""},
-		{"no ports", "busybox", nil, nil, false, 0, "", "no exposed ports"},
+		{"no ports", "busybox", nil, nil, false, 0, "", "no port detected — enter the app's port"},
 		{"udp only", "pihole-dns", []core.ContainerPort{{Private: 5353, Proto: "udp"}}, nil, false, 0, "http", "UDP only"},
 	}
 	for _, c := range cases {
@@ -306,7 +306,7 @@ func TestReconcileMultiEndpoint(t *testing.T) {
 	}
 	check("loki", "172.18.0.9", 3100, "")
 	check("old", "127.0.0.1", 8080, "stopped · starts on 127.0.0.1:8080")
-	check("noport", "", 0, "stopped — no published port")
+	check("noport", "", 0, reasonLinkOnStart)
 	check("grafana", "10.0.0.5", 3001, "")
 	check("jellyfin", "10.0.0.5", 8096, "")
 	check("whoami", "", 0, "no published port on nas — publish a port to proxy it")

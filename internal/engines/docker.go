@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
 	"sort"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 )
@@ -58,20 +60,26 @@ func composeProject(ctx context.Context, cli *client.Client) string {
 	if p := os.Getenv(envComposeProject); p != "" {
 		return p
 	}
-	b, err := os.ReadFile("/proc/self/mountinfo")
-	if err != nil {
-		return ""
+	var candidates []string
+	if b, err := os.ReadFile("/proc/self/mountinfo"); err == nil {
+		if id := selfContainerID(string(b)); id != "" {
+			candidates = append(candidates, id)
+		}
 	}
-	id := selfContainerID(string(b))
-	if id == "" {
-		return ""
+	// Without host networking the hostname is the (shared) container id.
+	if h, err := os.Hostname(); err == nil && shortIDRe.MatchString(h) {
+		candidates = append(candidates, h)
 	}
-	info, err := cli.ContainerInspect(ctx, id)
-	if err != nil || info.Config == nil {
-		return ""
+	for _, id := range candidates {
+		info, err := cli.ContainerInspect(ctx, id)
+		if err == nil && info.Config != nil && info.Config.Labels[labelComposeProj] != "" {
+			return info.Config.Labels[labelComposeProj]
+		}
 	}
-	return info.Config.Labels[labelComposeProj]
+	return ""
 }
+
+var shortIDRe = regexp.MustCompile(`^[0-9a-f]{12}$`)
 
 type engineContainer struct {
 	ID      string
@@ -104,7 +112,14 @@ func findEngineContainer(ctx context.Context, cli *client.Client, project, engin
 		if strings.Contains(name, "-old-") {
 			continue
 		}
-		found = append(found, engineContainer{ID: c.ID, Name: name, Image: c.Image, State: c.State, Project: c.Labels[labelComposeProj]})
+		ref := c.Image
+		if strings.HasPrefix(ref, "sha256:") {
+			// The tag moved or was removed; the create-time reference is in the config.
+			if info, err := cli.ContainerInspect(ctx, c.ID); err == nil && info.Config != nil {
+				ref = info.Config.Image
+			}
+		}
+		found = append(found, engineContainer{ID: c.ID, Name: name, Image: ref, State: c.State, Project: c.Labels[labelComposeProj]})
 	}
 	if len(found) == 0 {
 		where := ""
@@ -142,14 +157,55 @@ func officialRef(ref string) (repo, tag string, ok bool) {
 
 func imageForVersion(engine, version string) string { return engine + ":" + version + "-alpine" }
 
+// imageDefaults is the part of an image config Docker merges into every
+// container created from it. Values that only came from the old image must
+// not be copied into the new container, so the new image's defaults apply.
+type imageDefaults struct {
+	Env          []string
+	Labels       map[string]string
+	StopSignal   string
+	Cmd          []string
+	Entrypoint   []string
+	WorkingDir   string
+	User         string
+	ExposedPorts map[string]struct{}
+	Volumes      map[string]struct{}
+	Healthcheck  []string
+}
+
+func defaultsOf(img image.InspectResponse) imageDefaults {
+	c := img.Config
+	if c == nil {
+		return imageDefaults{}
+	}
+	d := imageDefaults{Env: c.Env, Labels: c.Labels, StopSignal: c.StopSignal, Cmd: c.Cmd, Entrypoint: c.Entrypoint,
+		WorkingDir: c.WorkingDir, User: c.User, ExposedPorts: c.ExposedPorts, Volumes: c.Volumes}
+	if c.Healthcheck != nil {
+		d.Healthcheck = c.Healthcheck.Test
+	}
+	return d
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // cloneSpec builds a container spec identical to old but running newImage.
-// Env/labels that only came from the old image are dropped so the new image's
-// own defaults apply.
-func cloneSpec(old container.InspectResponse, oldImageEnv []string, oldImageLabels map[string]string, oldImageStopSignal, newImage string) (*container.Config, *container.HostConfig, *network.NetworkingConfig) {
+// It handles host, bridge/user-defined and container:<id> (compose
+// `network_mode: service:x`) networking.
+func cloneSpec(old container.InspectResponse, img imageDefaults, newImage string) (*container.Config, *container.HostConfig, *network.NetworkingConfig) {
 	cfg := *old.Config
 	cfg.Image = newImage
 	imgEnv := map[string]bool{}
-	for _, e := range oldImageEnv {
+	for _, e := range img.Env {
 		imgEnv[e] = true
 	}
 	cfg.Env = nil
@@ -160,31 +216,85 @@ func cloneSpec(old container.InspectResponse, oldImageEnv []string, oldImageLabe
 	}
 	cfg.Labels = map[string]string{}
 	for k, v := range old.Config.Labels {
-		if iv, ok := oldImageLabels[k]; ok && iv == v {
+		if iv, ok := img.Labels[k]; ok && iv == v {
 			continue
 		}
 		cfg.Labels[k] = v
 	}
-	if oldImageStopSignal != "" && cfg.StopSignal == oldImageStopSignal {
+	if img.StopSignal != "" && cfg.StopSignal == img.StopSignal {
 		cfg.StopSignal = ""
 	}
+	if len(img.Cmd) > 0 && sameStrings(cfg.Cmd, img.Cmd) {
+		cfg.Cmd = nil
+	}
+	if len(img.Entrypoint) > 0 && sameStrings(cfg.Entrypoint, img.Entrypoint) {
+		cfg.Entrypoint = nil
+	}
+	if img.WorkingDir != "" && cfg.WorkingDir == img.WorkingDir {
+		cfg.WorkingDir = ""
+	}
+	if img.User != "" && cfg.User == img.User {
+		cfg.User = ""
+	}
+	if cfg.Healthcheck != nil && len(img.Healthcheck) > 0 && sameStrings(cfg.Healthcheck.Test, img.Healthcheck) {
+		cfg.Healthcheck = nil
+	}
+	if len(old.Config.ExposedPorts) > 0 {
+		cfg.ExposedPorts = maps.Clone(old.Config.ExposedPorts)
+		for p := range cfg.ExposedPorts {
+			if _, fromImage := img.ExposedPorts[string(p)]; fromImage {
+				delete(cfg.ExposedPorts, p)
+			}
+		}
+		if len(cfg.ExposedPorts) == 0 {
+			cfg.ExposedPorts = nil
+		}
+	}
+	if len(old.Config.Volumes) > 0 {
+		cfg.Volumes = nil
+		for v := range old.Config.Volumes {
+			if _, fromImage := img.Volumes[v]; fromImage {
+				continue
+			}
+			if cfg.Volumes == nil {
+				cfg.Volumes = map[string]struct{}{}
+			}
+			cfg.Volumes[v] = struct{}{}
+		}
+	}
+
 	var hc container.HostConfig
 	if old.HostConfig != nil {
 		hc = *old.HostConfig
 	}
 	var nc *network.NetworkingConfig
-	if hc.NetworkMode.IsHost() {
+	switch {
+	case hc.NetworkMode.IsHost():
 		cfg.Hostname, cfg.Domainname = "", ""
-	} else if old.NetworkSettings != nil && len(old.NetworkSettings.Networks) > 0 {
+	case hc.NetworkMode.IsContainer():
+		// Docker rejects hostname, exposed/published ports, DNS and extra
+		// hosts when sharing another container's network namespace.
+		cfg.Hostname, cfg.Domainname, cfg.ExposedPorts = "", "", nil
+		hc.PortBindings, hc.PublishAllPorts = nil, false
+		hc.DNS, hc.DNSOptions, hc.DNSSearch, hc.ExtraHosts = nil, nil, nil, nil
+	case old.NetworkSettings != nil && len(old.NetworkSettings.Networks) > 0:
 		nc = &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{}}
 		for name, ep := range old.NetworkSettings.Networks {
 			es := &network.EndpointSettings{}
 			if ep != nil {
 				es.Aliases = ep.Aliases
+				es.Links = ep.Links
+				if ep.IPAMConfig != nil {
+					ipam := *ep.IPAMConfig
+					es.IPAMConfig = &ipam
+				}
 			}
 			nc.EndpointsConfig[name] = es
 		}
-		cfg.Hostname = ""
+		// The default hostname is the container id; keep only explicit ones.
+		if len(old.ID) >= 12 && strings.HasPrefix(old.ID, cfg.Hostname) {
+			cfg.Hostname = ""
+		}
 	}
 	return &cfg, &hc, nc
 }

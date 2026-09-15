@@ -126,10 +126,16 @@ export default function BackendDrawer({ initial, onClose, onExpose }: { initial:
   }, [readOnly])
 
   // discovered containers not yet in this pool
+  const multiHost = new Set((containers.data ?? []).map((c) => c.endpointId)).size > 1
   const chips = (containers.data ?? [])
-    .filter((c) => c.state === 'running' && c.ip && (!c.backendId || c.backendId === draft.id))
-    .map((c) => ({ c, port: c.suggestedPort || c.ports[0]?.private || 0 }))
-    .filter(({ c, port }) => port && !draft.servers.some((s) => s.address === c.ip && s.port === port) && (!http || c.http || c.backendId))
+    .filter((c) => c.state === 'running' && !!c.upstreamHost && (!c.backendId || c.backendId === draft.id))
+    .map((c) => {
+      const port = c.suggestedPort || c.candidatePorts?.[0] || 0
+      return { c, address: c.upstreamHost ?? '', port, label: `${multiHost && c.endpointName ? `${c.endpointName} · ` : ''}${c.name}:${port}` }
+    })
+    .filter(({ address, port }) => port && !draft.servers.some((s) => s.address === address && s.port === port))
+    // web-looking containers first in HTTP mode, but any container with a port is offered
+    .sort((a, b) => Number(!!b.c.backendId) - Number(!!a.c.backendId) || (http ? Number(b.c.http) - Number(a.c.http) : 0))
     .slice(0, 5)
 
   // failing server callout
@@ -266,9 +272,9 @@ export default function BackendDrawer({ initial, onClose, onExpose }: { initial:
                   {chips.length > 0 && (
                     <>
                       <span>or pick from discovered containers:</span>
-                      {chips.map(({ c, port }) => (
-                        <button key={c.id} type="button" className="lb-chip" title={`${c.image} · ${c.ip}:${port}`} onClick={() => addServer(c.ip, port)}>
-                          {c.name}:{port}
+                      {chips.map(({ c, address, port, label }) => (
+                        <button key={`${c.endpointId}/${c.id}`} type="button" className="lb-chip" title={`${c.image} · ${address}:${port}`} onClick={() => addServer(address, port)}>
+                          {label}
                         </button>
                       ))}
                     </>

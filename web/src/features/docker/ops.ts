@@ -4,8 +4,28 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { Topics, useBusEvent } from '../../lib/events'
 import type { ToastAction } from '../../components/ui'
+import type { Container, DockerEndpointType } from '../../lib/types'
 
 // ---------------------------------------------------------------- docker
+export interface DockerEndpointStatus {
+  id: string
+  name: string
+  type: DockerEndpointType
+  url: string
+  /** Effective address for published ports ("" = local, containers reached by IP). */
+  upstreamAddress: string
+  enabled: boolean
+  connected: boolean
+  version: string
+  apiVersion?: string
+  containers: number
+  running: number
+  error?: string
+  socketMissing?: boolean
+  sshFingerprint?: string
+  checkedAt?: string
+}
+
 export interface DockerStatus {
   enabled: boolean
   connected: boolean
@@ -13,9 +33,34 @@ export interface DockerStatus {
   version: string
   apiVersion?: string
   containers: number
+  running: number
   error?: string
   socketMissing?: boolean
   checkedAt?: string
+  endpoints: DockerEndpointStatus[]
+}
+
+/** POST /api/docker/endpoints/test */
+export interface DockerTestResult {
+  ok: boolean
+  version?: string
+  containers: number
+  running: number
+  error?: string
+  sshFingerprint?: string
+}
+
+export function containerCounts(n: number, running: number): string {
+  return `${n} ${n === 1 ? 'container' : 'containers'} (${running} running)`
+}
+
+/** "nas · grafana" when several Docker hosts are connected, else "grafana". */
+export function containerLabel(c: Container, multiHost: boolean): string {
+  return multiHost && c.endpointName ? `${c.endpointName} · ${c.name}` : c.name
+}
+
+export function isMultiHost(list: Container[] | undefined): boolean {
+  return new Set((list ?? []).map((c) => c.endpointId)).size > 1
 }
 
 export const opsKeys = {
@@ -38,8 +83,8 @@ export function useDockerStatus(enabled = true) {
 }
 
 export interface CreateHostsResult {
-  created: { containerId: string; hostId: string; domain: string }[]
-  errors: { containerId: string; domain: string; error: string; fields?: Record<string, string> }[]
+  created: { endpointId: string; containerId: string; hostId: string; domain: string; enabled: boolean; linkOnStart?: boolean }[]
+  errors: { endpointId: string; containerId: string; domain: string; error: string; fields?: Record<string, string> }[]
 }
 
 export function schemeForPort(port: number): 'http' | 'https' {
@@ -137,6 +182,8 @@ export interface NpmPreviewItem {
   name: string
   detail: string
   conflict?: string
+  /** Conflicting item that "overwrite" replaces (others are always skipped). */
+  overwritable?: boolean
   warnings: string[]
 }
 

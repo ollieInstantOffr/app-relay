@@ -139,19 +139,26 @@ func summarize(p *Plan, token, source string, expires time.Time) *Preview {
 	for _, k := range []string{"hosts", "redirects", "streams", "accessLists", "certificates"} {
 		pv.Counts[k] = Count{}
 	}
+	// Overwritable mirrors Commit: conflicts replace exactly one existing
+	// entity, and certificates only when the NPM files are available.
 	for _, it := range p.Hosts {
+		it.Overwritable = it.Conflict != "" && it.ExistingID != ""
 		add("hosts", it.Base)
 	}
 	for _, it := range p.Redirects {
+		it.Overwritable = it.Conflict != "" && it.ExistingID != ""
 		add("redirects", it.Base)
 	}
 	for _, it := range p.Streams {
+		it.Overwritable = it.Conflict != "" && it.ExistingID != ""
 		add("streams", it.Base)
 	}
 	for _, it := range p.AccessLists {
+		it.Overwritable = it.Conflict != "" && it.ExistingID != ""
 		add("accessLists", it.Base)
 	}
 	for _, it := range p.Certs {
+		it.Overwritable = it.Conflict != "" && it.ExistingID != "" && it.Chain != nil
 		add("certificates", it.Base)
 	}
 	return pv
@@ -367,9 +374,18 @@ func (s *Service) Commit(r *http.Request, token string, overwrite bool) (*Commit
 	}
 
 	// Proxy hosts.
+	plannedLists := map[int]bool{}
+	for _, it := range p.AccessLists {
+		plannedLists[it.NPMID] = true
+	}
 	for _, it := range p.Hosts {
 		next := it.Host
 		next.AccessListID = accessIDs[it.AccessNPM]
+		if plannedLists[it.AccessNPM] && next.AccessListID == "" {
+			// Never import a protected host without its protection.
+			fail("hosts", it.Name, errors.New("its access list could not be imported, so the host was skipped instead of being left unprotected"))
+			continue
+		}
 		next.CertificateID = certIDs[it.CertNPM]
 		if next.CertificateID == "" {
 			next.ForceHTTPS = false

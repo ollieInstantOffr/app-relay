@@ -150,9 +150,9 @@ func (s *Service) Request(ctx context.Context, req core.CertRequest) (*model.Cer
 	if err != nil {
 		return nil, err
 	}
-	provider := model.CertLetsEncrypt
-	if tls.ACMEProvider == model.CertLetsEncryptStaging {
-		provider = model.CertLetsEncryptStaging
+	provider := certProviderFor(tls)
+	if _, err := serverFor(provider, tls); err != nil {
+		return nil, httpx.Errorf(http.StatusBadRequest, "acme_not_configured", err.Error())
 	}
 	existing, err := s.app.Store.Certificates().List(ctx)
 	if err != nil {
@@ -314,10 +314,16 @@ func (s *Service) run(ctx context.Context, id string, opts launchOpts) {
 	renewal := cert.NotAfter != nil
 	started := s.now()
 	var events []model.CertEvent
+	srv, err := serverFor(cert.Provider, tls)
+	if err != nil {
+		s.fail(ctx, cert, renewal, err.Error(), started, nil)
+		return
+	}
 
 	if opts.stagingFirst {
 		dry := *cert
-		out, err := s.obtain(ctx, &dry, directoryURL(model.CertLetsEncryptStaging), tls.Email)
+		staging, _ := serverFor(model.CertLetsEncryptStaging, tls)
+		out, err := s.obtain(ctx, &dry, staging)
 		if err != nil {
 			s.fail(ctx, cert, renewal, humanizeACMEError(cert.Challenge, cert.Domains, err, out.Propagation), started, events)
 			return
@@ -326,7 +332,7 @@ func (s *Service) run(ctx context.Context, id string, opts launchOpts) {
 	}
 
 	attemptStart := s.now()
-	out, err := s.obtain(ctx, cert, directoryURL(cert.Provider), tls.Email)
+	out, err := s.obtain(ctx, cert, srv)
 	if err != nil {
 		s.fail(ctx, cert, renewal, humanizeACMEError(cert.Challenge, cert.Domains, err, out.Propagation), started, events)
 		return
@@ -343,6 +349,9 @@ func (s *Service) run(ctx context.Context, id string, opts launchOpts) {
 	_ = s.app.Store.PutKV(context.WithoutCancel(ctx), "acme:certacct:"+id, []byte(out.AccountKey))
 
 	issuer := providerLabel(cert.Provider)
+	if cert.Provider == model.CertACME {
+		issuer = directoryHost(srv.Directory)
+	}
 	if out.Info.Issuer != "" {
 		issuer += " " + out.Info.Issuer
 	}

@@ -6,7 +6,13 @@
 # All three containers use host networking: nginx binds 80/443 (+443/udp for
 # HTTP/3) directly on the host, HAProxy frontends created by the Expose wizard
 # bind 127.0.0.1:10080+ and are reached by nginx over loopback.
-# See deploy/README.md for ports, volumes and the Docker socket proxy option.
+#
+# nginx and HAProxy run the OFFICIAL images. The relay container copies its
+# static binary into the relay-bin volume and each engine container runs it as
+# `relay agent` (PID 1), so engines can be upgraded from the UI
+# (Settings → Engines & updates) without rebuilding anything.
+# Pin versions in .env, e.g. RELAY_NGINX_IMAGE=nginx:1.30.4-alpine.
+# See deploy/README.md (ports, volumes, socket proxy) and deploy/UPGRADES.md.
 
 name: relay
 
@@ -21,49 +27,77 @@ services:
     restart: unless-stopped
     environment:
       RELAY_LISTEN: ":8181"
+      RELAY_AGENT_BIN_DIR: /opt/relay/bin
+      RELAY_NGINX_STATUS_PORT: ${RELAY_NGINX_STATUS_PORT:-18080}
+      RELAY_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME}
       TZ: ${TZ:-UTC}
     volumes:
       - relay-data:/data
       - relay-run:/run/relay
       - relay-logs:/var/log/relay
-      # Docker discovery (read-only). Remove, or use a socket proxy, to disable.
+      - relay-bin:/opt/relay
+      # Docker discovery and engine upgrades. Remove to disable both (or use a
+      # socket proxy for discovery only — upgrades need write access).
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - nginx
       - haproxy
 
   nginx:
-    build:
-      context: .
-      target: nginx
-    image: relay-nginx:latest
+    image: ${RELAY_NGINX_IMAGE:-nginx:1.30.4-alpine}
     container_name: relay-nginx
     network_mode: host
     restart: unless-stopped
     stop_grace_period: 30s
+    # The official images set STOPSIGNAL (SIGQUIT / SIGUSR1) for the engine;
+    # PID 1 is the relay agent, which shuts the engine down gracefully on SIGTERM.
+    stop_signal: SIGTERM
+    labels:
+      relay.engine: nginx
+    entrypoint: ["sh", "-c", "until [ -x /opt/relay/bin/relay ]; do sleep 1; done; exec /opt/relay/bin/relay agent --engine nginx"]
     environment:
+      RELAY_NGINX_STATUS_PORT: ${RELAY_NGINX_STATUS_PORT:-18080}
       TZ: ${TZ:-UTC}
     volumes:
+      - relay-bin:/opt/relay:ro
       - relay-data:/data:ro
       - relay-run:/run/relay
       - relay-logs:/var/log/relay
       - relay-nginx:/etc/relay/nginx
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/relay/nginx.sock && wget -q -O /dev/null http://127.0.0.1:$${RELAY_NGINX_STATUS_PORT}/stub_status"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
   haproxy:
-    build:
-      context: .
-      target: haproxy
-    image: relay-haproxy:latest
+    image: ${RELAY_HAPROXY_IMAGE:-haproxy:3.4.4-alpine}
     container_name: relay-haproxy
     network_mode: host
     restart: unless-stopped
     stop_grace_period: 30s
+    stop_signal: SIGTERM
+    # The agent binds the runtime/master sockets in /run/relay and HAProxy
+    # may bind privileged frontend ports, so it runs as root (the official
+    # image defaults to the haproxy user).
+    user: root
+    labels:
+      relay.engine: haproxy
+    entrypoint: ["sh", "-c", "until [ -x /opt/relay/bin/relay ]; do sleep 1; done; exec /opt/relay/bin/relay agent --engine haproxy"]
     environment:
       TZ: ${TZ:-UTC}
     volumes:
+      - relay-bin:/opt/relay:ro
       - relay-data:/data:ro
       - relay-run:/run/relay
       - relay-haproxy:/etc/relay/haproxy
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/relay/haproxy.sock"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
 volumes:
   relay-data:     # SQLite database, certificates, ACME webroot, backups
@@ -71,3 +105,4 @@ volumes:
   relay-logs:     # nginx access/error logs, ingested by relay
   relay-nginx:    # applied nginx releases (survive engine restarts)
   relay-haproxy:  # applied haproxy releases
+  relay-bin:      # relay binary for the engine agents (written by relay)

@@ -54,6 +54,8 @@ type EngineUpdates struct {
 	NextCheckAt *time.Time       `json:"nextCheckAt,omitempty"`
 	CheckError  string           `json:"checkError,omitempty"`
 	DockerError string           `json:"dockerError,omitempty"`
+	// ComposeProject is the compose project Relay searches for engine containers.
+	ComposeProject string `json:"composeProject,omitempty"`
 }
 
 const (

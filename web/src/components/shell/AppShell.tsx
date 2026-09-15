@@ -11,6 +11,7 @@ import PendingBar from '../../features/history/PendingBar'
 import EngineBanners from '../../features/history/EngineBanners'
 import SessionExpiredDialog from '../../features/auth/SessionExpiredDialog'
 import ApprovalToasts from '../../features/mcp/ApprovalToasts'
+import { hasEngineNotice, useEngineUpdates } from '../../features/settings/enginesApi'
 
 export interface NavItem {
   to: string
@@ -78,6 +79,7 @@ function Rail({ pendingCount, username, role }: { pendingCount: number; username
   const navigate = useNavigate()
   const qc = useQueryClient()
 
+  const engineNotice = hasEngineNotice(useEngineUpdates(role === 'admin').data)
   const badges = useMemo(() => {
     const b: Record<string, { tone?: 'warn' | 'danger'; count?: number }> = {}
     const hostStates = Object.entries(health ?? {}).filter(([k]) => k.startsWith('host:')).map(([, v]) => v.status)
@@ -114,6 +116,7 @@ function Rail({ pendingCount, username, role }: { pendingCount: number; username
       <Tooltip content="Settings" shortcut="G S" side="right">
         <NavLink to="/settings" className={({ isActive }) => cx('rail-item', isActive && 'active')} aria-label="Settings">
           <Icon name="settings" size={18} />
+          {engineNotice && <span className="rail-badge" style={{ background: 'var(--info, var(--accent))' }} title="Engine update available" />}
         </NavLink>
       </Tooltip>
       <Menu

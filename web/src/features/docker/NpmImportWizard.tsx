@@ -72,9 +72,8 @@ export default function NpmImportWizard({ open, onClose }: { open: boolean; onCl
     }
   }
 
-  const importable = preview
-    ? preview.items.filter((it) => !it.conflict || overwrite).length
-    : 0
+  const willImport = (it: NpmPreview['items'][number]) => !it.conflict || (overwrite && !!it.overwritable)
+  const importable = preview ? preview.items.filter(willImport).length : 0
 
   const commit = async () => {
     if (!preview) return
@@ -145,7 +144,7 @@ export default function NpmImportWizard({ open, onClose }: { open: boolean; onCl
                 <Input mono placeholder="/import/npm/data" value={path} onChange={(e) => setPath(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && runPreview()} autoFocus />
               </Field>
             ) : (
-              <Field label="NPM database" hint="Only SQLite installs are supported. Certificates are created as pending and need to be requested again.">
+              <Field label="NPM database" hint="Only SQLite installs are supported. Custom certificates are read from the database; Let's Encrypt certificates are created as pending and need to be requested again.">
                 <div
                   className="ops-dropzone"
                   onClick={() => fileRef.current?.click()}
@@ -194,7 +193,7 @@ export default function NpmImportWizard({ open, onClose }: { open: boolean; onCl
                   </thead>
                   <tbody>
                     {preview.items.map((it) => (
-                      <tr key={`${it.kind}-${it.npmId}`} className={it.conflict && !overwrite ? 'dim' : undefined}>
+                      <tr key={`${it.kind}-${it.npmId}`} className={willImport(it) ? undefined : 'dim'}>
                         <td className="ops-kind">{KIND_SINGULAR[it.kind]}</td>
                         <td className="mono small">
                           {it.name}
@@ -206,7 +205,7 @@ export default function NpmImportWizard({ open, onClose }: { open: boolean; onCl
                         <td className="mono small faint truncate" style={{ maxWidth: 220 }} title={it.detail}>{it.detail}</td>
                         <td style={{ textAlign: 'right' }}>
                           {it.conflict ? (
-                            <Badge tone="warn">{overwrite ? 'overwrite' : 'skip'}</Badge>
+                            <Badge tone="warn">{willImport(it) ? 'overwrite' : 'skip'}</Badge>
                           ) : it.warnings.length ? (
                             <Badge tone="info">review</Badge>
                           ) : (

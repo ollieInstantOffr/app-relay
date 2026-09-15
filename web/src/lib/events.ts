@@ -23,6 +23,8 @@ export const Topics = {
   DockerChanged: 'docker.changed',
   BackupChanged: 'backup.changed',
   ActivityAppended: 'activity.appended',
+  EngineUpgrade: 'engine.upgrade',
+  EngineUpdates: 'engine.updates',
 } as const
 
 function invalidateFor(qc: QueryClient, ev: BusEvent) {
@@ -48,6 +50,9 @@ function invalidateFor(qc: QueryClient, ev: BusEvent) {
       break
     case Topics.EngineChanged:
       qc.invalidateQueries({ queryKey: keys.engines })
+      break
+    case Topics.EngineUpdates:
+      qc.invalidateQueries({ queryKey: ['engines', 'updates'] })
       break
     case Topics.DockerChanged:
       qc.invalidateQueries({ queryKey: keys.containers })

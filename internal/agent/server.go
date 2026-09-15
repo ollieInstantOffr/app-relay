@@ -11,10 +11,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -40,6 +42,7 @@ type Agent struct {
 
 	version string
 	modules []string
+	dynMods map[string]string
 
 	mu           sync.Mutex
 	lastReloadAt *time.Time
@@ -52,6 +55,11 @@ const stoppedMarker = "stopped"
 
 // Run supervises the engine process and serves the agent protocol until ctx ends.
 func Run(ctx context.Context, o Options) error {
+	// Official nginx/HAProxy images declare STOPSIGNAL SIGQUIT / SIGUSR1,
+	// which Docker sends to PID 1 (this agent) unless compose overrides it.
+	// Treat them like SIGTERM: stop the engine gracefully, then exit.
+	ctx, stopSignals := signal.NotifyContext(ctx, syscall.SIGQUIT, syscall.SIGUSR1)
+	defer stopSignals()
 	if o.Engine != EngineNginx && o.Engine != EngineHAProxy {
 		return fmt.Errorf("agent: --engine must be %s or %s", EngineNginx, EngineHAProxy)
 	}
@@ -90,7 +98,7 @@ func Run(ctx context.Context, o Options) error {
 	if _, err := exec.LookPath(a.eng.binary()); err != nil {
 		a.log.Error("engine binary not found", "binary", a.eng.binary(), "err", err)
 	}
-	a.version, a.modules = a.eng.detect()
+	a.version, a.modules, a.dynMods = a.eng.detect()
 	a.log.Info("engine detected", "version", a.version, "modules", strings.Join(a.modules, ","))
 
 	a.boot()
@@ -166,19 +174,20 @@ func (a *Agent) status() Status {
 		a.linesHash = cur
 	}
 	s := Status{
-		Engine:       a.o.Engine,
-		Running:      st.pid != 0,
-		PID:          st.pid,
-		Version:      a.version,
-		Modules:      a.modules,
-		StartedAt:    st.startedAt,
-		ExitedAt:     st.exitedAt,
-		ExitError:    st.exitErr,
-		LastReloadAt: a.lastReloadAt,
-		LastReloadMs: a.lastReloadMs,
-		ConfigHash:   cur,
-		ConfigLines:  a.configLines,
-		Configured:   cur != "" && cur != BootstrapHash,
+		Engine:         a.o.Engine,
+		Running:        st.pid != 0,
+		PID:            st.pid,
+		Version:        a.version,
+		Modules:        a.modules,
+		DynamicModules: a.dynMods,
+		StartedAt:      st.startedAt,
+		ExitedAt:       st.exitedAt,
+		ExitError:      st.exitErr,
+		LastReloadAt:   a.lastReloadAt,
+		LastReloadMs:   a.lastReloadMs,
+		ConfigHash:     cur,
+		ConfigLines:    a.configLines,
+		Configured:     cur != "" && cur != BootstrapHash,
 	}
 	a.mu.Unlock()
 	if s.Modules == nil {

@@ -23,6 +23,7 @@ docker compose (network_mode: host for all three)
 └─ relay-haproxy  haproxy + `relay agent --engine haproxy`
 shared volumes: relay-data:/data (ro in engines), relay-run:/run/relay (agent sockets),
                 relay-logs:/var/log/relay (nginx access/error logs)
+                relay-bin:/opt/relay (relay copies its static binary here; engines run it)
 ```
 
 - Desired config = SQLite documents (`internal/model`, `internal/store`).
@@ -129,6 +130,7 @@ All JSON, camelCase, types in `web/src/lib/types.ts`. Errors:
 | `POST /api/pending/discard` | engine | restores live snapshot |
 | `GET /api/versions` → `Version[]`, `GET /api/versions/{id}`, `GET /api/versions/{id}/diff?against=` , `POST /api/versions/{id}/rollback` | engine | |
 | `GET /api/engines` → `EnginesStatus`; `POST /api/engines/{engine}/{start|stop|reload}`; `GET /api/engines/{engine}/logs`; `GET /api/engines/{engine}/listeners` | engine | |
+| `GET /api/engines/updates` → `EngineUpdates`; `POST /api/engines/updates/check` (admin); `POST /api/engines/{engine}/upgrade` `{version}` (admin, 202 → `UpgradeJob`); `GET /api/engines/upgrade-status` → `{job}`; `POST /api/engines/{engine}/keep-image` (admin) | engine | image version check + in-place upgrade (`internal/engines`); progress on `engine.upgrade`; settings key `engines`; see `deploy/UPGRADES.md` |
 | `POST /api/preview/nginx/host` `{host}` → `ConfigPreview` | engine | renders one server block (+ validates full config with the draft) |
 | `POST /api/preview/nginx/stream` `{stream}` → `ConfigPreview` | engine | |
 | `POST /api/preview/haproxy/backend` `{backend}`, `/frontend` `{frontend}` → `ConfigPreview` | lb | |

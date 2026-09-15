@@ -445,13 +445,18 @@ type HSTSSettings struct {
 }
 
 type TLSSettings struct {
-	ACMEProvider       string       `json:"acmeProvider"` // letsencrypt | letsencrypt-staging
+	ACMEProvider       string       `json:"acmeProvider"` // letsencrypt | letsencrypt-staging | custom
 	Email              string       `json:"email"`
 	PreferredChallenge string       `json:"preferredChallenge"`
 	RenewDaysBefore    int          `json:"renewDaysBefore"`
 	CipherProfile      string       `json:"cipherProfile"` // modern | intermediate | old
 	HSTS               HSTSSettings `json:"hsts"`
 	OCSPStapling       bool         `json:"ocspStapling"`
+	// Custom ACME server (acmeProvider "custom": step-ca, ZeroSSL, internal CAs).
+	ACMEDirectoryURL string `json:"acmeDirectoryUrl,omitempty"`
+	ACMECABundle     string `json:"acmeCaBundle,omitempty"` // PEM roots trusted for the directory's TLS
+	EABKid           string `json:"eabKid,omitempty"`
+	EABHMACKey       string `json:"eabHmacKey,omitempty"` // secret (redacted)
 }
 
 type DefaultHostSettings struct {

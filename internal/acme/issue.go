@@ -9,6 +9,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,7 +22,6 @@ import (
 
 	"github.com/go-acme/lego/v4/certcrypto"
 	"github.com/go-acme/lego/v4/certificate"
-	"github.com/go-acme/lego/v4/challenge/dns01"
 	"github.com/go-acme/lego/v4/lego"
 	"github.com/go-acme/lego/v4/providers/http/webroot"
 	"github.com/go-acme/lego/v4/registration"
@@ -31,19 +31,14 @@ import (
 	"github.com/instantoffr/relay/internal/store"
 )
 
-func directoryURL(provider string) string {
-	if provider == model.CertLetsEncryptStaging {
-		return lego.LEDirectoryStaging
-	}
-	return lego.LEDirectoryProduction
-}
-
 func providerLabel(provider string) string {
 	switch provider {
 	case model.CertLetsEncrypt:
 		return "Let's Encrypt"
 	case model.CertLetsEncryptStaging:
 		return "Let's Encrypt staging"
+	case model.CertACME:
+		return "Custom ACME"
 	case model.CertCustom:
 		return "Custom"
 	case model.CertSelfSigned:
@@ -114,12 +109,13 @@ func (s *Service) saveAccount(ctx context.Context, kvKey string, u *acmeUser) er
 	return s.app.Store.PutKV(ctx, kvKey, raw)
 }
 
-// client returns a lego client for (directory, email), creating and
-// registering the account on first use.
-func (s *Service) client(ctx context.Context, dir, email string) (*lego.Client, string, error) {
+// client returns a lego client for the ACME server (directory, email),
+// creating and registering the account on first use (with External Account
+// Binding when configured).
+func (s *Service) client(ctx context.Context, srv acmeServer) (*lego.Client, string, error) {
 	accountMu.Lock()
 	defer accountMu.Unlock()
-	kvKey := accountKVKey(dir, email)
+	kvKey := accountKVKey(srv.Directory, srv.Email)
 	user, err := s.loadAccount(ctx, kvKey)
 	if err != nil {
 		return nil, "", err
@@ -133,21 +129,16 @@ func (s *Service) client(ctx context.Context, dir, email string) (*lego.Client, 
 		if err != nil {
 			return nil, "", err
 		}
-		user = &acmeUser{Email: email, Directory: dir, KeyPEM: string(keyPEM), key: key}
+		user = &acmeUser{Email: srv.Email, Directory: srv.Directory, KeyPEM: string(keyPEM), key: key}
 	}
-	cfg := lego.NewConfig(user)
-	cfg.CADirURL = dir
-	cfg.UserAgent = "relay/" + s.app.Config.Version
-	cfg.Certificate.KeyType = certcrypto.EC256
-	cfg.Certificate.Timeout = 60 * time.Second
-	c, err := lego.NewClient(cfg)
+	c, err := newLegoClient(srv, user, s.app.Config.Version)
 	if err != nil {
-		return nil, "", fmt.Errorf("Could not reach the ACME directory: %w", err)
+		return nil, "", err
 	}
 	if user.Registration == nil {
-		reg, err := c.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
+		reg, err := registerAccount(c, srv)
 		if err != nil {
-			return nil, "", fmt.Errorf("ACME account registration failed: %w", err)
+			return nil, "", err
 		}
 		user.Registration = reg
 		if err := s.saveAccount(ctx, kvKey, user); err != nil {
@@ -155,6 +146,50 @@ func (s *Service) client(ctx context.Context, dir, email string) (*lego.Client, 
 		}
 	}
 	return c, kvKey, nil
+}
+
+// newLegoClient builds a lego client for srv (fetches the directory).
+func newLegoClient(srv acmeServer, user registration.User, version string) (*lego.Client, error) {
+	cfg := lego.NewConfig(user)
+	cfg.CADirURL = srv.Directory
+	cfg.UserAgent = "relay/" + version
+	cfg.Certificate.KeyType = certcrypto.EC256
+	cfg.Certificate.Timeout = 60 * time.Second
+	hc, err := acmeHTTPClient(srv.CABundle)
+	if err != nil {
+		return nil, err
+	}
+	cfg.HTTPClient = hc
+	c, err := lego.NewClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("Could not reach the ACME directory %s: %w", srv.Directory, err)
+	}
+	return c, nil
+}
+
+// registerAccount registers a new ACME account, with External Account
+// Binding when a key ID is configured.
+func registerAccount(c *lego.Client, srv acmeServer) (*registration.Resource, error) {
+	var reg *registration.Resource
+	var err error
+	switch {
+	case srv.EABKid != "":
+		key, derr := model.DecodeEABHMAC(srv.EABHMAC)
+		if derr != nil || len(key) == 0 {
+			return nil, errors.New("the EAB HMAC key is not valid base64url")
+		}
+		reg, err = c.Registration.RegisterWithExternalAccountBinding(registration.RegisterEABOptions{
+			TermsOfServiceAgreed: true, Kid: srv.EABKid, HmacEncoded: base64.RawURLEncoding.EncodeToString(key),
+		})
+	case c.GetExternalAccountRequired():
+		return nil, errors.New("the ACME server requires External Account Binding — add the EAB key ID and HMAC key in Settings → Default TLS")
+	default:
+		reg, err = c.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
+	}
+	if err != nil {
+		return nil, fmt.Errorf("ACME account registration failed: %w", err)
+	}
+	return reg, nil
 }
 
 // ---------------------------------------------------------------- issuance
@@ -167,10 +202,10 @@ type issueOutcome struct {
 	Via         string // "DNS-01 via Cloudflare"
 }
 
-// obtain runs one ACME order for cert against directory dir.
-func (s *Service) obtain(ctx context.Context, cert *model.Certificate, dir, email string) (*issueOutcome, error) {
+// obtain runs one ACME order for cert against the ACME server srv.
+func (s *Service) obtain(ctx context.Context, cert *model.Certificate, srv acmeServer) (*issueOutcome, error) {
 	out := &issueOutcome{Via: challengeLabel(cert.Challenge)}
-	client, kvKey, err := s.client(ctx, dir, email)
+	client, kvKey, err := s.client(ctx, srv)
 	if err != nil {
 		return out, err
 	}
@@ -204,9 +239,7 @@ func (s *Service) obtain(ctx context.Context, cert *model.Certificate, dir, emai
 			return out, fmt.Errorf("%s credentials: %w", dnsTypeLabel(dp.Type), err)
 		}
 		out.Propagation = timeout
-		if err := client.Challenge.SetDNS01Provider(prov,
-			dns01.AddRecursiveNameservers([]string{"1.1.1.1:53", "8.8.8.8:53", "9.9.9.9:53"}),
-		); err != nil {
+		if err := client.Challenge.SetDNS01Provider(prov, dnsChallengeOptions()...); err != nil {
 			return out, err
 		}
 	default:
@@ -237,10 +270,10 @@ func (s *Service) httpPreflight(ctx context.Context) error {
 	defer cancel()
 	st, err := s.app.Nginx.Status(cctx)
 	if err != nil {
-		return errors.New("nginx isn't reachable, so Let's Encrypt can't fetch the challenge from port 80")
+		return errors.New("nginx isn't reachable, so the ACME server can't fetch the challenge from port 80")
 	}
 	if !st.Running {
-		return errors.New("nginx is not running, so Let's Encrypt can't fetch the challenge from port 80")
+		return errors.New("nginx is not running, so the ACME server can't fetch the challenge from port 80")
 	}
 	return nil
 }
@@ -252,24 +285,30 @@ func dnsTypeLabel(t string) string {
 	return t
 }
 
-// revoke revokes the certificate at Let's Encrypt using the issuing account.
+// revoke revokes the certificate at its ACME server using the issuing account.
 func (s *Service) revoke(ctx context.Context, cert *model.Certificate) error {
 	fullchain, _ := s.env.CertPaths(cert.ID)
 	pemBytes, err := os.ReadFile(fullchain)
 	if err != nil {
 		return fmt.Errorf("certificate files are missing: %w", err)
 	}
-	dir := directoryURL(cert.Provider)
-	email := ""
+	tls, err := store.LoadSettings[model.TLSSettings](ctx, s.app.Store, model.SettingsTLS)
+	if err != nil {
+		return err
+	}
+	srv, srvErr := serverFor(cert.Provider, tls)
 	if raw, err := s.app.Store.GetKV(ctx, "acme:certacct:"+cert.ID); err == nil {
 		if u, err := s.loadAccount(ctx, string(raw)); err == nil && u != nil {
-			dir, email = u.Directory, u.Email
+			if u.Directory != srv.Directory {
+				srv.CABundle = "" // the configured bundle belongs to another server
+			}
+			srv.Directory, srv.Email, srvErr = u.Directory, u.Email, nil
 		}
-	} else {
-		tls, _ := store.LoadSettings[model.TLSSettings](ctx, s.app.Store, model.SettingsTLS)
-		email = tls.Email
 	}
-	client, _, err := s.client(ctx, dir, email)
+	if srvErr != nil {
+		return srvErr
+	}
+	client, _, err := s.client(ctx, srv)
 	if err != nil {
 		return err
 	}
@@ -306,7 +345,10 @@ func humanizeACMEError(challenge string, domains []string, err error, propagatio
 		subject = label + " for " + domain
 	}
 	var out string
+	lower := strings.ToLower(line)
 	switch {
+	case challenge == model.ChallengeHTTP01 && (strings.Contains(lower, "could not resolve") || strings.Contains(lower, "nxdomain") || strings.Contains(lower, "no valid a records") || strings.Contains(lower, "no valid ip addresses")):
+		out = subject + ": " + domain + " does not resolve for the ACME server — check its DNS A/AAAA record points at this machine"
 	case strings.Contains(line, "time limit exceeded"):
 		secs := int(propagation.Seconds())
 		if challenge == model.ChallengeDNS01 {
@@ -326,9 +368,15 @@ func humanizeACMEError(challenge string, domains []string, err error, propagatio
 		}
 		switch typ {
 		case "rateLimited":
-			out = "Let's Encrypt rate limit reached: " + detail
+			if strings.Contains(msg, "letsencrypt.org") {
+				out = "Let's Encrypt rate limit reached: " + detail
+			} else {
+				out = "ACME server rate limit reached: " + detail
+			}
 		case "rejectedIdentifier":
-			out = subject + ": Let's Encrypt won't issue for this name · " + detail
+			out = subject + ": the ACME server won't issue for this name · " + detail
+		case "externalAccountRequired":
+			out = "The ACME server requires External Account Binding — add the EAB key ID and HMAC key in Settings → Default TLS"
 		default:
 			out = subject + ": " + detail
 		}

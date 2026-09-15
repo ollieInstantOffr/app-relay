@@ -106,7 +106,7 @@ export interface AccessList extends Meta {
 }
 
 // ---------------------------------------------------------------- certificates
-export type CertProvider = 'letsencrypt' | 'letsencrypt-staging' | 'custom' | 'selfsigned'
+export type CertProvider = 'letsencrypt' | 'letsencrypt-staging' | 'acme' | 'custom' | 'selfsigned'
 export type Challenge = 'http-01' | 'dns-01' | 'tls-alpn-01'
 export interface CertEvent { at: string; message: string; result: 'ok' | 'failed' | 'retried'; durationMs: number }
 export interface Certificate extends Meta {
@@ -250,7 +250,13 @@ export interface DockerEndpoint {
   autoRemove: boolean
 }
 export interface TLSSettings {
-  acmeProvider: 'letsencrypt' | 'letsencrypt-staging'
+  acmeProvider: 'letsencrypt' | 'letsencrypt-staging' | 'custom'
+  /** Custom ACME server (acmeProvider "custom"). */
+  acmeDirectoryUrl?: string
+  acmeCaBundle?: string
+  eabKid?: string
+  /** Secret: masked in responses, resend the mask to keep it. */
+  eabHmacKey?: string
   email: string
   preferredChallenge: Challenge
   renewDaysBefore: number
@@ -296,7 +302,7 @@ export interface NotificationChannel {
 }
 export type NotificationEvent =
   | 'upstream_down' | 'cert_renew_failed' | 'cert_expiring' | 'reload_failed'
-  | 'unknown_sign_in' | 'mcp_write_executed' | 'weekly_summary'
+  | 'unknown_sign_in' | 'mcp_write_executed' | 'weekly_summary' | 'engine_update_available'
 export interface NotificationSettings {
   channels: NotificationChannel[]
   routes: Partial<Record<NotificationEvent, string[]>>
@@ -324,6 +330,7 @@ export interface SettingsMap {
   notifications: NotificationSettings
   backup: BackupSettings
   blocklist: BlocklistSettings
+  engines: EnginesSettings
 }
 export type SettingsKey = keyof SettingsMap
 
@@ -398,6 +405,69 @@ export interface EngineState {
 }
 export interface EnginesStatus { nginx: EngineState; haproxy: EngineState }
 
+/** Settings → Engines & updates (slice engine). GET/PUT /api/settings/engines */
+export interface EnginesSettings {
+  nginxChannel: 'stable' | 'mainline'
+  haproxyChannel: 'lts' | 'latest'
+  nginxImage: string
+  haproxyImage: string
+  checkIntervalHours: number
+  autoCheck: boolean
+}
+export interface EngineRelease { version: string; tag: string; image: string; date?: string }
+export interface EngineDrift { runningImage: string; runningVersion: string; desiredImage: string; desiredVersion: string }
+/** GET /api/engines/updates (slice engine) */
+export interface EngineUpdateInfo {
+  engine: 'nginx' | 'haproxy'
+  channel: string
+  version: string
+  reachable: boolean
+  running: boolean
+  image: string
+  imageVersion: string
+  container: string
+  official: boolean
+  desiredImage: string
+  latest?: EngineRelease
+  channels: Record<string, EngineRelease | null>
+  updateAvailable: boolean
+  drift?: EngineDrift
+  canUpgrade: boolean
+  upgradeBlocker?: string
+  changesUrl: string
+  modules: string[]
+  missingModules: string[]
+}
+export interface EngineUpdates {
+  nginx: EngineUpdateInfo
+  haproxy: EngineUpdateInfo
+  autoCheck: boolean
+  checkedAt?: string
+  nextCheckAt?: string
+  checkError?: string
+  dockerError?: string
+  composeProject?: string
+}
+export interface UpgradeStep { id: string; label: string; status: 'pending' | 'running' | 'done' | 'failed' | 'skipped'; detail?: string }
+/** GET /api/engines/upgrade-status → {job}; bus topic engine.upgrade */
+export interface UpgradeJob {
+  id: string
+  engine: 'nginx' | 'haproxy'
+  from: string
+  to: string
+  fromImage: string
+  toImage: string
+  actor: string
+  status: 'running' | 'succeeded' | 'rolled_back' | 'failed'
+  message: string
+  error?: string
+  output?: string
+  progress: number
+  steps: UpgradeStep[]
+  startedAt: string
+  finishedAt?: string
+}
+
 /** POST /api/preview/* (engine: nginx host/stream; lb: haproxy backend/frontend) */
 export interface ConfigPreview { config: string; valid: boolean; output: string }
 
@@ -443,6 +513,10 @@ export interface Container {
   endpointId: string; endpointName: string
   /** Address to proxy to together with suggestedPort; absent when not reachable. */
   upstreamHost?: string
+  /** Likely app ports usable with upstreamHost, best first. */
+  candidatePorts?: number[]
+  /** Stopped local container: a host can be created disabled and is enabled when it starts. */
+  linkOnStart?: boolean
 }
 
 /** GET /api/approvals (slice mcp) */

@@ -5,12 +5,16 @@ package model
 
 import (
 	"crypto/rand"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
 	"net/mail"
 	"net/netip"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,14 +25,24 @@ import (
 
 // ---------------------------------------------------------------- DNS provider types
 
+// DNSFieldOption is one choice of a select field.
+type DNSFieldOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+	// EnvPrefix (type "other"): lego environment variables must start with it.
+	EnvPrefix string `json:"envPrefix,omitempty"`
+	DocsURL   string `json:"docsUrl,omitempty"`
+}
+
 // DNSProviderField describes one credential field of a DNS provider type.
 type DNSProviderField struct {
-	Key         string `json:"key"`
-	Label       string `json:"label"`
-	Secret      bool   `json:"secret"`
-	Required    bool   `json:"required"`
-	Placeholder string `json:"placeholder,omitempty"`
-	Hint        string `json:"hint,omitempty"`
+	Key         string           `json:"key"`
+	Label       string           `json:"label"`
+	Secret      bool             `json:"secret"`
+	Required    bool             `json:"required"`
+	Placeholder string           `json:"placeholder,omitempty"`
+	Hint        string           `json:"hint,omitempty"`
+	Options     []DNSFieldOption `json:"options,omitempty"` // renders a select
 }
 
 // DNSProviderType is the schema the UI uses to render the provider form.
@@ -39,7 +53,23 @@ type DNSProviderType struct {
 	Fields  []DNSProviderField `json:"fields"`
 	// RequireOneOf lists field keys of which at least one must be set.
 	RequireOneOf []string `json:"requireOneOf,omitempty"`
+	// Note is shown under the form (what Test can and can't verify, caveats).
+	Note string `json:"note,omitempty"`
+	// AdminOnly types can only be created or changed by admins.
+	AdminOnly bool `json:"adminOnly,omitempty"`
+	// EnvPairs types additionally take lego environment variables as
+	// credentials (keys NAME, values secret).
+	EnvPairs bool `json:"envPairs,omitempty"`
 }
+
+const (
+	// DNSProviderOther configures any supported lego provider by its
+	// environment variables.
+	DNSProviderOther = "other"
+	// DNSOtherProviderKey is the credential holding the lego provider code.
+	DNSOtherProviderKey = "provider"
+	maxEnvPairs         = 40
+)
 
 var DNSProviderTypes = []DNSProviderType{
 	{
@@ -79,6 +109,98 @@ var DNSProviderTypes = []DNSProviderType{
 			{Key: "domain", Label: "Subdomain (for testing)", Placeholder: "myhome", Hint: "Used by Test to verify the token"},
 		},
 	},
+	{
+		Type: "gandiv5", Label: "Gandi LiveDNS", DocsURL: "https://docs.gandi.net/en/managing_an_organization/organizations/personal_access_token.html",
+		Fields: []DNSProviderField{
+			{Key: "personalAccessToken", Label: "Personal access token", Secret: true, Hint: "Scope: Domains · Manage domain name technical configurations"},
+			{Key: "apiKey", Label: "API key (deprecated)", Secret: true, Hint: "Only for accounts without personal access tokens"},
+		},
+		RequireOneOf: []string{"personalAccessToken", "apiKey"},
+		Note:         "Gandi publishes records slowly — issuance can take up to 20 minutes.",
+	},
+	{
+		Type: "godaddy", Label: "GoDaddy", DocsURL: "https://developer.godaddy.com/keys",
+		Fields: []DNSProviderField{
+			{Key: "apiKey", Label: "API key", Required: true},
+			{Key: "apiSecret", Label: "API secret", Secret: true, Required: true},
+		},
+		Note: "GoDaddy only grants DNS API access to accounts with 10 or more domains (or Discount Domain Club).",
+	},
+	{
+		Type: "namecheap", Label: "Namecheap", DocsURL: "https://www.namecheap.com/support/api/intro/",
+		Fields: []DNSProviderField{
+			{Key: "apiUser", Label: "API user", Required: true, Placeholder: "username"},
+			{Key: "apiKey", Label: "API key", Secret: true, Required: true},
+			{Key: "clientIp", Label: "Whitelisted client IP (optional)", Placeholder: "203.0.113.7", Hint: "The public IP on the API whitelist · detected automatically when empty"},
+		},
+	},
+	{
+		Type: "dynu", Label: "Dynu", DocsURL: "https://www.dynu.com/en-US/ControlPanel/APICredentials",
+		Fields: []DNSProviderField{
+			{Key: "apiKey", Label: "API key", Secret: true, Required: true},
+		},
+	},
+	{
+		Type: "netcup", Label: "netcup", DocsURL: "https://helpcenter.netcup.com/en/wiki/general/our-api",
+		Fields: []DNSProviderField{
+			{Key: "customerNumber", Label: "Customer number", Required: true, Placeholder: "12345"},
+			{Key: "apiKey", Label: "API key", Secret: true, Required: true},
+			{Key: "apiPassword", Label: "API password", Secret: true, Required: true},
+		},
+		Note: "netcup DNS changes can take up to 15 minutes to become visible.",
+	},
+	{
+		Type: "cloudns", Label: "ClouDNS", DocsURL: "https://www.cloudns.net/wiki/article/42/",
+		Fields: []DNSProviderField{
+			{Key: "authId", Label: "Auth ID", Placeholder: "1234"},
+			{Key: "subAuthId", Label: "Sub auth ID", Placeholder: "5678", Hint: "Use instead of Auth ID for a sub-user"},
+			{Key: "authPassword", Label: "Auth password", Secret: true, Required: true},
+		},
+		RequireOneOf: []string{"authId", "subAuthId"},
+	},
+	{
+		Type: "hurricane", Label: "Hurricane Electric (he.net)", DocsURL: "https://dns.he.net/docs.html",
+		Fields: []DNSProviderField{
+			{Key: "tokens", Label: "Dynamic TXT keys", Secret: true, Required: true, Placeholder: "example.com:key1,home.example.org:key2", Hint: "domain:key pairs, comma-separated · one per _acme-challenge TXT record"},
+		},
+		Note: "Create a dynamic TXT record _acme-challenge.<domain> in dns.he.net first. Hurricane Electric has no read-only API, so Test only checks the format.",
+	},
+	{
+		Type: "pdns", Label: "PowerDNS", DocsURL: "https://doc.powerdns.com/authoritative/http-api/",
+		Fields: []DNSProviderField{
+			{Key: "apiUrl", Label: "API URL", Required: true, Placeholder: "http://pdns.internal:8081"},
+			{Key: "apiKey", Label: "API key", Secret: true, Required: true, Hint: "api-key from pdns.conf"},
+			{Key: "serverName", Label: "Server ID (optional)", Placeholder: "localhost"},
+		},
+	},
+	{
+		Type: "httpreq", Label: "HTTP request (httpreq)", DocsURL: "https://go-acme.github.io/lego/dns/httpreq/",
+		Fields: []DNSProviderField{
+			{Key: "endpoint", Label: "Endpoint URL", Required: true, Placeholder: "https://dns-hook.internal/acme", Hint: "Relay POSTs JSON to <endpoint>/present and <endpoint>/cleanup"},
+			{Key: "mode", Label: "Mode", Options: []DNSFieldOption{{Value: "", Label: "Default · fqdn + value"}, {Value: "RAW", Label: "RAW · domain + token + keyAuth"}}},
+			{Key: "username", Label: "Basic auth user (optional)"},
+			{Key: "password", Label: "Basic auth password (optional)", Secret: true},
+		},
+		Note: "Test only checks that the endpoint answers — it can't call present/cleanup without changing DNS.",
+	},
+	{
+		Type: "exec", Label: "Run a program (exec)", DocsURL: "https://go-acme.github.io/lego/dns/exec/",
+		Fields: []DNSProviderField{
+			{Key: "program", Label: "Program", Required: true, Placeholder: "/data/hooks/dns01.sh", Hint: "Absolute path inside the relay container · called as <program> present|cleanup <fqdn> <value>"},
+			{Key: "mode", Label: "Mode", Options: []DNSFieldOption{{Value: "", Label: "Default · fqdn + value"}, {Value: "RAW", Label: "RAW · domain + token + keyAuth"}}},
+		},
+		AdminOnly: true,
+		Note:      "Admins only: the program runs inside the relay container with Relay's privileges. Test checks that it exists and is executable.",
+	},
+	{
+		Type: DNSProviderOther, Label: "Other (any lego provider)", DocsURL: "https://go-acme.github.io/lego/dns/",
+		Fields: []DNSProviderField{
+			// Options are filled by the acme package from its provider registry.
+			{Key: DNSOtherProviderKey, Label: "lego provider", Required: true},
+		},
+		EnvPairs: true,
+		Note:     "Add the provider's lego environment variables (see its guide). They are only set while the provider is created and are masked like other secrets. Test checks that the configuration is complete, not that DNS changes work.",
+	},
 }
 
 func DNSProviderTypeByName(t string) (DNSProviderType, bool) {
@@ -107,19 +229,27 @@ func MaskSecret(v string) string {
 // IsMaskedSecret reports whether v is a value produced by MaskSecret.
 func IsMaskedSecret(v string) bool { return strings.HasPrefix(v, secretMask) }
 
+func (pt DNSProviderType) field(key string) (DNSProviderField, bool) {
+	for _, f := range pt.Fields {
+		if f.Key == key {
+			return f, true
+		}
+	}
+	return DNSProviderField{}, false
+}
+
 func (d *DNSProvider) Redact() {
 	pt, ok := DNSProviderTypeByName(d.Type)
 	creds := map[string]string{}
 	for k, v := range d.Credentials {
-		if !ok {
+		f, declared := pt.field(k)
+		switch {
+		case !ok, !declared: // unknown type or lego environment variable
 			creds[k] = MaskSecret(v)
-			continue
-		}
-		creds[k] = v
-		for _, f := range pt.Fields {
-			if f.Key == k && f.Secret {
-				creds[k] = MaskSecret(v)
-			}
+		case f.Secret:
+			creds[k] = MaskSecret(v)
+		default:
+			creds[k] = v
 		}
 	}
 	d.Credentials = creds
@@ -130,6 +260,8 @@ func (d *DNSProvider) Redact() {
 
 // KeepSecrets drops unknown credential keys, trims values and carries over
 // secrets the client did not resend (empty for required fields, or masked).
+// EnvPairs types keep environment variables (upper-cased keys; masked values
+// are carried over, empty ones removed).
 func (d *DNSProvider) KeepSecrets(prev any) error {
 	p, _ := prev.(*DNSProvider)
 	d.Name = strings.TrimSpace(d.Name)
@@ -137,12 +269,13 @@ func (d *DNSProvider) KeepSecrets(prev any) error {
 	if !ok {
 		return nil // Validate reports the type
 	}
+	sameType := p != nil && p.Type == d.Type
 	next := map[string]string{}
 	for _, f := range pt.Fields {
 		v := strings.TrimSpace(d.Credentials[f.Key])
 		if f.Secret && (IsMaskedSecret(v) || (v == "" && f.Required)) {
 			v = ""
-			if p != nil && p.Type == d.Type {
+			if sameType {
 				v = p.Credentials[f.Key]
 			}
 		}
@@ -150,11 +283,67 @@ func (d *DNSProvider) KeepSecrets(prev any) error {
 			next[f.Key] = v
 		}
 	}
+	if pt.EnvPairs {
+		for k, v := range d.Credentials {
+			if _, declared := pt.field(k); declared {
+				continue
+			}
+			k, v = strings.ToUpper(strings.TrimSpace(k)), strings.TrimSpace(v)
+			if IsMaskedSecret(v) {
+				v = ""
+				if sameType {
+					v = p.Credentials[k]
+				}
+			}
+			if k != "" && v != "" {
+				next[k] = v
+			}
+		}
+	}
 	d.Credentials = next
 	if d.Zones == nil {
 		d.Zones = []string{}
 	}
 	return nil
+}
+
+var (
+	envKeyRe     = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,79}$`)
+	awsRegionRe  = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-\d$`)
+	netcupCustRe = regexp.MustCompile(`^\d{1,12}$`)
+)
+
+// ValidLegoEnvKey checks a lego environment variable for the "other" DNS
+// provider: it must belong to the provider's namespace (prefix) and must not
+// be a *_FILE indirection (lego would read an arbitrary file).
+func ValidLegoEnvKey(key, prefix string) error {
+	switch {
+	case !envKeyRe.MatchString(key):
+		return errors.New("Use an environment variable name like GANDI_API_KEY")
+	case prefix != "" && !strings.HasPrefix(key, prefix):
+		return fmt.Errorf("Variables for this provider start with %s", prefix)
+	case strings.HasSuffix(key, "_FILE"):
+		return errors.New("*_FILE variables are not supported — paste the value instead")
+	}
+	return nil
+}
+
+// OtherProviderPrefix returns the environment prefix of a lego provider code
+// offered by the "other" type ("" when unknown).
+func OtherProviderPrefix(code string) (string, bool) {
+	pt, _ := DNSProviderTypeByName(DNSProviderOther)
+	f, _ := pt.field(DNSOtherProviderKey)
+	for _, o := range f.Options {
+		if o.Value == code {
+			return o.EnvPrefix, true
+		}
+	}
+	return "", false
+}
+
+func validHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 func (d *DNSProvider) Validate() error {
@@ -169,27 +358,100 @@ func (d *DNSProvider) Validate() error {
 		e.Add("type", "Unsupported DNS provider %q", d.Type)
 		return e.Err()
 	}
+	c := d.Credentials
 	for _, f := range pt.Fields {
-		if f.Required && d.Credentials[f.Key] == "" {
+		v := c[f.Key]
+		if f.Required && v == "" {
 			e.Add("credentials."+f.Key, "%s is required", f.Label)
+			continue
+		}
+		if len(v) > 8192 {
+			e.Add("credentials."+f.Key, "At most 8192 characters")
+		}
+		if v != "" && len(f.Options) > 0 {
+			found := false
+			for _, o := range f.Options {
+				found = found || o.Value == v
+			}
+			if !found {
+				e.Add("credentials."+f.Key, "Pick one of the listed options")
+			}
 		}
 	}
 	if len(pt.RequireOneOf) > 0 {
 		found := false
+		labels := []string{}
 		for _, k := range pt.RequireOneOf {
-			if d.Credentials[k] != "" {
+			if c[k] != "" {
 				found = true
+			}
+			if f, ok := pt.field(k); ok {
+				labels = append(labels, f.Label)
 			}
 		}
 		if !found {
-			e.Add("credentials."+pt.RequireOneOf[0], "Enter an API token or a legacy API key")
+			e.Add("credentials."+pt.RequireOneOf[0], "Enter %s", strings.Join(labels, " or "))
 		}
 	}
-	if d.Type == "route53" && d.Credentials["region"] != "" && !regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-\d$`).MatchString(d.Credentials["region"]) {
-		e.Add("credentials.region", "Not an AWS region (e.g. us-east-1)")
-	}
-	if d.Type == "duckdns" && d.Credentials["domain"] != "" && strings.Contains(strings.TrimSuffix(d.Credentials["domain"], ".duckdns.org"), ".") {
-		e.Add("credentials.domain", "Enter just the subdomain, e.g. myhome")
+	switch d.Type {
+	case "route53":
+		if c["region"] != "" && !awsRegionRe.MatchString(c["region"]) {
+			e.Add("credentials.region", "Not an AWS region (e.g. us-east-1)")
+		}
+	case "duckdns":
+		if c["domain"] != "" && strings.Contains(strings.TrimSuffix(c["domain"], ".duckdns.org"), ".") {
+			e.Add("credentials.domain", "Enter just the subdomain, e.g. myhome")
+		}
+	case "namecheap":
+		if c["clientIp"] != "" && net.ParseIP(c["clientIp"]) == nil {
+			e.Add("credentials.clientIp", "Not a valid IP address")
+		}
+	case "netcup":
+		if c["customerNumber"] != "" && !netcupCustRe.MatchString(c["customerNumber"]) {
+			e.Add("credentials.customerNumber", "Digits only")
+		}
+	case "hurricane":
+		if c["tokens"] != "" {
+			if _, err := ParseDomainTokens(c["tokens"]); err != nil {
+				e.Add("credentials.tokens", "%s", err.Error())
+			}
+		}
+	case "pdns":
+		if c["apiUrl"] != "" && !validHTTPURL(c["apiUrl"]) {
+			e.Add("credentials.apiUrl", "Use an http:// or https:// URL")
+		}
+	case "httpreq":
+		if c["endpoint"] != "" && !validHTTPURL(c["endpoint"]) {
+			e.Add("credentials.endpoint", "Use an http:// or https:// URL")
+		}
+	case "exec":
+		if p := c["program"]; p != "" && (!strings.HasPrefix(p, "/") || strings.ContainsAny(p, " \t\n")) {
+			e.Add("credentials.program", "Use an absolute path without arguments, e.g. /data/hooks/dns01.sh")
+		}
+	case DNSProviderOther:
+		code := c[DNSOtherProviderKey]
+		prefix, known := OtherProviderPrefix(code)
+		if code != "" && !known {
+			e.Add("credentials."+DNSOtherProviderKey, "Pick a provider from the list")
+		}
+		n := 0
+		for k, v := range c {
+			if k == DNSOtherProviderKey {
+				continue
+			}
+			n++
+			if err := ValidLegoEnvKey(k, prefix); err != nil {
+				e.Add("credentials."+k, "%s", err.Error())
+			} else if len(v) > 8192 {
+				e.Add("credentials."+k, "At most 8192 characters")
+			}
+		}
+		if n == 0 && code != "" {
+			e.Add("credentials", "Add the provider's environment variables, e.g. %sAPI_KEY", firstNonEmptyStr(prefix, "PROVIDER_"))
+		}
+		if n > maxEnvPairs {
+			e.Add("credentials", "At most %d variables", maxEnvPairs)
+		}
 	}
 	switch d.Status {
 	case "", "ok", "failed", "unknown":
@@ -226,8 +488,49 @@ func ValidCertDomain(d string) bool {
 
 func IsWildcardDomain(d string) bool { return strings.HasPrefix(d, "*.") }
 
+const (
+	// ACMEProviderCustom (TLSSettings.ACMEProvider) issues from a custom ACME
+	// directory (step-ca, ZeroSSL, an internal CA).
+	ACMEProviderCustom = "custom"
+	// CertACME is the provider of certificates issued by a custom ACME server.
+	CertACME = "acme"
+)
+
 // IsACMEProvider reports whether a certificate provider is issued via ACME.
-func IsACMEProvider(p string) bool { return p == CertLetsEncrypt || p == CertLetsEncryptStaging }
+func IsACMEProvider(p string) bool {
+	return p == CertLetsEncrypt || p == CertLetsEncryptStaging || p == CertACME
+}
+
+// ParseDomainTokens parses "example.com:key1,home.example.org:key2"
+// (Hurricane Electric dynamic TXT keys).
+func ParseDomainTokens(s string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, pair := range strings.Split(s, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		d, tok, ok := strings.Cut(pair, ":")
+		d, tok = strings.TrimSpace(d), strings.TrimSpace(tok)
+		if !ok || tok == "" || !ValidCertDomain(d) || IsWildcardDomain(d) {
+			return nil, fmt.Errorf("Use domain:key pairs, e.g. example.com:%s", "key1")
+		}
+		out[strings.ToLower(d)] = tok
+	}
+	if len(out) == 0 {
+		return nil, errors.New("Add at least one domain:key pair")
+	}
+	return out, nil
+}
+
+func firstNonEmptyStr(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 func (c *Certificate) Validate() error {
 	e := Errs{}
@@ -238,7 +541,7 @@ func (c *Certificate) Validate() error {
 		e.Add("name", "At most 253 characters")
 	}
 	switch c.Provider {
-	case CertLetsEncrypt, CertLetsEncryptStaging, CertCustom, CertSelfSigned:
+	case CertLetsEncrypt, CertLetsEncryptStaging, CertACME, CertCustom, CertSelfSigned:
 	default:
 		e.Add("provider", "Unknown provider %q", c.Provider)
 	}
@@ -566,12 +869,81 @@ func (s *Stream) Validate() error {
 
 // ---------------------------------------------------------------- TLS settings
 
+// Redact masks the EAB HMAC key.
+func (t *TLSSettings) Redact() { t.EABHMACKey = MaskSecret(t.EABHMACKey) }
+
+// KeepSecrets trims the custom ACME fields and keeps the stored EAB HMAC key
+// when the client resends the mask for the same key ID.
+func (t *TLSSettings) KeepSecrets(prev any) error {
+	p, _ := prev.(*TLSSettings)
+	t.ACMEDirectoryURL = strings.TrimSpace(t.ACMEDirectoryURL)
+	t.ACMECABundle = strings.TrimSpace(t.ACMECABundle)
+	t.EABKid = strings.TrimSpace(t.EABKid)
+	t.EABHMACKey = strings.TrimSpace(t.EABHMACKey)
+	if IsMaskedSecret(t.EABHMACKey) {
+		t.EABHMACKey = ""
+		if p != nil && p.EABKid == t.EABKid {
+			t.EABHMACKey = p.EABHMACKey
+		}
+	}
+	return nil
+}
+
+// DecodeEABHMAC decodes an EAB HMAC key given as base64url (ZeroSSL, step-ca)
+// or standard base64, padded or not.
+func DecodeEABHMAC(s string) ([]byte, error) {
+	s = strings.TrimRight(strings.TrimSpace(s), "=")
+	s = strings.NewReplacer("+", "-", "/", "_").Replace(s)
+	return base64.RawURLEncoding.DecodeString(s)
+}
+
+func validateCustomACME(t *TLSSettings, e Errs) {
+	if t.ACMEDirectoryURL == "" {
+		e.Add("acmeDirectoryUrl", "Enter the ACME directory URL")
+	} else if u, err := url.Parse(t.ACMEDirectoryURL); err != nil || u.Scheme != "https" || u.Host == "" || len(t.ACMEDirectoryURL) > 2048 {
+		e.Add("acmeDirectoryUrl", "Use an https:// directory URL, e.g. https://ca.internal/acme/acme/directory")
+	}
+	if t.ACMECABundle != "" {
+		n := 0
+		rest := []byte(t.ACMECABundle)
+		for len(rest) > 0 && len(t.ACMECABundle) <= 256<<10 {
+			var block *pem.Block
+			if block, rest = pem.Decode(rest); block == nil {
+				break
+			}
+			if block.Type == "CERTIFICATE" {
+				if _, err := x509.ParseCertificate(block.Bytes); err == nil {
+					n++
+				}
+			}
+		}
+		if n == 0 {
+			e.Add("acmeCaBundle", "Paste one or more PEM certificates (-----BEGIN CERTIFICATE-----)")
+		}
+	}
+	switch {
+	case t.EABKid == "" && t.EABHMACKey != "":
+		e.Add("eabKid", "Enter the EAB key ID that belongs to this HMAC key")
+	case t.EABKid != "" && t.EABHMACKey == "":
+		e.Add("eabHmacKey", "Enter the EAB HMAC key")
+	case len(t.EABKid) > 256:
+		e.Add("eabKid", "At most 256 characters")
+	}
+	if t.EABHMACKey != "" {
+		if k, err := DecodeEABHMAC(t.EABHMACKey); err != nil || len(k) == 0 || len(t.EABHMACKey) > 1024 {
+			e.Add("eabHmacKey", "The HMAC key must be base64url-encoded")
+		}
+	}
+}
+
 func (t *TLSSettings) Validate() error {
 	e := Errs{}
 	switch t.ACMEProvider {
 	case CertLetsEncrypt, CertLetsEncryptStaging:
+	case ACMEProviderCustom:
+		validateCustomACME(t, e)
 	default:
-		e.Add("acmeProvider", "Pick Let's Encrypt production or staging")
+		e.Add("acmeProvider", "Pick Let's Encrypt production, staging or a custom ACME server")
 	}
 	t.Email = strings.TrimSpace(t.Email)
 	if t.Email != "" {

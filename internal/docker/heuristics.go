@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,12 +62,195 @@ func imageBase(image string) string {
 	return s
 }
 
-// Guess is the result of the HTTP heuristic.
+// Guess is the result of the port heuristic.
 type Guess struct {
-	HTTP   bool
-	Port   int
-	Scheme string
-	Reason string
+	HTTP       bool // looks like a web app (drives default selection and ordering only)
+	Port       int  // best container port (0 = unknown)
+	Scheme     string
+	Reason     string // warning ("not HTTP (6379)") or why no port is known
+	Candidates []int  // container ports, best first
+}
+
+// Hints are container details beyond port mappings that point at the app port.
+type Hints struct {
+	Env     []string // KEY=value
+	Command string   // entrypoint + cmd
+	Exposed []int    // image EXPOSE / compose expose (tcp)
+}
+
+// portEnvVars are environment variables apps commonly read their listen port from.
+var portEnvVars = []string{"PORT", "APP_PORT", "HTTP_PORT", "SERVER_PORT", "LISTEN_PORT", "NUXT_PORT", "VITE_PORT"}
+
+// runtimeHints map words in the image name or command to default dev-server ports.
+var runtimeHints = []struct {
+	words []string
+	ports []int
+}{
+	{[]string{"flask"}, []int{5000}},
+	{[]string{"gunicorn", "uvicorn", "django", "hypercorn", "daphne", "fastapi"}, []int{8000}},
+	{[]string{"vite"}, []int{3000, 5173}},
+	{[]string{"node", "nodejs", "next", "nuxt", "remix", "express", "npm", "pnpm", "yarn", "bun", "deno", "tsx", "nest", "rails", "puma"}, []int{3000}},
+	{[]string{"python", "python3"}, []int{8000, 5000}},
+}
+
+var wordSplitRe = regexp.MustCompile(`[^a-z0-9]+`)
+
+func runtimePorts(image, command string) []int {
+	words := map[string]bool{}
+	for _, w := range wordSplitRe.Split(strings.ToLower(imageBase(image)+" "+command), -1) {
+		words[w] = true
+	}
+	for _, h := range runtimeHints {
+		for _, w := range h.words {
+			if words[w] {
+				return h.ports
+			}
+		}
+	}
+	return nil
+}
+
+// rankPorts orders a port set: image hint, well-known web ports, other ports, known non-HTTP ports.
+func rankPorts(set map[int]bool, hint int) []int {
+	webIdx := map[int]int{}
+	for i, p := range webPorts {
+		webIdx[p] = i
+	}
+	rank := func(p int) (int, int) {
+		switch i, web := webIdx[p]; {
+		case p == hint:
+			return 0, 0
+		case web:
+			return 1, i
+		case nonHTTPPorts[p]:
+			return 3, p
+		default:
+			return 2, p
+		}
+	}
+	out := make([]int, 0, len(set))
+	for p := range set {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		ri, ki := rank(out[i])
+		rj, kj := rank(out[j])
+		if ri != rj {
+			return ri < rj
+		}
+		return ki < kj
+	})
+	return out
+}
+
+func labelScheme(labels map[string]string, port int) string {
+	if s := strings.ToLower(labels["relay.scheme"]); s == "http" || s == "https" {
+		return s
+	}
+	return SchemeForPort(port)
+}
+
+// portGuess describes a single chosen container port.
+func portGuess(port int, labels map[string]string) Guess {
+	g := Guess{HTTP: !nonHTTPPorts[port], Port: port, Scheme: labelScheme(labels, port)}
+	if strings.TrimSpace(labels["relay.port"]) != "" {
+		g.HTTP = true
+	}
+	if !g.HTTP {
+		g.Reason = fmt.Sprintf("not HTTP (%d)", port)
+	}
+	return g
+}
+
+// Detect picks the app port of a container. Candidate priority: relay.port
+// label → port env vars → exposed ports → published ports → image/command hints.
+// Known non-HTTP ports only produce a warning; they never hide a container.
+func Detect(image string, ports []core.ContainerPort, labels map[string]string, h Hints) Guess {
+	var cands []int
+	seen := map[int]bool{}
+	add := func(p int) {
+		if p > 0 && p < 65536 && !seen[p] {
+			seen[p] = true
+			cands = append(cands, p)
+		}
+	}
+	explicit := 0
+	if n, err := strconv.Atoi(strings.TrimSpace(labels["relay.port"])); err == nil && n > 0 && n < 65536 {
+		explicit = n
+		add(n)
+	}
+	env := map[string]string{}
+	for _, kv := range h.Env {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			env[k] = strings.TrimSpace(v)
+		}
+	}
+	for _, k := range portEnvVars {
+		if n, err := strconv.Atoi(env[k]); err == nil && n > 0 && n < 65536 {
+			if explicit == 0 {
+				explicit = n
+			}
+			add(n)
+		}
+	}
+	hint := imagePorts[imageBase(image)]
+	exposed, published := map[int]bool{}, map[int]bool{}
+	udp := false
+	for _, p := range h.Exposed {
+		exposed[p] = true
+	}
+	for _, p := range ports {
+		switch {
+		case p.Proto != "" && p.Proto != "tcp":
+			udp = true
+		case p.Private <= 0:
+		case p.Public > 0:
+			published[p.Private] = true
+		default:
+			exposed[p.Private] = true
+		}
+	}
+	for _, p := range rankPorts(exposed, hint) {
+		add(p)
+	}
+	for _, p := range rankPorts(published, hint) {
+		add(p)
+	}
+	fromContainer := len(cands) // label/env/exposed/published candidates
+	add(hint)
+	for _, p := range runtimePorts(image, h.Command) {
+		add(p)
+	}
+	if len(cands) == 0 {
+		g := Guess{Scheme: "http", Reason: "no port detected — enter the app's port", Candidates: []int{}}
+		if udp {
+			g.Reason = "UDP only"
+		}
+		return g
+	}
+	pick := cands[0]
+	if explicit == 0 && nonHTTPPorts[pick] {
+		// Prefer a web-looking port the container actually has; name hints
+		// only pick when the container has no ports of its own.
+		limit := fromContainer
+		if limit == 0 {
+			limit = len(cands)
+		}
+		for _, p := range cands[:limit] {
+			if !nonHTTPPorts[p] {
+				pick = p
+				break
+			}
+		}
+	}
+	g := portGuess(pick, labels)
+	g.Candidates = append([]int{pick}, slices.DeleteFunc(slices.Clone(cands), func(p int) bool { return p == pick })...)
+	return g
+}
+
+// Classify is Detect without env/command hints.
+func Classify(image string, ports []core.ContainerPort, labels map[string]string) Guess {
+	return Detect(image, ports, labels, Hints{})
 }
 
 // SchemeForPort returns https for well-known TLS ports.
@@ -75,58 +259,6 @@ func SchemeForPort(port int) string {
 		return "https"
 	}
 	return "http"
-}
-
-// Classify decides whether a container looks like a web app and which port to
-// proxy to.
-func Classify(image string, ports []core.ContainerPort, labels map[string]string) Guess {
-	tcp := []int{}
-	seen := map[int]bool{}
-	for _, p := range ports {
-		if p.Proto != "" && p.Proto != "tcp" {
-			continue
-		}
-		if p.Private > 0 && !seen[p.Private] {
-			seen[p.Private] = true
-			tcp = append(tcp, p.Private)
-		}
-	}
-	sort.Ints(tcp)
-	scheme := func(port int) string {
-		if s := strings.ToLower(labels["relay.scheme"]); s == "http" || s == "https" {
-			return s
-		}
-		return SchemeForPort(port)
-	}
-	if v := labels["relay.port"]; v != "" {
-		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 && n < 65536 {
-			return Guess{HTTP: true, Port: n, Scheme: scheme(n)}
-		}
-	}
-	if hint := imagePorts[imageBase(image)]; hint > 0 && (len(tcp) == 0 || seen[hint]) {
-		return Guess{HTTP: true, Port: hint, Scheme: scheme(hint)}
-	}
-	for _, wp := range webPorts {
-		if seen[wp] {
-			return Guess{HTTP: true, Port: wp, Scheme: scheme(wp)}
-		}
-	}
-	candidates := []int{}
-	for _, p := range tcp {
-		if !nonHTTPPorts[p] {
-			candidates = append(candidates, p)
-		}
-	}
-	if len(candidates) > 0 {
-		return Guess{HTTP: true, Port: candidates[0], Scheme: scheme(candidates[0])}
-	}
-	if len(tcp) > 0 {
-		return Guess{HTTP: false, Port: tcp[0], Scheme: "http", Reason: fmt.Sprintf("not HTTP (%d)", tcp[0])}
-	}
-	if len(ports) > 0 {
-		return Guess{HTTP: false, Port: 0, Scheme: "http", Reason: "UDP only"}
-	}
-	return Guess{HTTP: false, Reason: "no exposed ports"}
 }
 
 // defaultNetworks are Docker's built-in networks; user networks are preferred.

@@ -3,6 +3,7 @@ package docker
 import (
 	"fmt"
 	"net"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,23 +39,32 @@ type upstreamInput struct {
 	Labels          map[string]string
 	Ports           []core.ContainerPort
 	Bindings        []binding
+	Hints           Hints
 }
 
 type upstreamResult struct {
-	HTTP   bool
-	Host   string // "" = not reachable
-	Port   int    // upstream port (container port when not reachable)
-	Scheme string
-	Reason string
+	HTTP       bool
+	Host       string // "" = not reachable (yet)
+	Port       int    // upstream port (container port when not reachable; 0 = unknown)
+	Scheme     string
+	Reason     string
+	Candidates []int // ports usable with Host, best first
+	Link       bool  // stopped local container: link a disabled host on start
 }
+
+const reasonLinkOnStart = "stopped — the host is enabled automatically when the container starts"
 
 // resolveUpstream decides the address Relay proxies to:
 //   - local endpoint, running container with an IP → IP:container port
 //   - host networking → 127.0.0.1 (local) or the host address:container port
 //   - otherwise a published port → 127.0.0.1 (local) or the host address:published port
+//   - local stopped container without a published port → linked on start
+//
+// A container whose port can't be detected still gets an address (Port 0) so
+// the user can enter the port.
 func resolveUpstream(in upstreamInput) upstreamResult {
-	g := Classify(in.Image, in.Ports, in.Labels)
-	res := upstreamResult{HTTP: g.HTTP, Port: g.Port, Scheme: g.Scheme, Reason: g.Reason}
+	g := Detect(in.Image, in.Ports, in.Labels, in.Hints)
+	res := upstreamResult{HTTP: g.HTTP, Port: g.Port, Scheme: g.Scheme, Reason: g.Reason, Candidates: g.Candidates}
 	hostAddr := func() (string, bool) {
 		if in.Local {
 			return "127.0.0.1", true
@@ -62,22 +72,21 @@ func resolveUpstream(in upstreamInput) upstreamResult {
 		return in.UpstreamAddress, in.UpstreamAddress != ""
 	}
 	unreachable := ""
+	published := false
 	switch {
 	case in.HostNetwork:
-		if h, ok := hostAddr(); ok && g.Port > 0 {
+		if h, ok := hostAddr(); ok {
 			res.Host = h
-		} else if !ok {
+		} else {
 			unreachable = "set an address for upstreams on " + in.EndpointName
 		}
 	case in.Local && in.Running && in.IP != "":
-		if g.Port > 0 {
-			res.Host = in.IP
-		}
+		res.Host = in.IP
 	default:
 		b, found := pickBinding(in, g)
 		if found {
 			if b.Private != g.Port {
-				bg := Classify(in.Image, []core.ContainerPort{{Private: b.Private, Proto: "tcp"}}, in.Labels)
+				bg := portGuess(b.Private, in.Labels)
 				res.HTTP, res.Reason, res.Scheme = bg.HTTP, bg.Reason, bg.Scheme
 			}
 			ip := net.ParseIP(b.HostIP)
@@ -97,35 +106,38 @@ func resolveUpstream(in upstreamInput) upstreamResult {
 			default:
 				res.Host, res.Port = b.HostIP, b.Public
 			}
+			published = res.Host != ""
 		}
+	}
+	if published {
+		res.Candidates = publishedCandidates(in.Bindings, g.Candidates, res.Port)
 	}
 
 	if res.Host != "" {
 		if !in.Running {
-			if res.HTTP {
+			switch {
+			case res.HTTP && res.Port > 0:
 				res.Reason = fmt.Sprintf("stopped · starts on %s", net.JoinHostPort(res.Host, strconv.Itoa(res.Port)))
-			} else {
+			case res.Reason != "":
 				res.Reason = "stopped · " + res.Reason
+			default:
+				res.Reason = "stopped"
 			}
+		}
+		return res
+	}
+	if in.Local && !in.Running && unreachable == "" {
+		res.Link = true
+		if !res.HTTP && res.Reason != "" {
+			res.Reason = "stopped · " + res.Reason
+		} else {
+			res.Reason = reasonLinkOnStart
 		}
 		return res
 	}
 	switch {
 	case unreachable != "":
 		res.Reason = unreachable
-	case !res.HTTP && res.Reason != "" && len(in.Bindings) == 0 && !(in.Local && in.Running):
-		// not HTTP and nothing published: explain the missing port first for remote hosts
-		if in.Local {
-			res.Reason = "stopped · " + res.Reason
-		} else {
-			res.Reason = fmt.Sprintf("no published port on %s — publish a port to proxy it", in.EndpointName)
-		}
-	case !res.HTTP && res.Reason != "":
-		if !in.Running {
-			res.Reason = "stopped · " + res.Reason
-		}
-	case in.Local && !in.Running:
-		res.Reason = "stopped — no published port"
 	case in.Local:
 		res.Reason = "no IP address — publish a port to proxy it"
 	default:
@@ -137,7 +149,35 @@ func resolveUpstream(in upstreamInput) upstreamResult {
 	return res
 }
 
-// pickBinding finds the published port for the classified container port, or
+// publishedCandidates maps container candidates to their published ports and
+// appends the remaining published ports.
+func publishedCandidates(bindings []binding, containerCands []int, chosen int) []int {
+	out := []int{}
+	add := func(p int) {
+		if p > 0 && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	add(chosen)
+	for _, cp := range containerCands {
+		for _, b := range bindings {
+			if b.Private == cp {
+				add(b.Public)
+			}
+		}
+	}
+	rest := []int{}
+	for _, b := range bindings {
+		rest = append(rest, b.Public)
+	}
+	sort.Ints(rest)
+	for _, p := range rest {
+		add(p)
+	}
+	return out
+}
+
+// pickBinding finds the published port for the best container candidate, or
 // the best web-looking published port.
 func pickBinding(in upstreamInput, g Guess) (binding, bool) {
 	find := func(private int) (binding, bool) {
@@ -155,6 +195,9 @@ func pickBinding(in upstreamInput, g Guess) (binding, bool) {
 		}
 		return best, ok
 	}
+	if len(in.Bindings) == 0 {
+		return binding{}, false
+	}
 	if g.Port > 0 {
 		if b, ok := find(g.Port); ok {
 			return b, true
@@ -163,15 +206,16 @@ func pickBinding(in upstreamInput, g Guess) (binding, bool) {
 			return binding{}, false // explicit port that isn't published
 		}
 	}
-	if len(in.Bindings) == 0 {
-		return binding{}, false
+	for _, p := range g.Candidates {
+		if b, ok := find(p); ok && !nonHTTPPorts[p] {
+			return b, true
+		}
 	}
 	published := []core.ContainerPort{}
 	for _, b := range in.Bindings {
 		published = append(published, core.ContainerPort{Private: b.Private, Public: b.Public, Proto: "tcp"})
 	}
-	bg := Classify(in.Image, published, nil)
-	if bg.Port > 0 {
+	if bg := Classify(in.Image, published, nil); bg.Port > 0 {
 		return find(bg.Port)
 	}
 	return binding{}, false
@@ -239,8 +283,28 @@ func inspectPorts(resp container.InspectResponse) portConfig {
 	return pc
 }
 
+// inspectHints reads env, command and exposed ports from a container's config.
+func inspectHints(resp container.InspectResponse, fallbackCmd string) Hints {
+	h := Hints{Command: fallbackCmd}
+	if resp.Config == nil {
+		return h
+	}
+	h.Env = resp.Config.Env
+	parts := append(slices.Clone([]string(resp.Config.Entrypoint)), resp.Config.Cmd...)
+	if len(parts) > 0 {
+		h.Command = strings.Join(parts, " ")
+	}
+	for p := range resp.Config.ExposedPorts {
+		if p.Proto() == "tcp" {
+			h.Exposed = append(h.Exposed, p.Int())
+		}
+	}
+	sort.Ints(h.Exposed)
+	return h
+}
+
 // buildContainer converts a Docker summary into Relay's container view.
-func buildContainer(ep model.DockerEndpoint, sm container.Summary, pc portConfig) core.Container {
+func buildContainer(ep model.DockerEndpoint, sm container.Summary, pc portConfig, hints Hints) core.Container {
 	name := sm.ID
 	if len(sm.Names) > 0 {
 		name = strings.TrimPrefix(sm.Names[0], "/")
@@ -255,50 +319,99 @@ func buildContainer(ep model.DockerEndpoint, sm container.Summary, pc portConfig
 	if running && mode != "host" && sm.NetworkSettings != nil {
 		ip = PickIP(mode, sm.NetworkSettings.Networks)
 	}
+	if hints.Command == "" {
+		hints.Command = sm.Command
+	}
 	r := resolveUpstream(upstreamInput{
 		Local: isLocal(ep), EndpointName: ep.Name, UpstreamAddress: effectiveUpstream(ep), Running: running,
-		HostNetwork: mode == "host", IP: ip, Image: sm.Image, Labels: labels, Ports: pc.ports, Bindings: pc.bindings,
+		HostNetwork: mode == "host", IP: ip, Image: sm.Image, Labels: labels, Ports: pc.ports, Bindings: pc.bindings, Hints: hints,
 	})
+	if r.Candidates == nil {
+		r.Candidates = []int{}
+	}
 	return core.Container{
 		ID: sm.ID, Name: name, Image: sm.Image, State: string(sm.State), IP: ip, Ports: pc.ports, Labels: labels,
 		HTTP: r.HTTP, SuggestedPort: r.Port, Reason: r.Reason,
-		EndpointID: ep.ID, EndpointName: ep.Name, UpstreamHost: r.Host,
+		EndpointID: ep.ID, EndpointName: ep.Name, UpstreamHost: r.Host, CandidatePorts: r.Candidates, LinkOnStart: r.Link,
 	}
+}
+
+// viaPublished reports whether c's upstream uses published ports.
+func viaPublished(c core.Container) bool {
+	if c.UpstreamHost == "" || c.UpstreamHost == c.IP {
+		return false
+	}
+	for _, p := range c.Ports {
+		if p.Public != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// containerPortFor maps an upstream port of c back to the container port.
+func containerPortFor(c core.Container, upstreamPort int) int {
+	if viaPublished(c) {
+		for _, p := range c.Ports {
+			if p.Public == upstreamPort && (p.Proto == "" || p.Proto == "tcp") {
+				return p.Private
+			}
+		}
+	}
+	return upstreamPort
+}
+
+// upstreamPortFor maps a container port to the port usable with c.UpstreamHost
+// (0 when that container port isn't published).
+func upstreamPortFor(c core.Container, containerPort int) int {
+	if !viaPublished(c) {
+		return containerPort
+	}
+	for _, p := range c.Ports {
+		if p.Private == containerPort && p.Public != 0 && (p.Proto == "" || p.Proto == "tcp") {
+			return p.Public
+		}
+	}
+	return 0
 }
 
 // containerScheme picks http/https for a container's upstream port.
 func containerScheme(c core.Container) string {
-	if s := strings.ToLower(c.Labels["relay.scheme"]); s == "http" || s == "https" {
-		return s
-	}
-	if c.UpstreamHost != "" && c.UpstreamHost != c.IP {
-		for _, p := range c.Ports {
-			if p.Public == c.SuggestedPort && p.Public != 0 {
-				return SchemeForPort(p.Private)
-			}
-		}
-	}
-	return SchemeForPort(c.SuggestedPort)
+	return portScheme(c, c.SuggestedPort)
+}
+
+// portScheme picks http/https for an upstream port of c.
+func portScheme(c core.Container, upstreamPort int) string {
+	return labelScheme(c.Labels, containerPortFor(c, upstreamPort))
 }
 
 // upstreamPorts are the ports usable on UpstreamHost: container ports when
-// proxying to the container IP or host network, published ports otherwise.
+// proxying to the container IP or host network, published ports otherwise,
+// plus the detected candidates.
 func upstreamPorts(c core.Container) map[int]bool {
 	m := map[int]bool{}
-	published := false
+	pub := viaPublished(c)
 	for _, p := range c.Ports {
-		if p.Public != 0 {
-			published = true
-		}
-	}
-	for _, p := range c.Ports {
-		if c.UpstreamHost == c.IP || !published {
+		if !pub {
 			m[p.Private] = true
 		} else if p.Public != 0 {
 			m[p.Public] = true
 		}
 	}
+	for _, p := range c.CandidatePorts {
+		m[p] = true
+	}
 	return m
+}
+
+// placeholderHost is the upstream host of a disabled host waiting for its
+// container to start (the container name when it is a valid host name).
+func placeholderHost(name string) string {
+	s := strings.Trim(wordSplitRe.ReplaceAllString(strings.ToLower(name), "-"), "-")
+	if s == "" || model.HostUpstreamHostError(s) != "" {
+		return "container"
+	}
+	return s
 }
 
 // sourceRef is the proxy host sourceRef for a container.

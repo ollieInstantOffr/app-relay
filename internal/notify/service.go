@@ -118,7 +118,10 @@ func (s *Service) route(ctx context.Context, n core.Notification) {
 		return
 	}
 	now := s.now()
-	key := n.Event + "\x00" + n.Title
+	n.URL = s.absoluteURL(ctx, n.URL)
+	// Titles are not unique per occurrence (e.g. every unknown sign-in is
+	// "Sign-in from a new address"), so the message is part of the key.
+	key := n.Event + "\x00" + n.Title + "\x00" + n.Message
 	s.mu.Lock()
 	for k, t := range s.recent {
 		if now.Sub(t) > dedupeWindow {
@@ -290,7 +293,7 @@ func (s *Service) flushHeld(ctx context.Context) {
 	s.persistHeldLocked(ctx)
 	s.mu.Unlock()
 
-	for _, d := range BuildDigests(held, set.Channels, now) {
+	for _, d := range BuildDigests(held, set.Channels, now.In(location(ctx, s.app.Store))) {
 		s.enqueue(d.channel, d.msg)
 	}
 }
@@ -333,7 +336,7 @@ func BuildDigests(held []heldItem, channels []model.NotificationChannel, now tim
 			if h.Level == "error" {
 				level = "error"
 			}
-			line := "• " + h.At.Format("15:04") + " " + h.Title
+			line := "• " + h.At.In(now.Location()).Format("15:04") + " " + h.Title // configured timezone
 			if h.Message != "" {
 				line += " — " + h.Message
 			}

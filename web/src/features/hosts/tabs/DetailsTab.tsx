@@ -31,6 +31,9 @@ export function ProbeLine({ probe }: { probe: ReturnType<typeof useProbe> }) {
   return null
 }
 
+/** Best port of a discovered container usable with its upstreamHost (0 = unknown). */
+const chipPort = (c: Container) => c.suggestedPort || c.candidatePorts?.[0] || 0
+
 export function DetailsTab({ ctx }: { ctx: HostFormCtx }) {
   const { draft, update, errors, readOnly, preview, isNew } = ctx
   const lists = useEntities('access-lists').data ?? []
@@ -50,11 +53,12 @@ export function DetailsTab({ ctx }: { ctx: HostFormCtx }) {
   const portErr = errors['upstream.port'] || (u.port ? portError(u.port) : '')
   const setUpstream = (patch: Partial<Upstream>) => update({ upstream: { ...u, ...patch } })
 
+  const multiHost = new Set((containersQ.data ?? []).map((c) => c.endpointId)).size > 1
   const containers = useMemo(() => {
     const label = (draft.domains.find((d) => !d.startsWith('*.')) ?? '').split('.')[0]
-    const score = (c: Container) => (label && c.name.toLowerCase().includes(label) ? 2 : 0) - (c.hostId && c.hostId !== draft.id ? 1 : 0)
+    const score = (c: Container) => (label && c.name.toLowerCase().includes(label) ? 4 : 0) + (c.http ? 1 : 0) - (c.hostId && c.hostId !== draft.id ? 2 : 0)
     return (containersQ.data ?? [])
-      .filter((c) => c.http && c.state === 'running' && c.suggestedPort > 0 && !c.backendId)
+      .filter((c) => c.state === 'running' && !!c.upstreamHost && chipPort(c) > 0 && !c.backendId)
       .sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name))
       .slice(0, 8)
   }, [containersQ.data, draft.domains, draft.id])
@@ -143,19 +147,20 @@ export function DetailsTab({ ctx }: { ctx: HostFormCtx }) {
           <label className="field-label">Discovered containers</label>
           <div className="row wrap gap-8">
             {containers.map((c) => {
-              const host = c.ip || c.name
-              const active = u.host === host && u.port === c.suggestedPort
+              const host = c.upstreamHost ?? ''
+              const port = chipPort(c)
+              const active = u.host === host && u.port === port
               return (
                 <button
-                  key={c.id}
+                  key={`${c.endpointId}/${c.id}`}
                   type="button"
                   className={cx('hosts-container-chip', active && 'active')}
-                  title={`${c.image} · ${host}:${c.suggestedPort}${c.hostId && c.hostId !== draft.id ? ' · already proxied by another host' : ''}`}
+                  title={`${c.image} · ${host}:${port}${c.reason ? ` · ${c.reason}` : ''}${c.hostId && c.hostId !== draft.id ? ' · already proxied by another host' : ''}`}
                   disabled={viaBackend}
-                  onClick={() => setUpstream({ scheme: 'http', host, port: c.suggestedPort })}
+                  onClick={() => setUpstream({ scheme: port === 443 || port === 8443 || port === 9443 ? 'https' : 'http', host, port })}
                 >
                   <Dot tone={c.hostId && c.hostId !== draft.id ? 'muted' : 'ok'} />
-                  {c.name}:{c.suggestedPort}
+                  {multiHost && c.endpointName ? `${c.endpointName} · ` : ''}{c.name}:{port}
                 </button>
               )
             })}

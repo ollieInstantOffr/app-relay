@@ -6,7 +6,7 @@ import { keys, useEntities, useRole, useSettings } from '../../lib/queries'
 import type { Certificate, Challenge } from '../../lib/types'
 import { Button, Callout, Checkbox, ChipsInput, Dialog, Field, RadioCard, Select, Spinner, useToast } from '../../components/ui'
 import DNSProviderDialog from './DNSProviderDialog'
-import { challengeLabel, fieldErrors, isWildcard, providerName, toastUnlessFields } from './common'
+import { challengeLabel, directoryHost, fieldErrors, isWildcard, providerName, toastUnlessFields } from './common'
 import './certs.css'
 
 const domainRe = /^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]*[a-z0-9]$/i
@@ -64,7 +64,9 @@ export default function RequestCertificateDialog(props: {
 
   const invalidDomain = useMemo(() => domains.find((d) => !domainRe.test(d)), [domains])
   const selectedProvider = providers.find((p) => p.id === dnsProviderId)
-  const production = tls?.acmeProvider !== 'letsencrypt-staging'
+  const custom = tls?.acmeProvider === 'custom'
+  const production = !custom && tls?.acmeProvider !== 'letsencrypt-staging'
+  const caName = custom ? `the ACME server${directoryHost(tls?.acmeDirectoryUrl) ? ` (${directoryHost(tls?.acmeDirectoryUrl)})` : ''}` : 'Let’s Encrypt'
 
   const submit = async () => {
     setBusy(true)
@@ -104,11 +106,13 @@ export default function RequestCertificateDialog(props: {
         width={520}
         icon="certificates"
         title="Request certificate"
-        description={production ? "Let's Encrypt · production" : "Let's Encrypt · staging (browser-untrusted) — change in Settings → Default TLS"}
+        description={custom
+          ? `Custom ACME server · ${directoryHost(tls?.acmeDirectoryUrl) || 'not configured'} — change in Settings → Default TLS`
+          : production ? "Let's Encrypt · production" : "Let's Encrypt · staging (browser-untrusted) — change in Settings → Default TLS"}
         footer={
           <>
             <span className="mono small muted" style={{ marginRight: 'auto' }}>
-              {rate.data ? `LE limit: ${rate.data.limit} certs / domain / week · ${rate.data.used} used` : primary ? 'LE limit: 50 certs / domain / week' : ''}
+              {custom ? '' : rate.data ? `LE limit: ${rate.data.limit} certs / domain / week · ${rate.data.used} used` : primary ? 'LE limit: 50 certs / domain / week' : ''}
             </span>
             <Button onClick={onClose}>Cancel</Button>
             <Button
@@ -164,16 +168,18 @@ export default function RequestCertificateDialog(props: {
               onSelect={() => setChallenge('http-01')}
               disabled={!!wildcard}
               title="HTTP-01"
-              description={wildcard ? 'Unavailable — wildcard domains need DNS-01' : 'Let’s Encrypt fetches a token from port 80 · the domain must point at this machine'}
+              description={wildcard ? 'Unavailable — wildcard domains need DNS-01' : `${caName.charAt(0).toUpperCase()}${caName.slice(1)} fetches a token from port 80 · the domain must point at this machine`}
             />
           </div>
         </Field>
-        <Checkbox
-          checked={staging && production}
-          disabled={!production}
-          onChange={setStaging}
-          label="Use staging first (no rate limits, browser-untrusted)"
-        />
+        {!custom && (
+          <Checkbox
+            checked={staging && production}
+            disabled={!production}
+            onChange={setStaging}
+            label="Use staging first (no rate limits, browser-untrusted)"
+          />
+        )}
         {!canWrite && <Callout tone="info">Viewers can't request certificates.</Callout>}
         {busy && <div className="row small muted"><Spinner /> Creating order…</div>}
       </Dialog>

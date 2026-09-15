@@ -74,8 +74,19 @@ func TestBackupRoundTrip(t *testing.T) {
 	os.WriteFile(filepath.Join(certDir, "fullchain.pem"), []byte("CHAIN"), 0o644)
 	os.WriteFile(filepath.Join(certDir, "privkey.pem"), []byte("KEY"), 0o600)
 
+	if err := st.InsertVersion(ctx, &store.VersionRow{ID: 1, CreatedAt: time.Now(), Actor: "jonas", Status: "live", Snapshot: "{}", NginxFiles: "{}"}); err != nil {
+		t.Fatal(err)
+	}
+
 	row, err := s.Create(ctx, TriggerManual, "")
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Applied after the backup: the engines now run v2.
+	if err := st.InsertVersion(ctx, &store.VersionRow{ID: 2, CreatedAt: time.Now(), Actor: "jonas", Status: "draft", Snapshot: "{}", NginxFiles: "{}"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PromoteVersion(ctx, 2); err != nil {
 		t.Fatal(err)
 	}
 	if row.Status != "ok" || row.Size == 0 || row.Contents["hosts"] != 1 || row.Contents["users"] != 1 {
@@ -124,6 +135,11 @@ func TestBackupRoundTrip(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(certDir, "fullchain.pem")); string(b) != "CHAIN" {
 		t.Fatalf("cert = %s", b)
+	}
+	// The local version history is kept: v2 is what the engines run, so the
+	// restored configuration must show up as pending against it.
+	if live, err := st.LiveVersion(ctx, false); err != nil || live.ID != 2 {
+		t.Fatalf("live version after restore = %+v, %v (want 2)", live, err)
 	}
 	var n int
 	st.DB.QueryRow(`SELECT COUNT(*) FROM sessions WHERE id IN ('s-old', 's-now')`).Scan(&n)

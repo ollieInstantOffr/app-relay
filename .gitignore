@@ -8,3 +8,4 @@ internal/webui/dist/*
 *.log
 .env
 .claude/worktrees/
+graphify-out/

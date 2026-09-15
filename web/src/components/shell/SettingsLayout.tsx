@@ -7,6 +7,7 @@ import UsersSettings from '../../features/settings/UsersSettings'
 import DockerSettings from '../../features/settings/DockerSettings'
 import TLSSettings from '../../features/settings/TLSSettings'
 import HAProxySettings from '../../features/settings/HAProxySettings'
+import EnginesSettings from '../../features/settings/EnginesSettings'
 import MCPSettings from '../../features/settings/MCPSettings'
 import NotificationsSettings from '../../features/settings/NotificationsSettings'
 import BackupSettings from '../../features/settings/BackupSettings'
@@ -18,6 +19,7 @@ export const SETTINGS_SECTIONS: { id: string; label: string; icon: IconName; com
   { id: 'docker', label: 'Docker discovery', icon: 'docker', component: DockerSettings },
   { id: 'tls', label: 'Default TLS', icon: 'certificates', component: TLSSettings },
   { id: 'haproxy', label: 'HAProxy engine', icon: 'load-balancer', component: HAProxySettings },
+  { id: 'engines', label: 'Engines & updates', icon: 'reload', component: EnginesSettings },
   { id: 'mcp', label: 'MCP server', icon: 'mcp', component: MCPSettings },
   { id: 'notifications', label: 'Notifications', icon: 'bolt', component: NotificationsSettings },
   { id: 'backup', label: 'Backup & restore', icon: 'download', component: BackupSettings },

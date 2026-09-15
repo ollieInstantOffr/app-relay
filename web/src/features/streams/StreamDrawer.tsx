@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { useContainers, useEntities, useRole, useSaveEntity } from '../../lib/queries'
+import { useDockerStatus } from '../docker/ops'
 import type { ConfigPreview, Stream } from '../../lib/types'
 import {
   Button, Callout, CodeBlock, Field, Input, Segmented, Select, Spinner, Status, ToggleCard, useToast, Drawer,
@@ -38,6 +39,7 @@ export default function StreamDrawer({ open, onClose, stream, ports }: {
   const save = useSaveEntity('streams')
   const backends = useEntities('backends').data ?? []
   const containers = useContainers(open).data ?? []
+  const dockerStatus = useDockerStatus(open)
   const [draft, setDraft] = useState<Stream>(blank())
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [customAddr, setCustomAddr] = useState(false)
@@ -92,15 +94,26 @@ export default function StreamDrawer({ open, onClose, stream, ports }: {
   const [lo] = draft.listenPorts.split('-').map((p) => parseInt(p, 10))
   const suggestions = useMemo(() => {
     const out: { label: string; host: string; port: number }[] = []
+    const multiHost = new Set(containers.map((c) => c.endpointId)).size > 1
+    // Address of each Docker host for published ports ("" = local: container IPs are routable).
+    const remote = new Map((dockerStatus.data?.endpoints ?? []).map((e) => [e.id, e.upstreamAddress]))
     for (const c of containers) {
       if (c.state !== 'running') continue
+      const hostAddr = remote.get(c.endpointId) ?? ''
       for (const p of c.ports) {
         const protoOK = draft.protocol === 'both' || p.proto === draft.protocol
-        if (protoOK && lo && (p.private === lo || p.public === lo)) out.push({ label: `${c.name}:${p.private}/${p.proto}`, host: c.ip || c.name, port: p.private })
+        if (!protoOK || !lo || (p.private !== lo && p.public !== lo)) continue
+        // local: container IP + container port (or loopback for host networking);
+        // remote: host address + published port (host networking: container port).
+        const target = !hostAddr
+          ? { host: c.ip || '127.0.0.1', port: p.private }
+          : p.public ? { host: hostAddr, port: p.public } : !c.ip ? { host: hostAddr, port: p.private } : null
+        if (!target) continue
+        out.push({ label: `${multiHost && c.endpointName ? `${c.endpointName} · ` : ''}${c.name}:${target.port}/${p.proto}`, ...target })
       }
     }
     return out.slice(0, 3)
-  }, [containers, draft.protocol, lo])
+  }, [containers, dockerStatus.data, draft.protocol, lo])
 
   const submit = async () => {
     setErrors({})
@@ -184,7 +197,7 @@ export default function StreamDrawer({ open, onClose, stream, ports }: {
           <Field label="Forward to" error={errors.forwardHost} className="grow">
             <Input mono value={draft.backendId ? '' : draft.forwardHost} disabled={!!draft.backendId} invalid={!!errors.forwardHost} placeholder={draft.backendId ? 'via load balancer' : '10.0.0.61'} onChange={(e) => set({ forwardHost: e.target.value.trim() })} list="stream-container-hosts" />
             <datalist id="stream-container-hosts">
-              {containers.filter((c) => c.ip).map((c) => <option key={c.id} value={c.ip}>{c.name}</option>)}
+              {containers.filter((c) => c.state === 'running' && c.upstreamHost).map((c) => <option key={`${c.endpointId}/${c.id}`} value={c.upstreamHost}>{c.endpointName ? `${c.endpointName} · ${c.name}` : c.name}</option>)}
             </datalist>
           </Field>
           <Field label="Port" error={errors.forwardPorts} hint="same = listen port">

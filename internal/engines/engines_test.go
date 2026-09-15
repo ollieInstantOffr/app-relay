@@ -14,6 +14,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/go-connections/nat"
 
 	"github.com/instantoffr/relay/internal/core"
 )
@@ -138,25 +139,56 @@ func TestCloneSpec(t *testing.T) {
 		ContainerJSONBase: &container.ContainerJSONBase{Name: "/relay-nginx", HostConfig: &container.HostConfig{NetworkMode: "host", RestartPolicy: container.RestartPolicy{Name: "unless-stopped"}}},
 		Config: &container.Config{
 			Image: "nginx:1.28.0-alpine", Hostname: "orbstack",
-			Env:        []string{"PATH=/usr/sbin", "NGINX_VERSION=1.28.0", "TZ=UTC"},
-			Labels:     map[string]string{"maintainer": "NGINX Docker Maintainers", "relay.engine": "nginx", "com.docker.compose.project": "relay"},
-			Entrypoint: []string{"sh", "-c", "exec /opt/relay/bin/relay agent --engine nginx"},
-			StopSignal: "SIGTERM",
+			Env:          []string{"PATH=/usr/sbin", "NGINX_VERSION=1.28.0", "TZ=UTC"},
+			Labels:       map[string]string{"maintainer": "NGINX Docker Maintainers", "relay.engine": "nginx", "com.docker.compose.project": "relay"},
+			Entrypoint:   []string{"sh", "-c", "exec /opt/relay/bin/relay agent --engine nginx"},
+			Cmd:          []string{"nginx", "-g", "daemon off;"},
+			StopSignal:   "SIGTERM",
+			ExposedPorts: map[nat.Port]struct{}{"80/tcp": {}},
 		},
 		NetworkSettings: &container.NetworkSettings{Networks: map[string]*network.EndpointSettings{"host": {}}},
 	}
-	cfg, hc, nc := cloneSpec(old, []string{"PATH=/usr/sbin", "NGINX_VERSION=1.28.0"}, map[string]string{"maintainer": "NGINX Docker Maintainers"}, "SIGQUIT", "nginx:1.30.4-alpine")
+	img := imageDefaults{
+		Env: []string{"PATH=/usr/sbin", "NGINX_VERSION=1.28.0"}, Labels: map[string]string{"maintainer": "NGINX Docker Maintainers"},
+		StopSignal: "SIGQUIT", Cmd: []string{"nginx", "-g", "daemon off;"}, Entrypoint: []string{"/docker-entrypoint.sh"},
+		ExposedPorts: map[string]struct{}{"80/tcp": {}},
+	}
+	cfg, hc, nc := cloneSpec(old, img, "nginx:1.30.4-alpine")
 	if cfg.Image != "nginx:1.30.4-alpine" || strings.Join(cfg.Env, ",") != "TZ=UTC" || cfg.Hostname != "" || cfg.StopSignal != "SIGTERM" {
 		t.Fatalf("cfg = %+v", cfg)
+	}
+	if cfg.Cmd != nil || len(cfg.Entrypoint) != 3 || cfg.ExposedPorts != nil {
+		t.Fatalf("image defaults copied: cmd=%v entrypoint=%v ports=%v", cfg.Cmd, cfg.Entrypoint, cfg.ExposedPorts)
 	}
 	if _, ok := cfg.Labels["maintainer"]; ok || cfg.Labels["relay.engine"] != "nginx" || cfg.Labels["com.docker.compose.project"] != "relay" {
 		t.Fatalf("labels = %v", cfg.Labels)
 	}
-	if hc.RestartPolicy.Name != "unless-stopped" || nc != nil || len(cfg.Entrypoint) != 3 {
+	if hc.RestartPolicy.Name != "unless-stopped" || nc != nil {
 		t.Fatalf("hc = %+v nc = %+v", hc, nc)
 	}
-	if old.Config.Image != "nginx:1.28.0-alpine" || len(old.Config.Env) != 3 {
+	if old.Config.Image != "nginx:1.28.0-alpine" || len(old.Config.Env) != 3 || len(old.Config.ExposedPorts) != 1 {
 		t.Fatal("cloneSpec mutated the original")
+	}
+
+	// compose network_mode: service:netns → container:<id>
+	old.HostConfig = &container.HostConfig{NetworkMode: container.NetworkMode("container:" + strings.Repeat("c", 64)), DNS: []string{"1.1.1.1"}, ExtraHosts: []string{"a:1.2.3.4"}}
+	old.Config.Hostname = "abc"
+	old.Config.ExposedPorts = map[nat.Port]struct{}{"80/tcp": {}, "9000/tcp": {}}
+	old.NetworkSettings = &container.NetworkSettings{Networks: map[string]*network.EndpointSettings{}}
+	cfg, hc, nc = cloneSpec(old, img, "nginx:1.30.4-alpine")
+	if cfg.Hostname != "" || cfg.ExposedPorts != nil || hc.DNS != nil || hc.ExtraHosts != nil || nc != nil || !hc.NetworkMode.IsContainer() {
+		t.Fatalf("container mode: cfg=%+v hc=%+v nc=%+v", cfg, hc, nc)
+	}
+
+	// user-defined bridge network: endpoints + aliases carried over, generated hostname dropped.
+	id := strings.Repeat("d", 64)
+	old.ID = id
+	old.HostConfig = &container.HostConfig{NetworkMode: "relay_default"}
+	old.Config.Hostname = id[:12]
+	old.NetworkSettings = &container.NetworkSettings{Networks: map[string]*network.EndpointSettings{"relay_default": {Aliases: []string{"nginx"}}}}
+	cfg, _, nc = cloneSpec(old, img, "nginx:1.30.4-alpine")
+	if cfg.Hostname != "" || nc == nil || strings.Join(nc.EndpointsConfig["relay_default"].Aliases, ",") != "nginx" || len(cfg.ExposedPorts) != 1 {
+		t.Fatalf("bridge: cfg=%+v nc=%+v", cfg, nc)
 	}
 }
 
@@ -197,5 +229,15 @@ func TestInstallFile(t *testing.T) {
 	st, err := os.Stat(dst)
 	if err != nil || st.Mode().Perm() != 0o755 || !same(src, dst) {
 		t.Fatalf("install: %v %v", st, err)
+	}
+}
+
+func TestValidSummary(t *testing.T) {
+	out := "[NOTICE]   (1) : haproxy version is 3.4.4\n[WARNING]  (1) : config : The 'master-worker' keyword is deprecated\nWarnings were found."
+	if got := validSummary("haproxy", out); got != "haproxy -c passed · 1 warning" {
+		t.Fatalf("got %q", got)
+	}
+	if got := validSummary("nginx", "nginx: configuration file nginx.conf test is successful"); got != "nginx -t passed" {
+		t.Fatalf("got %q", got)
 	}
 }

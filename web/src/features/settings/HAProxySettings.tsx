@@ -5,6 +5,8 @@ import { Button, Card, ConfirmDialog, Dot, Field, Input, Select, SectionHeader, 
 import { api } from '../../lib/api'
 import { keys, useEngine, useEntities, useRole, useSaveSettings, useSettings } from '../../lib/queries'
 import { ago } from '../../lib/format'
+import { Link } from 'react-router-dom'
+import { useEngineUpdates } from './enginesApi'
 import type { HAProxySettings as Settings } from '../../lib/types'
 import ConfigDrawer from '../loadbalancer/ConfigDrawer'
 import { applyNowAction, fieldErrors, useHAProxyConfig, type ValidationResult } from '../loadbalancer/lbApi'
@@ -19,6 +21,7 @@ export default function HAProxySettings() {
   const { data, isLoading } = useSettings('haproxy')
   const save = useSaveSettings('haproxy')
   const engine = useEngine('haproxy')
+  const haproxyUpdate = useEngineUpdates().data?.haproxy
   const lists = useEntities('access-lists').data ?? []
   const cfg = useHAProxyConfig(true).data
   const { isAdmin, canWrite } = useRole()
@@ -148,7 +151,14 @@ export default function HAProxySettings() {
       <div className="grid-3">
         <div className="lb-mini">
           <div className="k">Version</div>
-          <div className="v">{engine?.version ? `${engine.version}${isLTS(engine.version) ? ' · LTS' : ''}` : '—'}</div>
+          <div className="v">
+            {engine?.version ? `${engine.version}${isLTS(engine.version) ? ' · LTS' : ''}` : '—'}
+            {haproxyUpdate?.updateAvailable && haproxyUpdate.latest && (
+              <Link to="/settings/engines" className="badge info" style={{ fontFamily: 'var(--font-sans)' }} title="Upgrade from Settings → Engines & updates">
+                {haproxyUpdate.latest.version} available
+              </Link>
+            )}
+          </div>
         </div>
         <div className="lb-mini">
           <div className="k">Last reload</div>

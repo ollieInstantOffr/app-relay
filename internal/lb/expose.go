@@ -381,7 +381,7 @@ func (h *handlers) exposePreview(w http.ResponseWriter, r *http.Request) {
 		host.CertificateID = "pending-" + host.ID
 		next.Certificates = append(next.Certificates, model.Certificate{
 			Meta: model.Meta{ID: host.CertificateID}, Name: host.Domains[0], Domains: host.Domains,
-			Provider: model.CertLetsEncrypt, Challenge: p.certReq.Challenge, Status: model.CertStatusPending, History: []model.CertEvent{},
+			Provider: certProviderFor(p.snap.TLS), Challenge: p.certReq.Challenge, Status: model.CertStatusPending, History: []model.CertEvent{},
 		})
 	}
 	next.Hosts = append(append([]model.ProxyHost{}, p.snap.Hosts...), host)
@@ -587,4 +587,16 @@ func (h *handlers) fromHost(w http.ResponseWriter, r *http.Request) {
 	h.app.Changed(ctx, model.KindFrontend, fe.ID, fe.Name, core.ActionCreated)
 	h.app.Changed(ctx, model.KindHost, next.ID, domain, core.ActionUpdated)
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"backend": backend, "frontend": fe, "host": next})
+}
+
+// certProviderFor mirrors the certs slice: the provider a newly requested
+// certificate gets under the current TLS settings.
+func certProviderFor(t model.TLSSettings) string {
+	switch t.ACMEProvider {
+	case model.CertLetsEncryptStaging:
+		return model.CertLetsEncryptStaging
+	case model.ACMEProviderCustom:
+		return model.CertACME
+	}
+	return model.CertLetsEncrypt
 }

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -138,12 +139,15 @@ func domainList(s string) []string {
 // ---------------------------------------------------------------- plan
 
 type Base struct {
-	NPMID      int      `json:"npmId"`
-	Name       string   `json:"name"`
-	Detail     string   `json:"detail"`
-	Conflict   string   `json:"conflict,omitempty"`
-	ExistingID string   `json:"-"` // entity to overwrite when the conflict is resolvable
-	Warnings   []string `json:"warnings"`
+	NPMID      int    `json:"npmId"`
+	Name       string `json:"name"`
+	Detail     string `json:"detail"`
+	Conflict   string `json:"conflict,omitempty"`
+	ExistingID string `json:"-"` // entity to overwrite when the conflict is resolvable
+	// Overwritable is set on conflicting items that "overwrite" replaces
+	// (the others are skipped either way).
+	Overwritable bool     `json:"overwritable,omitempty"`
+	Warnings     []string `json:"warnings"`
 }
 
 func (b *Base) warn(format string, args ...any) {
@@ -290,8 +294,19 @@ func BuildPlan(ctx context.Context, db *sql.DB, dataDir string, ex *existing) (*
 	if err != nil {
 		return nil, err
 	}
+	usedNames := map[string]bool{}
 	for _, r := range lists {
 		it := convertAccessList(r, clients, auths)
+		// Sanitised names can collide within one import (Relay requires
+		// unique names); existing Relay lists are handled as conflicts.
+		if base := it.Name; usedNames[strings.ToLower(base)] {
+			for n := 2; usedNames[strings.ToLower(it.Name)]; n++ {
+				it.Name = fmt.Sprintf("%s-%d", base, n)
+			}
+			it.List.Name = it.Name
+			it.warn("renamed to %s because another NPM access list has the same name", it.Name)
+		}
+		usedNames[strings.ToLower(it.Name)] = true
 		for _, l := range ex.accessLists {
 			if strings.EqualFold(l.Name, it.List.Name) {
 				it.Conflict = "an access list named " + l.Name + " already exists"
@@ -323,7 +338,8 @@ func BuildPlan(ctx context.Context, db *sql.DB, dataDir string, ex *existing) (*
 		}
 		sortedWant := sortedCopy(it.Cert.Domains)
 		for _, c := range ex.certs {
-			if strings.Join(sortedCopy(lower(c.Domains)), ",") == strings.Join(sortedWant, ",") {
+			sameFile := it.Cert.Fingerprint != "" && strings.EqualFold(c.Fingerprint, it.Cert.Fingerprint)
+			if sameFile || strings.Join(sortedCopy(lower(c.Domains)), ",") == strings.Join(sortedWant, ",") {
 				it.Conflict = "a certificate for " + strings.Join(c.Domains, ", ") + " already exists"
 				it.ExistingID = c.ID
 			}
@@ -374,8 +390,14 @@ func BuildPlan(ctx context.Context, db *sql.DB, dataDir string, ex *existing) (*
 			p.Warnings = append(p.Warnings, fmt.Sprintf("%d 404 hosts are not imported (use Settings → Default host instead)", len(dead)))
 		}
 	}
-	if dataDir == "" && len(p.Certs) > 0 {
-		p.Warnings = append(p.Warnings, "Only the database was uploaded, so certificate files are not available: certificates are created as pending and must be requested again. Point Relay at the NPM data folder to import the files.")
+	missing := 0
+	for _, c := range p.Certs {
+		if c.Chain == nil {
+			missing++
+		}
+	}
+	if dataDir == "" && missing > 0 {
+		p.Warnings = append(p.Warnings, fmt.Sprintf("Only the database was uploaded, so %d certificate files are not available: Let's Encrypt certificates are created as pending and must be requested again. Point Relay at the NPM data folder to import the files.", missing))
 	}
 	return p, nil
 }
@@ -402,9 +424,9 @@ func protocolsOverlap(a, b string) bool {
 
 func convertAccessList(r row, clients, auths []row) *AccessItem {
 	id := r.num("id")
-	it := &AccessItem{Base: Base{NPMID: id, Name: r.str("name"), Warnings: []string{}}}
-	if it.Name == "" {
-		it.Name = fmt.Sprintf("npm-access-%d", id)
+	it := &AccessItem{Base: Base{NPMID: id, Name: accessListName(r.str("name"), id), Warnings: []string{}}}
+	if orig := strings.TrimSpace(r.str("name")); orig != "" && orig != it.Name {
+		it.warn("renamed from %q: Relay allows letters, digits, space, dot, dash and underscore", orig)
 	}
 	l := model.AccessList{
 		Name:        it.Name,
@@ -435,13 +457,21 @@ func convertAccessList(r row, clients, auths []row) *AccessItem {
 		// NPM ends every client list with "deny all".
 		l.Rules = append(l.Rules, model.IPRule{ID: store.NewID(), Action: "deny", CIDR: "all", Note: "NPM default"})
 	}
+	hadUsers := false
 	for _, a := range auths {
 		if a.num("access_list_id") != id {
 			continue
 		}
 		user := strings.TrimSpace(a.str("username"))
+		// NPM stores basic-auth passwords in plain text (it only hashes them
+		// into its htpasswd files); they are bcrypt-hashed on commit.
 		pass := a.str("password")
 		if user == "" {
+			continue
+		}
+		hadUsers = true
+		if !basicAuthUserRe.MatchString(user) {
+			it.warn("user %q has characters Relay does not allow in user names and was skipped", user)
 			continue
 		}
 		if pass == "" {
@@ -456,13 +486,60 @@ func convertAccessList(r row, clients, auths []row) *AccessItem {
 		}
 		l.BasicAuth.Users = append(l.BasicAuth.Users, u)
 	}
-	l.BasicAuth.Enabled = len(l.BasicAuth.Users) > 0
-	if r.flag("pass_auth") {
-		it.warn("\"Pass Auth to upstream\" is not supported and was dropped")
+	// A list whose users were all skipped keeps basic auth on, so it fails
+	// validation on commit (and its hosts are skipped) instead of silently
+	// becoming an IP-only or empty list.
+	l.BasicAuth.Enabled = len(l.BasicAuth.Users) > 0 || hadUsers
+	// NPM renders "satisfy any|all" unconditionally; it only has an effect
+	// with both IP rules and users, and Relay requires basic auth for it.
+	l.SatisfyAny = l.SatisfyAny && l.BasicAuth.Enabled
+	// NPM strips the Authorization header unless "Pass Auth to upstream" is
+	// on; Relay (like plain nginx) always passes it on.
+	if len(l.BasicAuth.Users) > 0 && r.has("pass_auth") && !r.flag("pass_auth") {
+		it.warn("NPM removed the Authorization header before proxying (Pass Auth off); Relay passes it to the upstream")
 	}
 	it.List = l
 	it.Detail = fmt.Sprintf("%d rules · %d users", len(l.Rules), len(l.BasicAuth.Users))
 	return it
+}
+
+var (
+	accessListNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$`)
+	accessListBadRe  = regexp.MustCompile(`[^A-Za-z0-9 ._-]+`)
+	basicAuthUserRe  = regexp.MustCompile(`^[A-Za-z0-9._@+-]{1,64}$`)
+	// NPM skips its default "/" location when the advanced config has one.
+	defaultLocationRe = regexp.MustCompile(`(?m)^(?:.*;)?\s*location\s*/\s*\{`)
+)
+
+// accessListName converts an NPM access list name to one Relay accepts.
+func accessListName(name string, id int) string {
+	name = strings.TrimSpace(name)
+	if accessListNameRe.MatchString(name) {
+		return name
+	}
+	clean := strings.Join(strings.Fields(accessListBadRe.ReplaceAllString(name, " ")), " ")
+	clean = strings.TrimLeft(clean, " ._-")
+	if len(clean) > 64 {
+		clean = strings.TrimRight(clean[:64], " ")
+	}
+	if !accessListNameRe.MatchString(clean) {
+		return fmt.Sprintf("npm-access-%d", id)
+	}
+	return clean
+}
+
+// npmOffline returns NPM's own nginx error for an entity it could not load.
+func npmOffline(meta map[string]any) string {
+	if online, ok := meta["nginx_online"].(bool); !ok || online {
+		return ""
+	}
+	msg, _ := meta["nginx_err"].(string)
+	msg, _, _ = strings.Cut(strings.TrimSpace(msg), "\n")
+	msg = strings.TrimPrefix(msg, "nginx: ")
+	if msg == "" {
+		msg = "unknown error"
+	}
+	return "NPM reported this entry as offline (" + msg + "); check the target before applying"
 }
 
 func metaMap(r row) map[string]any {
@@ -518,27 +595,49 @@ func convertCert(r row, dataDir string, now time.Time) *CertItem {
 			break
 		}
 	}
+	if it.Chain == nil && c.Provider == model.CertCustom {
+		// NPM also keeps uploaded custom certificates in the database, so
+		// they survive an upload of just database.sqlite.
+		crt, _ := meta["certificate"].(string)
+		key, _ := meta["certificate_key"].(string)
+		if strings.Contains(crt, "BEGIN CERTIFICATE") && strings.Contains(key, "PRIVATE KEY") {
+			chain := strings.TrimRight(crt, "\r\n") + "\n"
+			if inter, _ := meta["intermediate_certificate"].(string); strings.Contains(inter, "BEGIN CERTIFICATE") {
+				chain += strings.TrimRight(inter, "\r\n") + "\n"
+			}
+			it.Chain, it.Key = []byte(chain), []byte(strings.TrimRight(key, "\r\n")+"\n")
+		}
+	}
+	parseFailed := false
 	if it.Chain != nil {
 		if err := fillCertInfo(&c, it.Chain, now); err != nil {
 			it.warn("certificate file could not be parsed: %v", err)
 			it.Chain, it.Key = nil, nil
+			parseFailed = true
 		}
 	}
 	if it.Chain == nil {
+		if parseFailed {
+			it.Warnings = append(it.Warnings, "created without files: request or upload it again after import")
+		}
 		c.Status = model.CertStatusPending
 		if c.Provider == model.CertLetsEncrypt {
 			c.LastError = "Imported from Nginx Proxy Manager without certificate files — request it again"
-			it.warn("certificate files not found: created as pending, request it again after import")
+			if !parseFailed {
+				it.warn("certificate files not found: created as pending, request it again after import")
+			}
 		} else {
 			c.Status = model.CertStatusFailed
 			c.LastError = "Imported from Nginx Proxy Manager without certificate files — upload the certificate again"
-			it.warn("custom certificate files not found: upload them again after import")
+			if !parseFailed {
+				it.warn("custom certificate files not found: upload them again after import")
+			}
 		}
 	}
 	c.History = append(c.History, model.CertEvent{At: now, Message: "Imported from Nginx Proxy Manager", Result: "ok"})
 	it.Cert = c
-	it.Detail = strings.Join(domains, ", ")
-	if len(domains) == 0 {
+	it.Detail = strings.Join(c.Domains, ", ")
+	if len(c.Domains) == 0 {
 		it.warn("certificate has no domains")
 	}
 	return it
@@ -598,8 +697,10 @@ func fillCertInfo(c *model.Certificate, chain []byte, now time.Time) error {
 	for _, x := range certs {
 		c.Chain = append(c.Chain, x.Subject.CommonName)
 	}
-	if len(c.Domains) == 0 {
-		c.Domains = leaf.DNSNames
+	// NPM derives a custom certificate's domain_names from the subject CN
+	// only; the SANs are what the certificate really covers.
+	if (len(c.Domains) == 0 || c.Provider == model.CertCustom) && len(leaf.DNSNames) > 0 {
+		c.Domains = lower(leaf.DNSNames)
 	}
 	c.Status = model.CertStatusValid
 	if now.After(na) {
@@ -666,14 +767,24 @@ func convertHost(r row) *HostItem {
 		Source:        model.SourceImport,
 		SourceRef:     fmt.Sprintf("npm:proxy_host:%d", r.num("id")),
 	}
-	if r.flag("hsts_enabled") {
+	// NPM only sends HSTS on hosts with a certificate and Force SSL.
+	if r.flag("hsts_enabled") && r.flag("ssl_forced") {
 		h.HSTS = "on"
 		if r.flag("hsts_subdomains") {
 			it.warn("HSTS includeSubDomains is controlled globally in Relay (Settings → Default TLS)")
 		}
 	}
+	if r.flag("trust_forwarded_proto") {
+		it.warn("\"Trust upstream forwarded proto headers\" is not supported: Relay sends its own X-Forwarded-Proto")
+	}
 	if h.CustomNginx != "" {
 		it.warn("custom nginx configuration was copied as-is — review it before applying")
+		if defaultLocationRe.MatchString(h.CustomNginx) {
+			it.warn("the custom nginx configuration defines location /, which clashes with Relay's own / location: move it into Locations before applying")
+		}
+	}
+	if msg := npmOffline(metaMap(r)); msg != "" {
+		it.warn("%s", msg)
 	}
 	var locs []npmLocation
 	if s := r.str("locations"); s != "" && s != "null" {
@@ -683,15 +794,30 @@ func convertHost(r row) *HostItem {
 	}
 	for _, l := range locs {
 		lh, lp := splitHostPath(l.ForwardHost)
-		loc := model.Location{
-			ID: store.NewID(), Path: l.Path, Kind: model.LocationProxy,
-			Upstream:   model.Upstream{Scheme: scheme(l.ForwardScheme), Host: lh, Port: anyInt(l.ForwardPort), Path: lp},
-			Websockets: h.Websockets, Headers: []model.Header{},
+		up := model.Upstream{Scheme: scheme(l.ForwardScheme), Host: lh, Port: anyInt(l.ForwardPort), Path: lp}
+		path := strings.TrimSpace(l.Path)
+		switch {
+		case path == "":
+			continue
+		case path == "/":
+			// NPM drops its default location when a custom "/" exists.
+			h.Upstream = up
+			it.warn("custom location / became the host's forward target")
+		case !strings.HasPrefix(path, "/") || strings.ContainsAny(path, " \t\r\n\"'{};\\"):
+			it.warn("location %s uses an nginx modifier or characters Relay does not support and was skipped", path)
+			continue
+		default:
+			h.Locations = append(h.Locations, model.Location{
+				ID: store.NewID(), Path: path, Kind: model.LocationProxy, Upstream: up,
+				// NPM renders "proxy_pass scheme://host:port/path", which
+				// replaces the location prefix with the path.
+				StripPrefix: lp != "",
+				Websockets:  h.Websockets, Headers: []model.Header{},
+			})
 		}
 		if strings.TrimSpace(l.AdvancedConfig) != "" {
-			it.warn("location %s has custom nginx configuration that was not imported", l.Path)
+			it.warn("location %s has custom nginx configuration that was not imported", path)
 		}
-		h.Locations = append(h.Locations, loc)
 	}
 	it.Host = h
 	it.Detail = fmt.Sprintf("%s://%s:%d%s", h.Upstream.Scheme, h.Upstream.Host, h.Upstream.Port, h.Upstream.Path)
@@ -736,6 +862,12 @@ func convertRedirect(r row) *RedirectItem {
 	if strings.TrimSpace(r.str("advanced_config")) != "" {
 		it.warn("custom nginx configuration was not imported")
 	}
+	if r.flag("hsts_enabled") && r.flag("ssl_forced") {
+		it.warn("HSTS on redirects is controlled globally in Relay (Settings → Default TLS)")
+	}
+	if msg := npmOffline(metaMap(r)); msg != "" {
+		it.warn("%s", msg)
+	}
 	it.Detail = fmt.Sprintf("%d → %s", code, to)
 	return it
 }
@@ -765,6 +897,9 @@ func convertStream(r row) *StreamItem {
 	}
 	if r.num("certificate_id") > 0 {
 		it.warn("TLS termination for streams is not supported; imported as plain %s", proto)
+	}
+	if msg := npmOffline(metaMap(r)); msg != "" {
+		it.warn("%s", msg)
 	}
 	it.Name = name
 	it.Detail = fmt.Sprintf("%s :%d → %s:%d", proto, in, it.Stream.ForwardHost, fwdPort)

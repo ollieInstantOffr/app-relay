@@ -1,9 +1,11 @@
 # syntax=docker/dockerfile:1.7
 #
-# Relay images (one Dockerfile, three targets):
-#   docker build --target relay   -t relay .          API, UI, MCP
-#   docker build --target nginx   -t relay-nginx .    nginx + relay agent (PID 1)
-#   docker build --target haproxy -t relay-haproxy .  haproxy + relay agent (PID 1)
+# Relay image:
+#   docker build --target relay -t relay .     API, UI, MCP (+ agent binary)
+#
+# nginx and HAProxy run the official images (docker-compose.yml). On start the
+# relay container copies its static binary to the relay-bin volume
+# (/opt/relay/bin/relay) and the engine containers run it as `relay agent`.
 
 # ---------------------------------------------------------------- web UI
 FROM node:22-alpine AS web
@@ -28,45 +30,16 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 
 # ---------------------------------------------------------------- relay (app)
 FROM alpine:3.22 AS relay
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata && mkdir -p /opt/relay/bin
 COPY --from=build /out/relay /usr/local/bin/relay
 ENV RELAY_DATA_DIR=/data \
     RELAY_RUN_DIR=/run/relay \
     RELAY_LOG_DIR=/var/log/relay \
-    RELAY_LISTEN=:8181
+    RELAY_LISTEN=:8181 \
+    RELAY_AGENT_BIN_DIR=/opt/relay/bin
 VOLUME ["/data"]
 EXPOSE 8181
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD wget -q -O /dev/null "http://127.0.0.1:${RELAY_LISTEN##*:}/healthz" || exit 1
 ENTRYPOINT ["relay"]
 CMD ["serve"]
-
-# ---------------------------------------------------------------- nginx engine
-FROM alpine:3.22 AS nginx
-# Alpine's nginx is built with http_v3, http_v2, auth_request and stub_status;
-# stream and geoip2 ship as dynamic modules loaded from /etc/nginx/modules.
-RUN apk add --no-cache nginx nginx-mod-stream nginx-mod-http-geoip2 ca-certificates tzdata \
- && rm -f /etc/nginx/http.d/default.conf \
- && mkdir -p /etc/relay/nginx /run/nginx /var/cache/nginx /var/log/relay
-COPY --from=build /out/relay /usr/local/bin/relay
-ENV RELAY_DATA_DIR=/data \
-    RELAY_RUN_DIR=/run/relay \
-    RELAY_LOG_DIR=/var/log/relay
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD test -S /run/relay/nginx.sock || exit 1
-ENTRYPOINT ["relay", "agent", "--engine", "nginx"]
-
-# ---------------------------------------------------------------- haproxy engine
-FROM haproxy:3.0-alpine AS haproxy
-# The agent binds the runtime/master sockets in /run/relay and must be able to
-# bind privileged frontend ports, so it runs as root like the nginx master.
-USER root
-RUN mkdir -p /etc/relay/haproxy /run/relay
-COPY --from=build /out/relay /usr/local/bin/relay
-ENV RELAY_DATA_DIR=/data \
-    RELAY_RUN_DIR=/run/relay \
-    RELAY_LOG_DIR=/var/log/relay
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD test -S /run/relay/haproxy.sock || exit 1
-ENTRYPOINT ["relay", "agent", "--engine", "haproxy"]
-CMD []

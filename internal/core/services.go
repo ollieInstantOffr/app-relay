@@ -270,6 +270,12 @@ type Container struct {
 	EndpointID    string            `json:"endpointId"`          // Docker host the container runs on
 	EndpointName  string            `json:"endpointName"`
 	UpstreamHost  string            `json:"upstreamHost,omitempty"` // address to proxy to (with SuggestedPort); "" = not reachable
+	// CandidatePorts are likely app ports usable with UpstreamHost (container
+	// ports for container IPs / host networking, published ports otherwise), best first.
+	CandidatePorts []int `json:"candidatePorts"`
+	// LinkOnStart: stopped local container without an address yet; a host can be
+	// created disabled and is linked + enabled when the container starts.
+	LinkOnStart bool `json:"linkOnStart,omitempty"`
 }
 
 type Docker interface {

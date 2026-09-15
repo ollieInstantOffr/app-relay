@@ -101,7 +101,7 @@ func (h *haproxyEngine) reload() (string, error) {
 
 var haproxyVersionRe = regexp.MustCompile(`(?i)HA-?Proxy version (\S+)`)
 
-func (h *haproxyEngine) detect() (string, []string) {
+func (h *haproxyEngine) detect() (string, []string, map[string]string) {
 	out, _ := h.a.reaper.run(10*time.Second, "haproxy", "-v")
 	version := ""
 	if m := haproxyVersionRe.FindStringSubmatch(out); m != nil {
@@ -110,7 +110,7 @@ func (h *haproxyEngine) detect() (string, []string) {
 			version = version[:i]
 		}
 	}
-	return version, []string{}
+	return version, []string{}, nil
 }
 
 // unixCommand writes one command line to a unix socket and reads the reply.

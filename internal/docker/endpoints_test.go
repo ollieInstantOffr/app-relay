@@ -92,7 +92,7 @@ func TestResolveUpstream(t *testing.T) {
 			Bindings: []binding{{3000, 3001, "0.0.0.0"}}}, "172.18.0.9", 3000, true, ""},
 		{"local stopped published", upstreamInput{Local: true, Image: "nginx", Ports: []core.ContainerPort{cport(80, 8080)}, Bindings: []binding{{80, 8080, ""}}},
 			"127.0.0.1", 8080, true, "stopped · starts on 127.0.0.1:8080"},
-		{"local stopped none", upstreamInput{Local: true, Image: "nginx", Ports: []core.ContainerPort{cport(80, 0)}}, "", 80, true, "stopped — no published port"},
+		{"local stopped none", upstreamInput{Local: true, Image: "nginx", Ports: []core.ContainerPort{cport(80, 0)}}, "", 80, true, reasonLinkOnStart},
 		{"local stopped redis", upstreamInput{Local: true, Image: "redis", Ports: []core.ContainerPort{cport(6379, 0)}}, "", 6379, false, "stopped · not HTTP (6379)"},
 		{"local host network", upstreamInput{Local: true, Running: true, HostNetwork: true, Image: "jellyfin/jellyfin"}, "127.0.0.1", 8096, true, ""},
 		{"remote published", remote(upstreamInput{Running: true, IP: "172.20.0.5", Image: "grafana/grafana", Ports: []core.ContainerPort{cport(3000, 3001)},

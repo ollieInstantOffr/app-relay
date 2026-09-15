@@ -46,19 +46,22 @@ const (
 )
 
 type Status struct {
-	Engine       string     `json:"engine"`
-	Running      bool       `json:"running"`
-	PID          int        `json:"pid"`
-	Version      string     `json:"version"`
-	Modules      []string   `json:"modules"` // nginx: http_v3, stream, geoip2, auth_request …
-	StartedAt    *time.Time `json:"startedAt,omitempty"`
-	ExitedAt     *time.Time `json:"exitedAt,omitempty"`
-	ExitError    string     `json:"exitError,omitempty"`
-	LastReloadAt *time.Time `json:"lastReloadAt,omitempty"`
-	LastReloadMs int64      `json:"lastReloadMs"`
-	ConfigHash   string     `json:"configHash"` // hash of the active release
-	ConfigLines  int        `json:"configLines"`
-	Configured   bool       `json:"configured"` // a release has been applied
+	Engine  string   `json:"engine"`
+	Running bool     `json:"running"`
+	PID     int      `json:"pid"`
+	Version string   `json:"version"`
+	Modules []string `json:"modules"` // nginx: http_v3, stream, geoip2, auth_request …
+	// DynamicModules maps modules that must be loaded with load_module to
+	// their .so path (nginx; empty when everything is compiled in).
+	DynamicModules map[string]string `json:"dynamicModules,omitempty"`
+	StartedAt      *time.Time        `json:"startedAt,omitempty"`
+	ExitedAt       *time.Time        `json:"exitedAt,omitempty"`
+	ExitError      string            `json:"exitError,omitempty"`
+	LastReloadAt   *time.Time        `json:"lastReloadAt,omitempty"`
+	LastReloadMs   int64             `json:"lastReloadMs"`
+	ConfigHash     string            `json:"configHash"` // hash of the active release
+	ConfigLines    int               `json:"configLines"`
+	Configured     bool              `json:"configured"` // a release has been applied
 }
 
 type ValidateRequest struct {

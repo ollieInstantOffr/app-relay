@@ -358,7 +358,7 @@ export default function ExposeWizard({ backendId, onClose }: { backendId: string
                 <RadioCard
                   selected={mode === 'request'}
                   onSelect={() => setCert({ mode: 'request', challenge })}
-                  title={`Request new · Let's Encrypt${tls?.acmeProvider === 'letsencrypt-staging' ? ' (staging)' : ''}`}
+                  title={`Request new · ${tls?.acmeProvider === 'custom' ? 'ACME server' : `Let's Encrypt${tls?.acmeProvider === 'letsencrypt-staging' ? ' (staging)' : ''}`}`}
                   description={`${challenge.toUpperCase()} · auto-renews${challenge === 'http-01' ? ' · ready in ~30s' : ''}`}
                 >
                   {mode === 'request' && (

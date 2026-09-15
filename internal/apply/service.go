@@ -38,6 +38,7 @@ type Service struct {
 
 	mu           sync.Mutex
 	modules      map[string]bool
+	modulePaths  map[string]string
 	lastPending  int
 	liveID       int64
 	liveSnap     *model.Snapshot
@@ -50,7 +51,9 @@ type engineObs struct {
 }
 
 func New(app *core.App) *Service {
-	if addr := strings.TrimSpace(os.Getenv("RELAY_STUB_STATUS_ADDR")); addr != "" {
+	if port := strings.TrimSpace(os.Getenv(agent.StatusPortEnv)); port != "" {
+		nginx.StubStatusAddr = "127.0.0.1:" + port
+	} else if addr := strings.TrimSpace(os.Getenv("RELAY_STUB_STATUS_ADDR")); addr != "" {
 		nginx.StubStatusAddr = addr
 	}
 	log := app.Log
@@ -60,17 +63,24 @@ func New(app *core.App) *Service {
 	return &Service{app: app, log: log.With("svc", "engine"), lastPending: -1, observed: map[string]engineObs{}, healthWindow: 10 * time.Second}
 }
 
-const modulesKV = "engine.nginx.modules"
+const (
+	modulesKV     = "engine.nginx.modules"
+	modulePathsKV = "engine.nginx.modulePaths"
+)
 
 // defaultModules are assumed before the nginx agent was ever reached (they
-// match the relay-nginx image).
+// match the official nginx image, where all of them are compiled in).
 var defaultModules = map[string]bool{"stream": true, "http_v3": true, "http_v2": true, "auth_request": true, "stub_status": true}
 
 func (s *Service) Start(ctx context.Context) error {
 	if b, err := s.app.Store.GetKV(ctx, modulesKV); err == nil {
 		var mods []string
 		if json.Unmarshal(b, &mods) == nil && len(mods) > 0 {
-			s.setModules(ctx, mods, false)
+			var paths map[string]string
+			if pb, err := s.app.Store.GetKV(ctx, modulePathsKV); err == nil {
+				json.Unmarshal(pb, &paths)
+			}
+			s.setModules(ctx, mods, paths, false)
 		}
 	}
 	go s.watchConfig(ctx)
@@ -78,7 +88,7 @@ func (s *Service) Start(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) setModules(ctx context.Context, mods []string, persist bool) {
+func (s *Service) setModules(ctx context.Context, mods []string, paths map[string]string, persist bool) {
 	m := map[string]bool{}
 	for _, x := range mods {
 		m[x] = true
@@ -90,9 +100,20 @@ func (s *Service) setModules(ctx context.Context, mods []string, persist bool) {
 			changed = true
 		}
 	}
+	if len(paths) != len(s.modulePaths) {
+		changed = true
+	}
+	for k, v := range paths {
+		if s.modulePaths[k] != v {
+			changed = true
+		}
+	}
 	s.modules = m
+	s.modulePaths = paths
 	s.mu.Unlock()
 	if changed && persist {
+		pb, _ := json.Marshal(paths)
+		s.app.Store.PutKV(context.WithoutCancel(ctx), modulePathsKV, pb)
 		sorted := append([]string(nil), mods...)
 		sort.Strings(sorted)
 		b, _ := json.Marshal(sorted)
@@ -113,6 +134,7 @@ func (s *Service) env(ctx context.Context) render.Env {
 	}
 	s.mu.Lock()
 	mods := s.modules
+	paths := s.modulePaths
 	s.mu.Unlock()
 	if len(mods) == 0 {
 		mods = defaultModules
@@ -120,6 +142,10 @@ func (s *Service) env(ctx context.Context) render.Env {
 	env.Modules = map[string]bool{}
 	for k, v := range mods {
 		env.Modules[k] = v
+	}
+	env.ModulePaths = map[string]string{}
+	for k, v := range paths {
+		env.ModulePaths[k] = v
 	}
 	return env
 }
@@ -308,7 +334,7 @@ func (s *Service) Status(ctx context.Context) (*core.EnginesStatus, error) {
 	go get(s.app.HAProxy, &out.HAProxy)
 	wg.Wait()
 	if out.Nginx.Reachable && len(out.Nginx.Modules) > 0 {
-		s.setModules(ctx, out.Nginx.Modules, true)
+		s.setModules(ctx, out.Nginx.Modules, out.Nginx.DynamicModules, true)
 	}
 	return &out, nil
 }

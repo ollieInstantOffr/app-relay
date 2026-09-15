@@ -32,6 +32,9 @@ const (
 	// are kept per trigger.
 	keepOther = 10
 	fileExt   = ".relay.age"
+
+	// keepOnRestore is backed up but never overwritten by a restore.
+	keepOnRestore = "config_versions"
 )
 
 type Service struct {
@@ -400,6 +403,13 @@ func (s *Service) Restore(ctx context.Context, src io.Reader, passphrase string)
 		return nil, fmt.Errorf("could not back up the current state before restoring: %w", err)
 	}
 
+	// Config versions describe what THIS instance's engines actually run
+	// (the live row drives pending changes and rollback). Restoring them from
+	// an archive would mark an old version live while nginx/HAProxy still
+	// serve the newer one, so the restored config could never be applied
+	// ("nothing to apply"). Keep the local history; the restored config shows
+	// up as pending changes instead.
+	delete(a.Tables, keepOnRestore)
 	actor := core.ActorFrom(ctx)
 	kept, err := s.app.Store.RestoreTables(ctx, a.Tables, actor.SessionID)
 	if err != nil {

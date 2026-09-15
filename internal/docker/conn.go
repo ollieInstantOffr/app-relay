@@ -52,13 +52,20 @@ type endpointConn struct {
 	status    EndpointStatus
 	raw       []core.Container
 	cachedAt  time.Time
-	inspected map[string]portConfig
+	inspected map[string]inspectInfo
 
 	refreshMu sync.Mutex
 }
 
+// inspectInfo is the id-stable part of a container's configuration.
+type inspectInfo struct {
+	pc    portConfig // configured ports and bindings (used for stopped containers)
+	hints Hints
+	ok    bool
+}
+
 func newConn(s *Service, ep model.DockerEndpoint) *endpointConn {
-	return &endpointConn{svc: s, ep: ep, key: endpointKey(ep), kick: make(chan struct{}, 1), inspected: map[string]portConfig{}}
+	return &endpointConn{svc: s, ep: ep, key: endpointKey(ep), kick: make(chan struct{}, 1), inspected: map[string]inspectInfo{}}
 }
 
 func (c *endpointConn) start(parent context.Context) {
@@ -262,14 +269,15 @@ func (c *endpointConn) refresh(ctx context.Context) error {
 	seen := map[string]bool{}
 	for _, sm := range summaries {
 		seen[sm.ID] = true
-		var pc portConfig
+		info := c.inspect(lctx, d.api, sm)
+		pc := info.pc
+		if string(sm.State) == "running" || !info.ok {
+			pc = summaryPorts(sm)
+		}
 		if string(sm.State) == "running" {
 			running++
-			pc = summaryPorts(sm)
-		} else {
-			pc = c.stoppedPorts(lctx, d.api, sm)
 		}
-		list = append(list, buildContainer(ep, sm, pc))
+		list = append(list, buildContainer(ep, sm, pc, info.hints))
 	}
 	sort.SliceStable(list, func(i, j int) bool { return list[i].Name < list[j].Name })
 	c.mu.Lock()
@@ -286,24 +294,25 @@ func (c *endpointConn) refresh(ctx context.Context) error {
 	return nil
 }
 
-// stoppedPorts inspects a stopped container once (its config can't change
-// without recreating it, which yields a new id).
-func (c *endpointConn) stoppedPorts(ctx context.Context, api dockerAPI, sm container.Summary) portConfig {
+// inspect reads a container's configuration once (it can't change without
+// recreating the container, which yields a new id): env and command for port
+// detection, configured bindings for stopped containers.
+func (c *endpointConn) inspect(ctx context.Context, api dockerAPI, sm container.Summary) inspectInfo {
 	c.mu.Lock()
-	pc, ok := c.inspected[sm.ID]
+	info, ok := c.inspected[sm.ID]
 	c.mu.Unlock()
 	if ok {
-		return pc
+		return info
 	}
 	resp, err := api.ContainerInspect(ctx, sm.ID)
 	if err != nil {
-		return summaryPorts(sm)
+		return inspectInfo{hints: Hints{Command: sm.Command}}
 	}
-	pc = inspectPorts(resp)
+	info = inspectInfo{pc: inspectPorts(resp), hints: inspectHints(resp, sm.Command), ok: true}
 	c.mu.Lock()
-	c.inspected[sm.ID] = pc
+	c.inspected[sm.ID] = info
 	c.mu.Unlock()
-	return pc
+	return info
 }
 
 func (c *endpointConn) containers(ctx context.Context) ([]core.Container, error) {

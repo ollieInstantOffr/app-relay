@@ -161,7 +161,7 @@ func (h *handlers) revokeCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !model.IsACMEProvider(cert.Provider) || cert.NotAfter == nil {
-		httpx.Fail(w, r, httpx.Errorf(http.StatusBadRequest, "not_revocable", "Only issued Let's Encrypt certificates can be revoked"))
+		httpx.Fail(w, r, httpx.Errorf(http.StatusBadRequest, "not_revocable", "Only issued ACME certificates can be revoked"))
 		return
 	}
 	if h.svc.isInflight(id) {
@@ -545,6 +545,13 @@ func (h *handlers) testCert(w http.ResponseWriter, r *http.Request) {
 
 func (h *handlers) registerDNSHooks() {
 	httpx.DNSProviderHooks.BeforeSave = func(r *http.Request, prev, next *model.DNSProvider) error {
+		if !httpx.Actor(r).IsAdmin() {
+			for _, p := range []*model.DNSProvider{prev, next} {
+				if pt, ok := model.DNSProviderTypeByName(typeOf(p)); ok && pt.AdminOnly {
+					return httpx.Errorf(http.StatusForbidden, "admin_only", "Only admins can configure "+pt.Label+" DNS providers")
+				}
+			}
+		}
 		list, err := h.app.Store.DNSProviders().List(r.Context())
 		if err != nil {
 			return err
@@ -586,6 +593,13 @@ func (h *handlers) registerDNSHooks() {
 		}
 		return nil
 	}
+}
+
+func typeOf(p *model.DNSProvider) string {
+	if p == nil {
+		return ""
+	}
+	return p.Type
 }
 
 func mapsEqual(a, b map[string]string) bool {

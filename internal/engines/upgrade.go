@@ -119,6 +119,7 @@ func (s *Service) Upgrade(ctx context.Context, engine, version string) (*core.Up
 	s.mu.Lock()
 	s.job = job
 	s.mu.Unlock()
+	s.persistJob(ctx)
 	s.step("preflight", "done", fmt.Sprintf("Docker reachable · container %s · %s", c.Name, c.Image), 3, "Preflight passed")
 
 	actorCtx := core.WithActor(context.WithoutCancel(s.ctx), core.ActorFrom(ctx))
@@ -152,7 +153,20 @@ func (s *Service) step(id, status, detail string, progress int, message string) 
 		s.job.Message = message
 	}
 	s.mu.Unlock()
+	// Persist step transitions (not pull progress ticks) so a restarted relay
+	// knows a swap may be half done.
+	if status != "running" || id == "swap" || id == "health" {
+		s.persistJob(context.Background())
+	}
 	s.publishJob()
+}
+
+func (s *Service) persistJob(ctx context.Context) {
+	if j := s.UpgradeStatus(); j != nil {
+		if b, err := json.Marshal(j); err == nil {
+			s.app.Store.PutKV(context.WithoutCancel(ctx), kvLastJob, b)
+		}
+	}
 }
 
 func (s *Service) publishJob() {
@@ -185,11 +199,7 @@ func (s *Service) finishJob(ctx context.Context, status, message, errText, outpu
 		}
 	}
 	s.mu.Unlock()
-	if j := s.UpgradeStatus(); j != nil {
-		if b, err := json.Marshal(j); err == nil {
-			s.app.Store.PutKV(context.WithoutCancel(ctx), kvLastJob, b)
-		}
-	}
+	s.persistJob(ctx)
 	s.publishJob()
 	s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": s.job.Engine})
 	s.app.Bus.Publish(events.EngineUpdates, map[string]any{"reason": "upgrade"})
@@ -237,7 +247,7 @@ func (s *Service) runUpgrade(ctx context.Context, cli *client.Client, ops applyO
 			fail("validate", fmt.Sprintf("The live configuration (v%d) doesn't validate on %s %s — nothing was changed.", liveVersion, name, job.To), err.Error(), out)
 			return
 		}
-		s.step("validate", "done", firstLine(out), 50, fmt.Sprintf("v%d is valid on %s %s", liveVersion, name, job.To))
+		s.step("validate", "done", validSummary(engine, out), 50, fmt.Sprintf("v%d is valid on %s %s", liveVersion, name, job.To))
 	}
 
 	// 4. Backup (best effort).
@@ -262,14 +272,12 @@ func (s *Service) runUpgrade(ctx context.Context, cli *client.Client, ops applyO
 
 	// 5. Swap.
 	s.step("swap", "running", "", 60, "Swapping "+c.Name)
-	oldImg, _ := cli.ImageInspect(ctx, old.Image)
-	var imgEnv []string
-	var imgLabels map[string]string
-	imgStop := ""
-	if oldImg.Config != nil {
-		imgEnv, imgLabels, imgStop = oldImg.Config.Env, oldImg.Config.Labels, oldImg.Config.StopSignal
+	oldImg, err := cli.ImageInspect(ctx, old.Image)
+	if err != nil {
+		fail("swap", "Couldn't inspect the current image — nothing was changed.", err.Error(), "")
+		return
 	}
-	cfg, hc, nc := cloneSpec(old, imgEnv, imgLabels, imgStop, job.ToImage)
+	cfg, hc, nc := cloneSpec(old, defaultsOf(oldImg), job.ToImage)
 	oldName := strings.TrimPrefix(old.Name, "/")
 	backupName := fmt.Sprintf("%s-old-%d", oldName, time.Now().Unix())
 	if err := cli.ContainerRename(ctx, old.ID, backupName); err != nil {
@@ -284,8 +292,10 @@ func (s *Service) runUpgrade(ctx context.Context, cli *client.Client, ops applyO
 		return
 	}
 	newID := created.ID
-	gapStart := time.Now()
-	stopTimeout := 15
+	// The agent stops the engine gracefully (nginx quit / HAProxy soft stop,
+	// which closes listeners first); Docker kills it after the timeout.
+	stopStart := time.Now()
+	stopTimeout := 10
 	if err := cli.ContainerStop(ctx, old.ID, container.StopOptions{Timeout: &stopTimeout}); err != nil {
 		cli.ContainerRemove(context.WithoutCancel(ctx), newID, container.RemoveOptions{Force: true})
 		restoreName()
@@ -302,7 +312,7 @@ func (s *Service) runUpgrade(ctx context.Context, cli *client.Client, ops applyO
 		restoreName()
 		startErr := cli.ContainerStart(rctx, old.ID, container.StartOptions{})
 		if startErr == nil {
-			s.waitAgent(rctx, engine, "", 60*time.Second, engine == "nginx" || running)
+			s.waitAgent(rctx, cli, old.ID, engine, "", 60*time.Second, engine == "nginx" || running)
 		}
 		msg := fmt.Sprintf("%s %s failed after the swap (%s). %s is running again.", name, job.To, reason, job.FromImage)
 		if startErr != nil {
@@ -316,6 +326,8 @@ func (s *Service) runUpgrade(ctx context.Context, cli *client.Client, ops applyO
 			s.app.Notify.Notify(ctx, core.Notification{Event: model.EventReloadFailed, Level: "error", Title: fmt.Sprintf("%s upgrade rolled back", name), Message: msg, URL: "/settings/engines"})
 		}
 	}
+	stopTook := time.Since(stopStart)
+	gapStart := time.Now()
 	if err := cli.ContainerStart(ctx, newID, container.StartOptions{}); err != nil {
 		rollback("the new container didn't start", err.Error())
 		return
@@ -325,7 +337,7 @@ func (s *Service) runUpgrade(ctx context.Context, cli *client.Client, ops applyO
 	// 6. Agent up, live version pushed, hosts healthy.
 	needRunning := engine == "nginx" || running
 	s.step("health", "running", "", 78, "Waiting for "+name+" "+job.To)
-	if err := s.waitAgent(ctx, engine, job.To, 90*time.Second, needRunning); err != nil {
+	if err := s.waitAgent(ctx, cli, newID, engine, job.To, 90*time.Second, needRunning); err != nil {
 		rollback("the agent didn't come up", err.Error())
 		return
 	}
@@ -348,7 +360,7 @@ func (s *Service) runUpgrade(ctx context.Context, cli *client.Client, ops applyO
 			return
 		}
 	}
-	s.step("health", "done", fmt.Sprintf("%d host(s) healthy · %s interruption", len(healthy), gap.Round(100*time.Millisecond)), 99, "")
+	s.step("health", "done", fmt.Sprintf("%d host(s) healthy · stop %s · start %s", len(healthy), stopTook.Round(100*time.Millisecond), gap.Round(100*time.Millisecond)), 99, "")
 
 	// Success.
 	cli.ContainerRemove(context.WithoutCancel(ctx), old.ID, container.RemoveOptions{Force: true})
@@ -362,8 +374,8 @@ func (s *Service) runUpgrade(ctx context.Context, cli *client.Client, ops applyO
 	msg := fmt.Sprintf("%s upgraded %s → %s", name, orDash(job.From), job.To)
 	s.finishJob(ctx, core.UpgradeSucceeded, msg, "", "")
 	s.app.Audit(ctx, core.AuditEntry{Action: "engine.upgrade", Target: engine, Detail: fmt.Sprintf("%s → %s", job.FromImage, job.ToImage), Result: "applied"})
-	s.app.Activity(ctx, "engine.upgrade", "ok", msg, engine, fmt.Sprintf("%s · %s interruption", job.ToImage, gap.Round(100*time.Millisecond)))
-	s.log.Info("engine upgraded", "engine", engine, "from", job.FromImage, "to", job.ToImage, "gap", gap)
+	s.app.Activity(ctx, "engine.upgrade", "ok", msg, engine, fmt.Sprintf("%s · stopped in %s, new engine ready in %s", job.ToImage, stopTook.Round(100*time.Millisecond), gap.Round(100*time.Millisecond)))
+	s.log.Info("engine upgraded", "engine", engine, "from", job.FromImage, "to", job.ToImage, "stop", stopTook, "start", gap)
 }
 
 func errString(err error, def string) string {
@@ -496,6 +508,19 @@ func (s *Service) validateOn(ctx context.Context, cli *client.Client, old contai
 	return out, nil
 }
 
+// validSummary describes a successful nginx -t / haproxy -c run.
+func validSummary(engine, out string) string {
+	warnings := strings.Count(out, "[warn]") + strings.Count(out, "[WARNING]")
+	msg := "nginx -t passed"
+	if engine == "haproxy" {
+		msg = "haproxy -c passed"
+	}
+	if warnings > 0 {
+		msg += fmt.Sprintf(" · %d warning%s", warnings, map[bool]string{true: "s", false: ""}[warnings > 1])
+	}
+	return msg
+}
+
 func firstErrorLine(out string) string {
 	for _, l := range strings.Split(out, "\n") {
 		if strings.Contains(l, "[emerg]") || strings.Contains(l, "[ALERT]") || strings.Contains(l, "error") {
@@ -520,10 +545,16 @@ func containerLogs(ctx context.Context, cli *client.Client, id string, tail int)
 
 // waitAgent waits until the engine agent answers (and the engine runs the
 // expected version when version != "").
-func (s *Service) waitAgent(ctx context.Context, engine, version string, timeout time.Duration, needRunning bool) error {
+func (s *Service) waitAgent(ctx context.Context, cli *client.Client, containerID, engine, version string, timeout time.Duration, needRunning bool) error {
 	deadline := time.Now().Add(timeout)
 	var last string
 	for time.Now().Before(deadline) {
+		// Fail fast when the container itself died (crash loop, killed, bad entrypoint).
+		if cli != nil && containerID != "" {
+			if info, err := cli.ContainerInspect(ctx, containerID); err == nil && info.State != nil && !info.State.Running && !info.State.Restarting {
+				return fmt.Errorf("the container exited (code %d)%s", info.State.ExitCode, map[bool]string{true: ": " + info.State.Error, false: ""}[info.State.Error != ""])
+			}
+		}
 		sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		st, err := s.agentClient(engine).Status(sctx)
 		cancel()

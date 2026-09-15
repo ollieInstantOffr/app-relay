@@ -22,7 +22,7 @@ type engine interface {
 	stableWait() time.Duration
 	reload() (string, error)
 	bootstrap() Files // nil: the engine does not run until configured
-	detect() (version string, modules []string)
+	detect() (version string, modules []string, dynamic map[string]string)
 	checkFiles(files Files) error
 	prepare() // create runtime directories before start/validate
 }
@@ -111,8 +111,21 @@ func (n *nginxEngine) reload() (string, error) {
 	return joinLines(errorLines(n.a.logs.after(seq))), errors.New("nginx did not load the new configuration within 15 s")
 }
 
+// StatusPortEnv overrides the loopback stub_status port (default 18080).
+// The relay container reads the same variable when rendering nginx.conf.
+const StatusPortEnv = "RELAY_NGINX_STATUS_PORT"
+
+// NginxStatusPort returns the configured stub_status port.
+func NginxStatusPort() string {
+	if p := strings.TrimSpace(os.Getenv(StatusPortEnv)); p != "" {
+		return p
+	}
+	return "18080"
+}
+
 // bootstrap serves ACME HTTP-01 challenges and closes everything else, so
-// certificates can be issued before the first apply.
+// certificates can be issued before the first apply. It also serves
+// stub_status on loopback so container health checks work before an apply.
 func (n *nginxEngine) bootstrap() Files {
 	port := os.Getenv("RELAY_BOOTSTRAP_HTTP_PORT")
 	if port == "" {
@@ -124,7 +137,6 @@ func (n *nginxEngine) bootstrap() Files {
 	}
 	acme := filepath.Join(n.a.o.DataDir, "acme")
 	return Files{"nginx.conf": `# Relay bootstrap configuration — replaced by the first apply.
-include /etc/nginx/modules/*.conf;
 worker_processes 1;
 pid /run/nginx/nginx.pid;
 error_log stderr warn;
@@ -153,56 +165,98 @@ http {
             return 444;
         }
     }
+
+    server {
+        listen 127.0.0.1:` + NginxStatusPort() + `;
+        server_name _;
+        location = /stub_status {
+            stub_status;
+        }
+        location / {
+            return 404;
+        }
+    }
 }
 `}
 }
 
-var nginxVersionRe = regexp.MustCompile(`nginx/(\S+)`)
+var (
+	nginxVersionRe    = regexp.MustCompile(`nginx/(\S+)`)
+	nginxModulesDirRe = regexp.MustCompile(`--modules-path=(\S+)`)
+)
 
-func (n *nginxEngine) detect() (string, []string) {
+// detect parses `nginx -V`. Official nginx images compile stream, http_v2,
+// http_v3, auth_request and stub_status in; distro packages (Alpine's nginx)
+// ship stream and geoip2 as dynamic modules, which the renderer loads with
+// load_module using the paths returned here.
+func (n *nginxEngine) detect() (string, []string, map[string]string) {
 	out, err := n.a.reaper.run(10*time.Second, "nginx", "-V")
 	if err != nil && out == "" {
-		return "", nil
+		return "", nil, nil
 	}
+	modDirs := []string{"/usr/lib/nginx/modules", "/etc/nginx/modules"}
+	if m := nginxModulesDirRe.FindStringSubmatch(out); m != nil {
+		modDirs = append([]string{m[1]}, modDirs...)
+	}
+	return parseNginxV(out, func(so string) string {
+		for _, d := range modDirs {
+			p := filepath.Join(d, so)
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+		return ""
+	}, ipv6Available())
+}
+
+// parseNginxV is detect without the side effects (tested).
+func parseNginxV(out string, findSO func(string) string, ipv6 bool) (string, []string, map[string]string) {
 	version := ""
 	if m := nginxVersionRe.FindStringSubmatch(out); m != nil {
 		version = m[1]
 	}
-	modDir := "/usr/lib/nginx/modules"
-	if m := regexp.MustCompile(`--modules-path=(\S+)`).FindStringSubmatch(out); m != nil {
-		modDir = m[1]
-	}
-	dynamic := func(so string) bool {
-		_, err := os.Stat(filepath.Join(modDir, so))
-		return err == nil
+	has := func(flag string) bool {
+		for _, f := range strings.Fields(out) {
+			if f == flag {
+				return true
+			}
+		}
+		return false
 	}
 	mods := []string{}
-	if strings.Contains(out, "--with-http_v3_module") {
-		mods = append(mods, "http_v3")
-	}
-	if strings.Contains(out, "--with-http_v2_module") {
-		mods = append(mods, "http_v2")
-	}
-	if strings.Contains(out, "--with-http_auth_request_module") {
-		mods = append(mods, "auth_request")
-	}
-	if strings.Contains(out, "--with-http_stub_status_module") {
-		mods = append(mods, "stub_status")
-	}
-	if strings.Contains(out, "--with-stream=dynamic") {
-		if dynamic("ngx_stream_module.so") {
-			mods = append(mods, "stream")
+	dyn := map[string]string{}
+	for _, m := range []struct{ name, flag string }{
+		{"http_v3", "--with-http_v3_module"},
+		{"http_v2", "--with-http_v2_module"},
+		{"auth_request", "--with-http_auth_request_module"},
+		{"stub_status", "--with-http_stub_status_module"},
+	} {
+		if has(m.flag) {
+			mods = append(mods, m.name)
 		}
-	} else if strings.Contains(out, "--with-stream") {
+	}
+	switch {
+	case has("--with-stream"):
 		mods = append(mods, "stream")
+	case has("--with-stream=dynamic"):
+		if p := findSO("ngx_stream_module.so"); p != "" {
+			mods = append(mods, "stream")
+			dyn["stream"] = p
+		}
 	}
-	if strings.Contains(out, "geoip2") && dynamic("ngx_http_geoip2_module.so") {
+	// geoip2 is a third-party module: never in the official image, a
+	// dynamic module in distro packages.
+	if p := findSO("ngx_http_geoip2_module.so"); p != "" {
 		mods = append(mods, "geoip2")
+		dyn["geoip2"] = p
 	}
-	if ipv6Available() {
+	if ipv6 {
 		mods = append(mods, "ipv6")
 	}
-	return version, mods
+	if len(dyn) == 0 {
+		dyn = nil
+	}
+	return version, mods, dyn
 }
 
 func ipv6Available() bool {
