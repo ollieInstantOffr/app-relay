@@ -295,7 +295,7 @@ export interface MCPSettings {
 }
 export interface NotificationChannel {
   id: string
-  type: 'ntfy' | 'smtp' | 'webhook'
+  type: 'ntfy' | 'smtp' | 'resend' | 'webhook'
   name: string
   config: Record<string, string>
   enabled: boolean

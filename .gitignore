@@ -9,3 +9,4 @@ internal/webui/dist/*
 .env
 .claude/worktrees/
 graphify-out/
+.uitest/

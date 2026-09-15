@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"mime"
 	"mime/quotedprintable"
@@ -17,6 +19,7 @@ import (
 	"net/mail"
 	"net/smtp"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +33,7 @@ import (
 const (
 	TypeNtfy    = "ntfy"
 	TypeSMTP    = "smtp"
+	TypeResend  = "resend"
 	TypeWebhook = "webhook"
 )
 
@@ -37,6 +41,7 @@ const (
 var secretKeys = map[string][]string{
 	TypeNtfy:    {"token"},
 	TypeSMTP:    {"password"},
+	TypeResend:  {"apiKey"},
 	TypeWebhook: {"secret"},
 }
 
@@ -63,6 +68,8 @@ func Send(ctx context.Context, ch model.NotificationChannel, msg Message) error 
 		return sendNtfy(ctx, ch.Config, msg)
 	case TypeSMTP:
 		return sendSMTP(ctx, ch.Config, msg)
+	case TypeResend:
+		return sendResend(ctx, ch.Config, msg)
 	case TypeWebhook:
 		return sendWebhook(ctx, ch.Config, msg)
 	}
@@ -387,9 +394,120 @@ func sendSMTP(ctx context.Context, cfg map[string]string, msg Message) error {
 	return c.Quit()
 }
 
+// ---------------------------------------------------------------- Resend
+
+// resendAPI is Resend's API base; config "endpoint" overrides it (tests).
+const resendAPI = "https://api.resend.com"
+
+// ResendPayload builds the POST /emails body.
+func ResendPayload(cfg map[string]string, msg Message) ([]byte, error) {
+	from := strings.TrimSpace(cfg["from"])
+	if _, err := mail.ParseAddress(from); err != nil {
+		return nil, fmt.Errorf("invalid from address %q", from)
+	}
+	to := recipients(cfg["to"])
+	if len(to) == 0 {
+		return nil, errors.New("no valid recipient address")
+	}
+	text := msg.Message
+	if isAbsoluteURL(msg.URL) {
+		text += "\n\n" + msg.URL
+	}
+	text += "\n\n-- \nRelay"
+
+	var h strings.Builder
+	h.WriteString(`<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:14px;line-height:1.5;color:#141414">`)
+	fmt.Fprintf(&h, `<p style="font-size:16px;font-weight:600;margin:0 0 8px">%s</p>`, html.EscapeString(msg.Title))
+	for _, para := range strings.Split(strings.TrimSpace(msg.Message), "\n") {
+		if para = strings.TrimSpace(para); para != "" {
+			fmt.Fprintf(&h, `<p style="margin:0 0 8px">%s</p>`, html.EscapeString(para))
+		}
+	}
+	if isAbsoluteURL(msg.URL) {
+		fmt.Fprintf(&h, `<p style="margin:16px 0"><a href="%s" style="background:#141414;color:#fff;padding:8px 14px;border-radius:8px;text-decoration:none">Open in Relay</a></p>`, html.EscapeString(msg.URL))
+	}
+	h.WriteString(`<p style="margin:24px 0 0;color:#888;font-size:12px">Sent by Relay</p></div>`)
+
+	body := map[string]any{
+		"from":    from,
+		"to":      to,
+		"subject": truncate(msg.Title, 250),
+		"text":    text,
+		"html":    h.String(),
+	}
+	if rt := recipients(cfg["replyTo"]); len(rt) > 0 {
+		body["reply_to"] = rt
+	}
+	if msg.Event != "" && resendTagValue.MatchString(msg.Event) {
+		body["tags"] = []map[string]string{{"name": "event", "value": msg.Event}}
+	}
+	return json.Marshal(body)
+}
+
+// Resend tag values may only contain ASCII letters, numbers, _ and -.
+var resendTagValue = regexp.MustCompile(`^[A-Za-z0-9_-]{1,256}$`)
+
+func sendResend(ctx context.Context, cfg map[string]string, msg Message) error {
+	key := strings.TrimSpace(cfg["apiKey"])
+	if key == "" {
+		return errors.New("Resend API key is required")
+	}
+	base := strings.TrimRight(strings.TrimSpace(cfg["endpoint"]), "/")
+	if base == "" {
+		base = resendAPI
+	} else if err := checkHTTPURL(base); err != nil {
+		return err
+	}
+	payload, err := ResendPayload(cfg, msg)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/emails", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Relay")
+	// Retries of the same delivery must not send the email twice.
+	sum := sha256.Sum256([]byte(msg.Event + "\x00" + msg.Title + "\x00" + msg.Message + "\x00" + msg.At.UTC().Format(time.RFC3339Nano) + "\x00" + cfg["to"]))
+	req.Header.Set("Idempotency-Key", "relay-"+hex.EncodeToString(sum[:12]))
+
+	res, err := httpClient.Do(req)
+	if err != nil {
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			return ue.Err
+		}
+		return err
+	}
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+	if res.StatusCode >= 200 && res.StatusCode <= 299 {
+		return nil
+	}
+	var apiErr struct {
+		Message string `json:"message"`
+		Name    string `json:"name"`
+	}
+	if json.Unmarshal(raw, &apiErr) == nil && apiErr.Message != "" {
+		switch res.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return fmt.Errorf("Resend rejected the API key (HTTP %d): %s", res.StatusCode, apiErr.Message)
+		}
+		return fmt.Errorf("Resend HTTP %d: %s", res.StatusCode, truncate(apiErr.Message, 200))
+	}
+	if detail := strings.TrimSpace(string(raw)); detail != "" {
+		return fmt.Errorf("Resend HTTP %d: %s", res.StatusCode, truncate(detail, 200))
+	}
+	return fmt.Errorf("Resend HTTP %d", res.StatusCode)
+}
+
 // Target describes a channel for display ("smtp.fastmail.com:465 → jonas@…").
 func Target(ch model.NotificationChannel) string {
 	switch ch.Type {
+	case TypeResend:
+		return "Resend → " + ch.Config["to"]
 	case TypeSMTP:
 		port := ch.Config["port"]
 		if port == "" {

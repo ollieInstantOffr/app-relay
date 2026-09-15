@@ -86,8 +86,26 @@ func ValidateChannel(ch model.NotificationChannel) model.Errs {
 		default:
 			errs.Add("config.security", "use tls, starttls or none")
 		}
+	case TypeResend:
+		if strings.TrimSpace(cfg["apiKey"]) == "" {
+			errs.Add("config.apiKey", "Resend API key is required")
+		}
+		if _, err := mail.ParseAddress(strings.TrimSpace(cfg["from"])); err != nil {
+			errs.Add("config.from", "enter a sender address on a domain verified in Resend")
+		}
+		if len(recipients(cfg["to"])) == 0 {
+			errs.Add("config.to", "enter at least one recipient")
+		}
+		if rt := strings.TrimSpace(cfg["replyTo"]); rt != "" && len(recipients(rt)) == 0 {
+			errs.Add("config.replyTo", "enter a valid reply-to address")
+		}
+		if ep := strings.TrimSpace(cfg["endpoint"]); ep != "" {
+			if err := checkHTTPURL(ep); err != nil {
+				errs.Add("config.endpoint", "enter an http(s) URL")
+			}
+		}
 	default:
-		errs.Add("type", "choose ntfy, smtp or webhook")
+		errs.Add("type", "choose ntfy, smtp, resend or webhook")
 	}
 	return errs
 }
@@ -98,6 +116,8 @@ func defaultName(t string) string {
 		return "ntfy"
 	case TypeSMTP:
 		return "Email (SMTP)"
+	case TypeResend:
+		return "Email (Resend)"
 	case TypeWebhook:
 		return "Webhook"
 	}

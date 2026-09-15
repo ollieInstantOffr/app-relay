@@ -23,15 +23,18 @@ const EVENTS: { key: NotificationEvent; label: string; critical?: boolean }[] = 
   { key: 'weekly_summary', label: 'Weekly summary' },
 ]
 
-const TYPE_LABEL: Record<ChannelType, string> = { ntfy: 'ntfy', smtp: 'Email (SMTP)', webhook: 'Webhook' }
+const CHANNEL_TYPES: ChannelType[] = ['ntfy', 'smtp', 'resend', 'webhook']
+const TYPE_LABEL: Record<ChannelType, string> = { ntfy: 'ntfy', smtp: 'Email (SMTP)', resend: 'Email (Resend)', webhook: 'Webhook' }
 const TYPE_HINT: Record<ChannelType, string> = {
   ntfy: 'Push notifications to your phone',
   smtp: 'Any SMTP server · Fastmail, Gmail, Postmark…',
+  resend: 'Resend email API · no SMTP server needed',
   webhook: 'Discord, Slack, Home Assistant…',
 }
-const SECRET: Record<ChannelType, string> = { ntfy: 'token', smtp: 'password', webhook: 'secret' }
+const SECRET: Record<ChannelType, string> = { ntfy: 'token', smtp: 'password', resend: 'apiKey', webhook: 'secret' }
 
 function target(ch: NotificationChannel): string {
+  if (ch.type === 'resend') return `Resend → ${ch.config.to ?? ''}`
   if (ch.type === 'smtp') {
     const port = ch.config.port || (ch.config.security === 'tls' ? '465' : '587')
     return `${ch.config.host}:${port} → ${ch.config.to}`
@@ -101,6 +104,8 @@ function ChannelDialog({ open, initial, onClose, onSave }: {
           if (m) f[m[1]] = v
         }
         setFields(f)
+        // Errors shown next to their fields don't need a toast as well.
+        if (Object.keys(f).length > 0) return
       }
       toast.error(err, 'Could not save channel')
     } finally {
@@ -188,6 +193,29 @@ function ChannelDialog({ open, initial, onClose, onSave }: {
                 <Input value={cfg.to ?? ''} placeholder="jonas@example.com" invalid={!!fieldErr('to')} onChange={(e) => set('to', e.target.value)} />
               </Field>
             </div>
+          </>
+        )}
+
+        {ch.type === 'resend' && (
+          <>
+            <Field
+              label="API key"
+              error={fieldErr('apiKey')}
+              hint={<>Create one at <a href="https://resend.com/api-keys" target="_blank" rel="noreferrer">resend.com/api-keys</a> with “Sending access”</>}
+            >
+              <PasswordInput mono value={cfg.apiKey ?? ''} autoComplete="off" placeholder={secretPlaceholder || 're_…'} invalid={!!fieldErr('apiKey')} onChange={(e) => set('apiKey', e.target.value)} autoFocus />
+            </Field>
+            <div className="grid-2">
+              <Field label="From" error={fieldErr('from')} hint="Use a domain verified in Resend">
+                <Input value={cfg.from ?? ''} placeholder="Relay <relay@example.com>" invalid={!!fieldErr('from')} onChange={(e) => set('from', e.target.value)} />
+              </Field>
+              <Field label="To" error={fieldErr('to')} hint="Separate multiple addresses with commas">
+                <Input value={cfg.to ?? ''} placeholder="jonas@example.com" invalid={!!fieldErr('to')} onChange={(e) => set('to', e.target.value)} />
+              </Field>
+            </div>
+            <Field label="Reply-to" error={fieldErr('replyTo')} hint="Optional">
+              <Input value={cfg.replyTo ?? ''} placeholder="ops@example.com" invalid={!!fieldErr('replyTo')} onChange={(e) => set('replyTo', e.target.value)} />
+            </Field>
           </>
         )}
 
@@ -329,7 +357,7 @@ export default function NotificationsSettings() {
     setDraft({ ...draft, routes: { ...draft.routes, [event]: [...ids] } })
   }
 
-  const missingTypes = (['ntfy', 'smtp', 'webhook'] as ChannelType[]).filter((t) => !draft.channels.some((c) => c.type === t))
+  const missingTypes = CHANNEL_TYPES.filter((t) => !draft.channels.some((c) => c.type === t))
   const cols = draft.channels.length
 
   return (
@@ -342,7 +370,7 @@ export default function NotificationsSettings() {
           isAdmin && (
             <Menu
               trigger={<Button size="sm" variant="ghost" icon="plus" style={{ color: 'var(--ink)' }}>Add channel</Button>}
-              items={(['ntfy', 'smtp', 'webhook'] as ChannelType[]).map((t) => ({ label: TYPE_LABEL[t], onSelect: () => setEditing({ open: true, channel: newChannel(t) }) }))}
+              items={CHANNEL_TYPES.map((t) => ({ label: TYPE_LABEL[t], onSelect: () => setEditing({ open: true, channel: newChannel(t) }) }))}
             />
           )
         }
@@ -403,7 +431,7 @@ export default function NotificationsSettings() {
           <div className="ops-matrix-head" style={{ ['--ops-cols' as string]: cols }}>
             <span>Event</span>
             {draft.channels.map((ch) => (
-              <span key={ch.id} title={ch.name}>{ch.type === 'smtp' && ch.name === TYPE_LABEL.smtp ? 'Email' : ch.name}</span>
+              <span key={ch.id} title={ch.name}>{ch.type === 'smtp' && ch.name === TYPE_LABEL.smtp ? 'Email' : ch.type === 'resend' && ch.name === TYPE_LABEL.resend ? 'Resend' : ch.name}</span>
             ))}
           </div>
           {EVENTS.map((e) => (

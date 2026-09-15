@@ -499,7 +499,7 @@ type MCPSettings struct {
 
 type NotificationChannel struct {
 	ID      string            `json:"id"`
-	Type    string            `json:"type"` // ntfy | smtp | webhook
+	Type    string            `json:"type"` // ntfy | smtp | resend | webhook
 	Name    string            `json:"name"`
 	Config  map[string]string `json:"config"`
 	Enabled bool              `json:"enabled"`
