@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { TopBar } from '../../components/shell/TopBar'
 import {
-  Badge, Button, Callout, ConfirmDialog, EmptyState, Icon, IconButton, Input, Select, Skeleton, Tooltip, useToast,
+  Badge, Button, Callout, ConfirmDialog, EmptyState, Icon, IconButton, Input, Pagination, Select, Skeleton, Tooltip, pageCount, paginate, useToast,
 } from '../../components/ui'
 import { errorMessage } from '../../lib/api'
 import { useEntities, useRole } from '../../lib/queries'
@@ -16,6 +16,7 @@ import {
 import './dns.css'
 
 const EDITABLE = new Set<string>(EDITABLE_TYPES)
+const PAGE_SIZE = 25
 
 export default function DNSPage() {
   const toast = useToast()
@@ -30,6 +31,7 @@ export default function DNSPage() {
   const [typeFilter, setTypeFilter] = useState('')
   const [dialog, setDialog] = useState<{ open: boolean; record?: DNSRecord }>({ open: false })
   const [deleting, setDeleting] = useState<DNSRecord | undefined>()
+  const [page, setPage] = useState(1)
 
   const zones = useMemo(() => [...(status.data?.zones ?? [])].sort((a, b) => a.name.localeCompare(b.name)), [status.data])
   const zone = zones.find((z) => z.name === stored) ?? zones[0]
@@ -51,6 +53,11 @@ export default function DNSPage() {
       .sort((a, b) => (a.name === '@' ? -1 : b.name === '@' ? 1 : a.name.localeCompare(b.name)) || a.type.localeCompare(b.type))
   }, [recordsQ.data, filter, typeFilter])
   const types = useMemo(() => [...new Set((recordsQ.data?.records ?? []).map((r) => r.type))].sort(), [recordsQ.data])
+  // Back to the first page when the domain or filters change; stay in range after deletes.
+  useEffect(() => setPage(1), [zoneName, filter, typeFilter])
+  const lastPage = pageCount(records.length, PAGE_SIZE)
+  const currentPage = Math.min(page, lastPage)
+  const pageRows = paginate(records, currentPage, PAGE_SIZE)
   const total = recordsQ.data?.records.length
 
   const pickZone = (name: string) => {
@@ -207,7 +214,7 @@ export default function DNSPage() {
                           <td colSpan={6} className="muted small" style={{ textAlign: 'center', padding: 24 }}>No records match.</td>
                         </tr>
                       )}
-                      {records.map((r) => {
+                      {pageRows.map((r) => {
                         const used = r.hosts ?? []
                         const editable = canWrite && !r.readOnly && EDITABLE.has(r.type)
                         return (
@@ -255,6 +262,7 @@ export default function DNSPage() {
                       })}
                     </tbody>
                   </table>
+                  <Pagination page={currentPage} pageSize={PAGE_SIZE} total={records.length} onPage={setPage} label="records" />
                 </div>
               ) : null}
             </div>

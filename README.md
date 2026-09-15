@@ -68,3 +68,22 @@ make test
 - `web/`: React + TypeScript UI (built into `internal/webui/dist`, embedded in the binary)
 - `design/`: the Claude Design mockups this UI implements
 - `docs/SLICES.md`: architecture contracts between feature areas
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up a development
+environment and send changes, and [SECURITY.md](SECURITY.md) for how to report
+a vulnerability privately.
+
+## License
+
+Relay is free software: you can redistribute it and/or modify it under the
+terms of the [GNU Affero General Public License v3.0](LICENSE) as published by
+the Free Software Foundation.
+
+In short: you can use, self-host, modify and share Relay for free, for any
+purpose, including commercially. If you distribute a modified version, or run
+one as a service that other people use over a network, you must make the
+source code of your version available under the same license.
+
+Copyright (C) 2026 InstantOffr

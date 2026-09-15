@@ -520,3 +520,8 @@ input, select, textarea { font: inherit; color: inherit; }
 .skeleton { background: linear-gradient(90deg, var(--surface-2), #f6f6f4, var(--surface-2)); background-size: 200% 100%; animation: shimmer 1.2s infinite; border-radius: 6px; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 .auth-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--bg); padding: 24px; }
+
+/* ---------------------------------------------------------------- pagination */
+.pagination { display: flex; align-items: center; gap: 6px; padding: 8px 12px 8px 18px; border-top: 1px solid var(--hairline-soft); font-size: 12px; color: var(--ink-subtle); }
+.pagination-range { font-variant-numeric: tabular-nums; }
+.pagination-page { margin-right: 4px; font-variant-numeric: tabular-nums; }
