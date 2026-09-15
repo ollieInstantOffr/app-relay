@@ -144,7 +144,12 @@ input, select, textarea { font: inherit; color: inherit; }
 .settings-layout { flex: 1; display: flex; min-height: 0; }
 .settings-nav {
   width: 220px; flex: none; border-right: 1px solid var(--hairline); background: var(--surface);
-  padding: 16px 10px; display: flex; flex-direction: column; gap: 2px; overflow: auto;
+  padding: 16px 10px; display: flex; flex-direction: column; gap: 18px; overflow: auto;
+}
+.settings-nav-group { display: flex; flex-direction: column; gap: 2px; }
+.settings-nav-heading {
+  padding: 0 12px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--ink-faint);
 }
 .settings-nav a {
   height: 34px; padding: 0 12px; border-radius: 7px; display: flex; align-items: center; gap: 10px;
