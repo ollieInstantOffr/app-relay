@@ -322,6 +322,11 @@ func (s *Service) syncAdminHost(r *http.Request, g model.GeneralSettings, sec mo
 	next.Websockets = true
 	next.AccessListID = sec.AdminAccessListID
 	next.System = true
+	if next.MaxBodySize == "" {
+		// Backup restores and NPM imports upload large files; Relay's API
+		// limits them itself.
+		next.MaxBodySize = "0"
+	}
 	if n, ok := any(&next).(interface{ Normalize() }); ok {
 		n.Normalize()
 	}

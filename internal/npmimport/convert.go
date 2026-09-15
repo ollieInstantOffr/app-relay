@@ -778,7 +778,10 @@ func convertHost(r row) *HostItem {
 		it.warn("\"Trust upstream forwarded proto headers\" is not supported: Relay sends its own X-Forwarded-Proto")
 	}
 	if h.CustomNginx != "" {
-		it.warn("custom nginx configuration was copied as-is — review it before applying")
+		h.CustomNginx = liftDirectives(&h, h.CustomNginx, it)
+	}
+	if h.CustomNginx != "" {
+		it.warn("custom nginx configuration was copied as-is — review it before applying (Relay Edge does not run it)")
 		if defaultLocationRe.MatchString(h.CustomNginx) {
 			it.warn("the custom nginx configuration defines location /, which clashes with Relay's own / location: move it into Locations before applying")
 		}
@@ -822,6 +825,81 @@ func convertHost(r row) *HostItem {
 	it.Host = h
 	it.Detail = fmt.Sprintf("%s://%s:%d%s", h.Upstream.Scheme, h.Upstream.Host, h.Upstream.Port, h.Upstream.Path)
 	return it
+}
+
+var (
+	directiveRe = regexp.MustCompile(`^(client_max_body_size|proxy_read_timeout|proxy_send_timeout)\s+([^;\s]+)\s*;\s*(#.*)?$`)
+	durationRe  = regexp.MustCompile(`^([0-9]+)(ms|s|m|h)?$`)
+)
+
+// liftDirectives moves top-level advanced_config directives Relay has host
+// settings for (body size, proxy timeouts) into those settings, so they work
+// with nginx and Relay Edge alike. It returns the configuration left over.
+func liftDirectives(h *model.ProxyHost, conf string, it *HostItem) string {
+	var keep []string
+	depth := 0
+	for _, line := range strings.Split(strings.ReplaceAll(conf, "\r\n", "\n"), "\n") {
+		t := strings.TrimSpace(line)
+		if depth == 0 {
+			if m := directiveRe.FindStringSubmatch(t); m != nil && liftDirective(h, m[1], strings.ToLower(m[2]), it) {
+				continue
+			}
+		}
+		depth += strings.Count(t, "{") - strings.Count(t, "}")
+		if depth < 0 {
+			depth = 0
+		}
+		keep = append(keep, line)
+	}
+	out := strings.TrimSpace(strings.Join(keep, "\n"))
+	// Only comments left: nothing to run.
+	onlyComments := true
+	for _, l := range strings.Split(out, "\n") {
+		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") {
+			onlyComments = false
+			break
+		}
+	}
+	if onlyComments {
+		return ""
+	}
+	return out
+}
+
+func liftDirective(h *model.ProxyHost, name, value string, it *HostItem) bool {
+	switch name {
+	case "client_max_body_size":
+		if !regexp.MustCompile(`^[0-9]+[kmg]?$`).MatchString(value) {
+			return false
+		}
+		h.MaxBodySize = value
+		it.warn("client_max_body_size %s became the host's Max body size", value)
+		return true
+	default:
+		m := durationRe.FindStringSubmatch(value)
+		if m == nil {
+			return false
+		}
+		n, _ := strconv.Atoi(m[1])
+		switch m[2] {
+		case "ms":
+			n = (n + 999) / 1000
+		case "m":
+			n *= 60
+		case "h":
+			n *= 3600
+		}
+		if n <= 0 || n > 86400 {
+			return false
+		}
+		if name == "proxy_read_timeout" {
+			h.ProxyReadTimeout = n
+		} else {
+			h.ProxySendTimeout = n
+		}
+		it.warn("%s %s became the host's %s timeout (%ds)", name, value, strings.TrimPrefix(strings.TrimSuffix(name, "_timeout"), "proxy_"), n)
+		return true
+	}
 }
 
 func convertRedirect(r row) *RedirectItem {

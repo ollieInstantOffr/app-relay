@@ -66,7 +66,15 @@ export default function NpmImportWizard({ open, onClose }: { open: boolean; onCl
       setPreview(pv)
       setStep(1)
     } catch (err) {
-      setError(errorMessage(err))
+      // fetch rejects without a response when the connection is cut: most often
+      // a proxy in front of Relay limiting uploads, or the upload timing out.
+      if (mode === 'upload' && err instanceof TypeError) {
+        setError(
+          'The upload was cut off before Relay answered. If you open Relay through a domain, the proxy in front of it may limit uploads ' +
+            '(update Relay, or raise Max body size on that host). You can also copy the NPM data folder to the server, mount it into the ' +
+            'Relay container and use “Mounted folder” instead.',
+        )
+      } else setError(errorMessage(err))
     } finally {
       setBusy(false)
     }

@@ -25,6 +25,8 @@ import (
 	"github.com/instantoffr/relay/internal/core"
 	"github.com/instantoffr/relay/internal/events"
 	"github.com/instantoffr/relay/internal/model"
+	"github.com/instantoffr/relay/internal/render"
+	edgerender "github.com/instantoffr/relay/internal/render/edge"
 	"github.com/instantoffr/relay/internal/store"
 )
 
@@ -66,7 +68,8 @@ func fixture(t *testing.T) string {
 			VALUES (1, '["Grafana.example.com"]', '10.0.0.21', 3000, 1, 1, 1, 1, 1, 1, 'http', 1,
 			'[{"path":"/api","advanced_config":"","forward_scheme":"https","forward_host":"10.0.0.22/v1","forward_port":8443}]', 1, '')`,
 		`INSERT INTO proxy_host (id, domain_names, forward_host, forward_port, forward_scheme, enabled, locations, advanced_config)
-			VALUES (2, '["taken.example.com"]', '10.0.0.30', 80, 'http', 0, '[]', 'client_max_body_size 0;')`,
+			VALUES (2, '["taken.example.com"]', '10.0.0.30', 80, 'http', 0, '[]', 'client_max_body_size 0;
+proxy_set_header X-Test 1;')`,
 		`INSERT INTO proxy_host (id, is_deleted, domain_names, forward_host, forward_port) VALUES (3, 1, '["gone.example.com"]', '10.0.0.40', 80)`,
 
 		`INSERT INTO redirection_host VALUES (1, 0, '["old.example.com"]', 'new.example.com', 1, 0, 1, 0, '', '{}', 0, 1, 0, 0, 301, 'auto')`,
@@ -270,5 +273,76 @@ func TestConvertNPMSemantics(t *testing.T) {
 	c := convertCert(row{"id": int64(1), "provider": "other", "nice_name": "Custom", "domain_names": `["secure.example.com"]`, "meta": string(meta)}, "", time.Now())
 	if c.Chain == nil || c.Key == nil || c.Cert.Status != model.CertStatusValid || strings.Join(c.Cert.Domains, ",") != "secure.example.com,www.secure.example.com" {
 		t.Fatalf("custom cert = %+v warnings=%v", c.Cert, c.Warnings)
+	}
+}
+
+// TestImportRendersWithEdge imports the fixture and renders the result with
+// Relay Edge: imported hosts, redirects, streams, access lists and
+// certificates must work there too, with nginx-only directives lifted into
+// host settings.
+func TestImportRendersWithEdge(t *testing.T) {
+	npmDir := fixture(t)
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "relay.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	app := core.New(core.Config{DataDir: dir, RunDir: dir, LogDir: dir}, st, events.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := context.Background()
+	s := New(app)
+	pv, err := s.PreviewPath(ctx, npmDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("POST", "/api/import/npm/commit", nil).WithContext(core.WithActor(ctx, core.Actor{Type: core.ActorUser, Name: "jonas", Role: core.RoleAdmin}))
+	res, err := s.Commit(req, pv.Token, false)
+	// The wildcard certificate needs a DNS provider and is skipped.
+	if err != nil || res.Created["hosts"] != 2 || res.Created["redirects"] != 1 || res.Created["streams"] != 1 || res.Created["accessLists"] != 1 {
+		t.Fatalf("commit = %+v, %v", res, err)
+	}
+	hosts, _ := st.Hosts().List(ctx)
+	var taken model.ProxyHost
+	for _, h := range hosts {
+		if h.Domains[0] == "taken.example.com" {
+			taken = h
+		}
+	}
+	if taken.MaxBodySize != "0" || taken.CustomNginx != "proxy_set_header X-Test 1;" {
+		t.Fatalf("client_max_body_size not lifted: %+v", taken)
+	}
+	snap, err := st.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.General.ProxyEngine = "edge"
+	env := render.DefaultEnv(dir, dir, dir)
+	env.Modules = map[string]bool{"stream": true, "http_v3": true, "auth_request": true, "ipv6": true}
+	files, err := edgerender.Render(snap, env)
+	if err != nil {
+		t.Fatalf("edge render: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatal("no edge files")
+	}
+}
+
+func TestLiftDirectives(t *testing.T) {
+	it := &HostItem{Base: Base{Warnings: []string{}}}
+	h := model.ProxyHost{Domains: []string{"a.example.com"}, Enabled: true, Upstream: model.Upstream{Scheme: "http", Host: "10.0.0.1", Port: 80},
+		HSTS: "inherit", Source: model.SourceImport, Locations: []model.Location{}}
+	left := liftDirectives(&h, "client_max_body_size 512M;\nproxy_read_timeout 5m;\nproxy_send_timeout 300s; # uploads\nlocation /x {\n  client_max_body_size 1m;\n}\n# note", it)
+	if h.MaxBodySize != "512m" || h.ProxyReadTimeout != 300 || h.ProxySendTimeout != 300 {
+		t.Fatalf("host = %+v", h)
+	}
+	if left != "location /x {\n  client_max_body_size 1m;\n}\n# note" {
+		t.Fatalf("left = %q", left)
+	}
+	h2 := model.ProxyHost{}
+	if liftDirectives(&h2, "# just a comment\nclient_max_body_size 0;", it) != "" || h2.MaxBodySize != "0" {
+		t.Fatalf("h2 = %+v", h2)
+	}
+	if err := h.Validate(); err != nil {
+		t.Fatalf("lifted host invalid: %v", err)
 	}
 }
