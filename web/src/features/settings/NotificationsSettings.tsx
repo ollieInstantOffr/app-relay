@@ -6,7 +6,7 @@ import { useRole, useSaveSettings, useSettings } from '../../lib/queries'
 import type { NotificationChannel, NotificationEvent, NotificationSettings as NotificationSettingsT } from '../../lib/types'
 import { ago } from '../../lib/format'
 import {
-  Button, Callout, Card, Checkbox, Dialog, Field, IconButton, Input, Menu, PasswordInput, SectionHeader, Segmented, Select, Skeleton, Toggle, useToast,
+  Button, Callout, Card, Checkbox, Dialog, Field, IconButton, Input, Menu, PasswordInput, SectionHeader, Segmented, Skeleton, Toggle, useToast,
 } from '../../components/ui'
 import { opsKeys, useNotificationLog } from '../docker/ops'
 import '../docker/ops.css'
@@ -23,15 +23,14 @@ const EVENTS: { key: NotificationEvent; label: string; critical?: boolean }[] = 
   { key: 'weekly_summary', label: 'Weekly summary' },
 ]
 
-const CHANNEL_TYPES: ChannelType[] = ['ntfy', 'smtp', 'resend', 'webhook']
-const TYPE_LABEL: Record<ChannelType, string> = { ntfy: 'ntfy', smtp: 'Email (SMTP)', resend: 'Email (Resend)', webhook: 'Webhook' }
+const CHANNEL_TYPES: ChannelType[] = ['smtp', 'resend', 'webhook']
+const TYPE_LABEL: Record<ChannelType, string> = { smtp: 'Email (SMTP)', resend: 'Email (Resend)', webhook: 'Webhook' }
 const TYPE_HINT: Record<ChannelType, string> = {
-  ntfy: 'Push notifications to your phone',
   smtp: 'Any SMTP server · Fastmail, Gmail, Postmark…',
   resend: 'Resend email API · no SMTP server needed',
   webhook: 'Discord, Slack, Home Assistant…',
 }
-const SECRET: Record<ChannelType, string> = { ntfy: 'token', smtp: 'password', resend: 'apiKey', webhook: 'secret' }
+const SECRET: Record<ChannelType, string> = { smtp: 'password', resend: 'apiKey', webhook: 'secret' }
 
 function target(ch: NotificationChannel): string {
   if (ch.type === 'resend') return `Resend → ${ch.config.to ?? ''}`
@@ -134,27 +133,6 @@ function ChannelDialog({ open, initial, onClose, onSave }: {
         <Field label="Name">
           <Input value={ch.name} placeholder={TYPE_LABEL[ch.type]} onChange={(e) => setCh({ ...ch, name: e.target.value })} />
         </Field>
-
-        {ch.type === 'ntfy' && (
-          <>
-            <Field label="Topic URL" error={fieldErr('url')} hint="Your ntfy server and topic, e.g. https://ntfy.sh/relay-a8f3">
-              <Input mono value={cfg.url ?? ''} placeholder="https://ntfy.home.lan/relay" invalid={!!fieldErr('url')} onChange={(e) => set('url', e.target.value)} autoFocus />
-            </Field>
-            <div className="grid-2">
-              <Field label="Access token" hint="Optional · tk_… or user:password">
-                <PasswordInput mono value={cfg.token ?? ''} placeholder={secretPlaceholder} onChange={(e) => set('token', e.target.value)} />
-              </Field>
-              <Field label="Priority">
-                <Select
-                  value={cfg.priority ?? ''}
-                  placeholder="By severity"
-                  options={['min', 'low', 'default', 'high', 'urgent']}
-                  onChange={(v) => set('priority', v)}
-                />
-              </Field>
-            </div>
-          </>
-        )}
 
         {ch.type === 'smtp' && (
           <>

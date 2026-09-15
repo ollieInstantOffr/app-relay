@@ -78,7 +78,7 @@ func TestWebhookPayload(t *testing.T) {
 	}
 }
 
-func TestSendNtfyAndWebhook(t *testing.T) {
+func TestSendWebhook(t *testing.T) {
 	var got *http.Request
 	var body string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -87,12 +87,6 @@ func TestSendNtfyAndWebhook(t *testing.T) {
 	}))
 	defer srv.Close()
 	msg := Message{Event: "cert_expiring", Level: "warn", Title: "Zertifikat läuft ab", Message: "in 5 days", At: at(1, 0)}
-	if err := Send(context.Background(), model.NotificationChannel{Type: TypeNtfy, Config: map[string]string{"url": srv.URL + "/relay", "token": "tk_abc"}}, msg); err != nil {
-		t.Fatal(err)
-	}
-	if got.Header.Get("Authorization") != "Bearer tk_abc" || got.Header.Get("Priority") != "default" || !strings.HasPrefix(got.Header.Get("Title"), "=?utf-8?") || body != "in 5 days" {
-		t.Errorf("ntfy request: %v %q", got.Header, body)
-	}
 	if err := Send(context.Background(), model.NotificationChannel{Type: TypeWebhook, Config: map[string]string{"url": srv.URL, "secret": "s3"}}, msg); err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +134,7 @@ func TestSettingsSecrets(t *testing.T) {
 	if _, ok := next.Routes["bogus"]; ok {
 		t.Error("unknown event kept")
 	}
-	bad := &model.NotificationSettings{Channels: []model.NotificationChannel{{Type: TypeNtfy, Config: map[string]string{"url": "ftp://x"}}}}
+	bad := &model.NotificationSettings{Channels: []model.NotificationChannel{{Type: TypeWebhook, Config: map[string]string{"url": "ftp://x"}}}}
 	err := prepare(&model.NotificationSettings{}, bad)
 	if ve, ok := err.(*model.ValidationError); !ok || ve.Fields["channels.0.config.url"] == "" {
 		t.Errorf("validation = %v", err)
@@ -157,7 +151,7 @@ func TestRoutingQuietDedupe(t *testing.T) {
 	app := core.New(core.Config{DataDir: dir, RunDir: dir, LogDir: dir}, st, events.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ctx := context.Background()
 	st.PutSettings(ctx, model.SettingsNotifications, model.NotificationSettings{
-		Channels: []model.NotificationChannel{{ID: "n", Type: TypeNtfy, Enabled: true, Config: map[string]string{"url": "http://x"}}},
+		Channels: []model.NotificationChannel{{ID: "n", Type: TypeWebhook, Enabled: true, Config: map[string]string{"url": "http://x"}}},
 		Routes: map[string][]string{
 			model.EventUpstreamDown: {"n"}, model.EventCertExpiring: {"n"}, model.EventUnknownSignIn: {"n"},
 		},
@@ -215,5 +209,27 @@ func TestRoutingQuietDedupe(t *testing.T) {
 	n, err := s.WeeklySummary(ctx, at(9, 0))
 	if err != nil || !strings.Contains(n.Message, "Hosts: 0") {
 		t.Errorf("summary = %+v %v", n, err)
+	}
+}
+
+func TestDropRemovedChannels(t *testing.T) {
+	s := &model.NotificationSettings{
+		Channels: []model.NotificationChannel{
+			{ID: "old", Type: "ntfy", Config: map[string]string{"url": "https://ntfy.sh/x"}},
+			{ID: "mail", Type: TypeSMTP, Config: map[string]string{"host": "smtp.x", "from": "relay@x.org", "to": "a@x.org"}},
+		},
+		Routes: map[string][]string{model.EventUpstreamDown: {"old", "mail"}},
+	}
+	if err := prepare(&model.NotificationSettings{}, s); err != nil {
+		t.Fatalf("legacy ntfy channel blocked saving: %v", err)
+	}
+	if len(s.Channels) != 1 || s.Channels[0].ID != "mail" {
+		t.Errorf("channels = %+v", s.Channels)
+	}
+	if r := s.Routes[model.EventUpstreamDown]; len(r) != 1 || r[0] != "mail" {
+		t.Errorf("routes = %v", s.Routes)
+	}
+	if err := Send(context.Background(), model.NotificationChannel{Type: "ntfy"}, Message{}); err == nil {
+		t.Error("ntfy still sendable")
 	}
 }

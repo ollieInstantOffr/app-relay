@@ -154,7 +154,7 @@ func TestRoutes(t *testing.T) {
 	}
 
 	// Notifications.
-	if w := do(t, h, "POST", "/notifications/test", map[string]any{"channel": map[string]any{"type": "ntfy", "config": map[string]string{"url": "nope"}}}); w.Code != 422 {
+	if w := do(t, h, "POST", "/notifications/test", map[string]any{"channel": map[string]any{"type": "webhook", "config": map[string]string{"url": "nope"}}}); w.Code != 422 {
 		t.Fatalf("test invalid channel: %d %s", w.Code, w.Body)
 	}
 	if w := do(t, h, "POST", "/notifications/test", map[string]any{"channel": map[string]any{"type": "webhook", "name": "hook", "config": map[string]string{"url": "http://127.0.0.1:1/unreachable"}}}); w.Code != 200 || !strings.Contains(w.Body.String(), `"ok":false`) {

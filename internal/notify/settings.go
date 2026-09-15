@@ -62,7 +62,7 @@ func ValidateChannel(ch model.NotificationChannel) model.Errs {
 	errs := model.Errs{}
 	cfg := ch.Config
 	switch ch.Type {
-	case TypeNtfy, TypeWebhook:
+	case TypeWebhook:
 		if err := checkHTTPURL(strings.TrimSpace(cfg["url"])); err != nil {
 			errs.Add("config.url", "enter an http(s) URL")
 		}
@@ -105,15 +105,13 @@ func ValidateChannel(ch model.NotificationChannel) model.Errs {
 			}
 		}
 	default:
-		errs.Add("type", "choose ntfy, smtp, resend or webhook")
+		errs.Add("type", "choose smtp, resend or webhook")
 	}
 	return errs
 }
 
 func defaultName(t string) string {
 	switch t {
-	case TypeNtfy:
-		return "ntfy"
 	case TypeSMTP:
 		return "Email (SMTP)"
 	case TypeResend:
@@ -130,6 +128,7 @@ func RegisterSettingsHook() {
 	httpx.SettingsHooks[model.SettingsNotifications] = &httpx.SettingsHook{
 		Decorate: func(r *http.Request, v any) any {
 			s := *(v.(*model.NotificationSettings))
+			DropRemovedChannels(&s)
 			Redact(&s)
 			return s
 		},
@@ -144,6 +143,7 @@ func RegisterSettingsHook() {
 
 func prepare(prev, next *model.NotificationSettings) error {
 	errs := model.Errs{}
+	DropRemovedChannels(next)
 	if next.Channels == nil {
 		next.Channels = []model.NotificationChannel{}
 	}
@@ -217,4 +217,36 @@ func isSecret(t, key string) bool {
 		}
 	}
 	return false
+}
+
+// removedTypes are channel types Relay no longer supports. Stored channels of
+// these types are dropped (with their routes) instead of failing validation.
+var removedTypes = map[string]bool{"ntfy": true}
+
+// DropRemovedChannels removes channels of unsupported types and routes to them.
+func DropRemovedChannels(s *model.NotificationSettings) {
+	kept := make([]model.NotificationChannel, 0, len(s.Channels))
+	gone := map[string]bool{}
+	for _, ch := range s.Channels {
+		if removedTypes[strings.ToLower(strings.TrimSpace(ch.Type))] {
+			gone[ch.ID] = true
+			continue
+		}
+		kept = append(kept, ch)
+	}
+	if len(gone) == 0 {
+		return
+	}
+	s.Channels = kept
+	routes := make(map[string][]string, len(s.Routes))
+	for event, ids := range s.Routes {
+		list := make([]string, 0, len(ids))
+		for _, id := range ids {
+			if !gone[id] {
+				list = append(list, id)
+			}
+		}
+		routes[event] = list
+	}
+	s.Routes = routes
 }

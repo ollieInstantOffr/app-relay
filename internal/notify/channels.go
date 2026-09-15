@@ -31,7 +31,6 @@ import (
 
 // Channel types.
 const (
-	TypeNtfy    = "ntfy"
 	TypeSMTP    = "smtp"
 	TypeResend  = "resend"
 	TypeWebhook = "webhook"
@@ -39,7 +38,6 @@ const (
 
 // secretKeys are config keys that are write-only through the API.
 var secretKeys = map[string][]string{
-	TypeNtfy:    {"token"},
 	TypeSMTP:    {"password"},
 	TypeResend:  {"apiKey"},
 	TypeWebhook: {"secret"},
@@ -64,8 +62,6 @@ var httpClient = &http.Client{Timeout: 15 * time.Second}
 // Send delivers msg over one channel.
 func Send(ctx context.Context, ch model.NotificationChannel, msg Message) error {
 	switch ch.Type {
-	case TypeNtfy:
-		return sendNtfy(ctx, ch.Config, msg)
 	case TypeSMTP:
 		return sendSMTP(ctx, ch.Config, msg)
 	case TypeResend:
@@ -74,76 +70,6 @@ func Send(ctx context.Context, ch model.NotificationChannel, msg Message) error 
 		return sendWebhook(ctx, ch.Config, msg)
 	}
 	return fmt.Errorf("unknown channel type %q", ch.Type)
-}
-
-// ---------------------------------------------------------------- ntfy
-
-func headerValue(s string) string {
-	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r", " "), "\n", " ")
-	for _, r := range s {
-		if r > 127 {
-			return mime.QEncoding.Encode("utf-8", s)
-		}
-	}
-	return s
-}
-
-func ntfyPriority(cfg map[string]string, level string) string {
-	if p := strings.TrimSpace(cfg["priority"]); p != "" {
-		return p
-	}
-	switch level {
-	case "error":
-		return "high"
-	case "warn":
-		return "default"
-	}
-	return "low"
-}
-
-func ntfyTags(level, event string) string {
-	tag := "information_source"
-	switch level {
-	case "error":
-		tag = "rotating_light"
-	case "warn":
-		tag = "warning"
-	case "ok":
-		tag = "white_check_mark"
-	}
-	if event != "" {
-		return tag + "," + event
-	}
-	return tag
-}
-
-func sendNtfy(ctx context.Context, cfg map[string]string, msg Message) error {
-	u := strings.TrimSpace(cfg["url"])
-	if err := checkHTTPURL(u); err != nil {
-		return err
-	}
-	body := msg.Message
-	if body == "" {
-		body = msg.Title
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, strings.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Title", headerValue(msg.Title))
-	req.Header.Set("Priority", ntfyPriority(cfg, msg.Level))
-	req.Header.Set("Tags", ntfyTags(msg.Level, msg.Event))
-	if isAbsoluteURL(msg.URL) { // ntfy only opens absolute links
-		req.Header.Set("Click", msg.URL)
-	}
-	if tok := strings.TrimSpace(cfg["token"]); tok != "" {
-		if user, pass, ok := strings.Cut(tok, ":"); ok && !strings.HasPrefix(tok, "tk_") {
-			req.SetBasicAuth(user, pass)
-		} else {
-			req.Header.Set("Authorization", "Bearer "+tok)
-		}
-	}
-	return doHTTP(req)
 }
 
 // ---------------------------------------------------------------- webhook

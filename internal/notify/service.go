@@ -1,4 +1,4 @@
-// Package notify routes Relay events to ntfy, SMTP and webhook channels
+// Package notify routes Relay events to SMTP, Resend and webhook channels
 // (slice: ops).
 package notify
 
@@ -96,6 +96,7 @@ func (s *Service) settings(ctx context.Context) model.NotificationSettings {
 	if err != nil {
 		return store.DefaultNotifications()
 	}
+	DropRemovedChannels(&v)
 	return v
 }
 
