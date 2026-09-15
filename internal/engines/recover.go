@@ -51,7 +51,7 @@ func (s *Service) recoverInterrupted(ctx context.Context) {
 		sctx, c2 := context.WithTimeout(dctx, 5*time.Second)
 		st, stErr := s.agentClient(engine).Status(sctx)
 		c2()
-		if cur != nil && cur.State == "running" && stErr == nil && (st.Running || !st.Configured) {
+		if cur != nil && cur.State == "running" && stErr == nil && (st.Running || !st.Configured || (engine == "nginx" && !s.activeProxy(dctx, engine))) {
 			for _, o := range olds {
 				cli.ContainerRemove(dctx, o.ID, container.RemoveOptions{Force: true})
 			}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
 )
 
@@ -33,23 +34,14 @@ func compileIPRules(rules []IPRule) (*ipMatcher, error) {
 	m := &ipMatcher{rules: make([]compiledRule, 0, len(rules))}
 	for i, r := range rules {
 		c := compiledRule{allow: r.Allow}
-		v := strings.TrimSpace(r.CIDR)
-		switch {
-		case strings.EqualFold(v, "all"):
+		if strings.EqualFold(strings.TrimSpace(r.CIDR), "all") {
 			c.all = true
-		case strings.Contains(v, "/"):
-			p, err := netip.ParsePrefix(v)
+		} else {
+			p, err := parsePrefix(r.CIDR)
 			if err != nil {
-				return nil, fmt.Errorf("rule %d: invalid prefix %q", i+1, v)
+				return nil, fmt.Errorf("rule %d: %w", i+1, err)
 			}
-			c.prefix = p.Masked()
-		default:
-			a, err := netip.ParseAddr(v)
-			if err != nil {
-				return nil, fmt.Errorf("rule %d: invalid address %q", i+1, v)
-			}
-			a = a.Unmap()
-			c.prefix = netip.PrefixFrom(a, a.BitLen())
+			c.prefix = p
 		}
 		m.rules = append(m.rules, c)
 	}
@@ -71,8 +63,90 @@ func (m *ipMatcher) decide(addr netip.Addr) (allow, matched bool) {
 	return true, false
 }
 
+// parsePrefix accepts an address or a CIDR prefix.
+func parsePrefix(s string) (netip.Prefix, error) {
+	v := strings.TrimSpace(s)
+	if strings.Contains(v, "/") {
+		p, err := netip.ParsePrefix(v)
+		if err != nil {
+			return netip.Prefix{}, fmt.Errorf("invalid prefix %q", v)
+		}
+		if p.Addr().Is4In6() {
+			p = netip.PrefixFrom(p.Addr().Unmap(), max(p.Bits()-96, 0))
+		}
+		return p.Masked(), nil
+	}
+	a, err := netip.ParseAddr(v)
+	if err != nil {
+		return netip.Prefix{}, fmt.Errorf("invalid address %q", v)
+	}
+	a = a.Unmap().WithZone("")
+	return netip.PrefixFrom(a, a.BitLen()), nil
+}
+
+// prefixMap maps prefixes to values with longest-prefix lookup (nginx geo).
+// Lookups mask the address once per distinct prefix length, so large
+// blocklists stay O(lengths) instead of O(entries).
+type prefixMap[V any] struct {
+	entries map[netip.Prefix]V
+	v4, v6  []int // distinct prefix lengths, longest first
+}
+
+func newPrefixMap[V any]() *prefixMap[V] {
+	return &prefixMap[V]{entries: map[netip.Prefix]V{}}
+}
+
+// add sets the value of p; the first value added for a prefix wins.
+func (m *prefixMap[V]) add(p netip.Prefix, v V) {
+	if _, dup := m.entries[p]; dup {
+		return
+	}
+	m.entries[p] = v
+	lens := &m.v6
+	if p.Addr().Is4() {
+		lens = &m.v4
+	}
+	if !slices.Contains(*lens, p.Bits()) {
+		*lens = append(*lens, p.Bits())
+		slices.Sort(*lens)
+		slices.Reverse(*lens)
+	}
+}
+
+func (m *prefixMap[V]) lookup(addr netip.Addr) (V, bool) {
+	var zero V
+	if m == nil || len(m.entries) == 0 || !addr.IsValid() {
+		return zero, false
+	}
+	addr = addr.Unmap()
+	lens := m.v6
+	if addr.Is4() {
+		lens = m.v4
+	}
+	for _, bits := range lens {
+		p, err := addr.Prefix(bits)
+		if err != nil {
+			continue
+		}
+		if v, ok := m.entries[p]; ok {
+			return v, true
+		}
+	}
+	return zero, false
+}
+
+func (m *prefixMap[V]) len() int {
+	if m == nil {
+		return 0
+	}
+	return len(m.entries)
+}
+
 // hostAddr parses the IP of a "host:port" (or bare host) remote address.
 func hostAddr(remote string) netip.Addr {
+	if ap, err := netip.ParseAddrPort(remote); err == nil {
+		return ap.Addr().Unmap().WithZone("")
+	}
 	host := remote
 	if h, _, err := net.SplitHostPort(remote); err == nil {
 		host = h
@@ -81,5 +155,5 @@ func hostAddr(remote string) netip.Addr {
 	if err != nil {
 		return netip.Addr{}
 	}
-	return a.Unmap()
+	return a.Unmap().WithZone("")
 }

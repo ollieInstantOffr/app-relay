@@ -20,7 +20,7 @@ curl -fsS http://127.0.0.1:8181/healthz`} />
           ['Is the app running?', <C>curl -I http://192.168.1.20:3000</C>],
           ['Right port and scheme?', 'An app that serves HTTPS needs upstream scheme https.'],
           ['Reachable from Relay’s host?', <>Run the curl on the Docker host itself; firewalls (ufw, firewalld) often block it.</>],
-          ['What does nginx say?', <><UI>Logs → Error</UI>, e.g. <C>connect() failed (111: Connection refused)</C>.</>],
+          ['What does the proxy say?', <><UI>Logs → Error</UI>, e.g. <C>connect() failed (111: Connection refused)</C>.</>],
           ['App bound to localhost only?', <>Apps listening on <C>127.0.0.1</C> inside a container can’t be reached; bind to <C>0.0.0.0</C>.</>],
         ]}
       />
@@ -65,6 +65,7 @@ curl -fsS http://127.0.0.1:8181/healthz`} />
       <H2>Where are the raw logs?</H2>
       <Example lang="bash" code={`docker logs relay            # Relay app
 docker logs relay-nginx      # nginx engine + agent
+docker logs relay-edge       # Relay Edge engine + agent
 docker logs relay-haproxy    # HAProxy engine + agent`} />
     </>
   )
@@ -78,14 +79,15 @@ function Reference() {
         head={['Port', 'Used by', 'Purpose']}
         mono={[0]}
         rows={[
-          ['80/tcp', 'nginx', 'HTTP, redirects to HTTPS, ACME HTTP-01 challenges'],
-          ['443/tcp', 'nginx', 'HTTPS for proxy hosts'],
-          ['443/udp', 'nginx', 'HTTP/3 (only when enabled)'],
+          ['80/tcp', 'nginx or edge', 'HTTP, redirects to HTTPS, ACME HTTP-01 challenges'],
+          ['443/tcp', 'nginx or edge', 'HTTPS for proxy hosts'],
+          ['443/udp', 'nginx or edge', 'HTTP/3 (only when enabled)'],
           ['8181/tcp', 'relay', 'Admin UI, REST API and MCP endpoint (change in Settings → General)'],
           ['127.0.0.1:18080', 'nginx', 'Status for Relay’s metrics'],
+          ['127.0.0.1:18081', 'edge', 'Relay Edge status: /healthz, /stub_status, /metrics (Prometheus)'],
           ['127.0.0.1:8404', 'haproxy', 'Stats and Prometheus metrics'],
           ['127.0.0.1:10080+', 'haproxy', 'Local frontends created by Expose'],
-          ['(your choice)', 'nginx', 'TCP/UDP streams'],
+          ['(your choice)', 'nginx or edge', 'TCP/UDP streams'],
         ]}
       />
 
@@ -96,9 +98,9 @@ function Reference() {
         rows={[
           ['relay-data', 'Database, certificates, ACME files and backups. The one to back up.'],
           ['relay-run', 'Control sockets between Relay and the engines.'],
-          ['relay-logs', 'nginx access, stream and error logs.'],
+          ['relay-logs', 'Access, stream and error logs of the proxy engine.'],
           ['relay-bin', 'The Relay agent binary shared with the engine containers.'],
-          ['relay-nginx · relay-haproxy', 'Applied configuration releases, so engines keep serving after a restart.'],
+          ['relay-nginx · relay-edge · relay-haproxy', 'Applied configuration releases, so engines keep serving after a restart.'],
         ]}
       />
 
@@ -111,7 +113,8 @@ function Reference() {
           ['RELAY_LISTEN', 'relay', 'Bind address and first-start port of the admin UI (default :8181). Afterwards the port is set in Settings → General.'],
           ['RELAY_NGINX_IMAGE / RELAY_HAPROXY_IMAGE', 'compose', 'Engine image versions.'],
           ['RELAY_NGINX_STATUS_PORT', 'relay, nginx', 'Local nginx status port (default 18080).'],
-          ['RELAY_BOOTSTRAP_HTTP_PORT', 'nginx', 'Port for the bootstrap config before the first apply.'],
+          ['RELAY_EDGE_STATUS_PORT', 'relay, edge', 'Local Relay Edge status and metrics port (default 18081).'],
+          ['RELAY_BOOTSTRAP_HTTP_PORT', 'nginx, edge', 'Port for the bootstrap config before the first apply.'],
           ['RELAY_ACME_DNS_RESOLVERS', 'relay', 'Resolvers for DNS-01 propagation checks, e.g. 10.0.0.53:53.'],
           ['RELAY_ACME_INSECURE_SKIP_VERIFY', 'relay', 'Testing only: skip TLS verification of the ACME server.'],
           ['RELAY_COMPOSE_PROJECT', 'relay', 'Set automatically; which compose project’s engines Relay manages.'],
@@ -132,7 +135,9 @@ function Reference() {
           ['relay version', 'Print the version and build commit.'],
           ['relay healthcheck', 'Exit 0 when the admin UI answers (used by the container healthcheck; follows the admin port).'],
           ['relay serve', 'Run the app (what the relay container does).'],
-          ['relay agent --engine nginx|haproxy', 'Run an engine agent (what the engine containers do).'],
+          ['relay agent --engine nginx|haproxy|edge', 'Run an engine agent (what the engine containers do).'],
+          ['relay edge run --config <file>', 'Run Relay Edge with a config file (the edge agent does this).'],
+          ['relay edge check <dir>', 'Validate a Relay Edge config release; exit 0 when valid.'],
         ]}
       />
       <Example lang="bash" title="Run commands inside the container" code={`docker exec -it relay relay users reset-password admin

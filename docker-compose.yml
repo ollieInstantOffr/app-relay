@@ -1,16 +1,20 @@
-# Relay: reverse proxy (nginx) + load balancer (HAProxy) manager.
+# Relay: reverse proxy (nginx or Relay Edge) + load balancer (HAProxy) manager.
 #
 #   docker compose up -d --build
 #   open http://<host>:8181   (first run starts the setup wizard)
 #
-# All three containers use host networking: nginx binds 80/443 (+443/udp for
-# HTTP/3) directly on the host, HAProxy frontends created by the Expose wizard
-# bind 127.0.0.1:10080+ and are reached by nginx over loopback.
+# All containers use host networking. The selected proxy engine (Settings →
+# General → Proxy engine: nginx by default, or Relay Edge) binds 80/443
+# (+443/udp for HTTP/3) directly on the host; the other one stays stopped.
+# HAProxy frontends created by the Expose wizard bind 127.0.0.1:10080+ and are
+# reached by the proxy engine over loopback.
 #
 # nginx and HAProxy run the OFFICIAL images. The relay container copies its
 # static binary into the relay-bin volume and each engine container runs it as
 # `relay agent` (PID 1), so engines can be upgraded from the UI
-# (Settings → Engines & updates) without rebuilding anything.
+# (Settings → Engines & updates) without rebuilding anything. Relay Edge is
+# part of the relay binary (`relay edge run`) and runs in a plain Alpine
+# container, so it is upgraded together with Relay.
 # Pin versions in .env, e.g. RELAY_NGINX_IMAGE=nginx:1.30.4-alpine.
 # See deploy/README.md (ports, volumes, socket proxy) and deploy/UPGRADES.md.
 
@@ -32,6 +36,7 @@ services:
       RELAY_LISTEN: ":8181"
       RELAY_AGENT_BIN_DIR: /opt/relay/bin
       RELAY_NGINX_STATUS_PORT: ${RELAY_NGINX_STATUS_PORT:-18080}
+      RELAY_EDGE_STATUS_PORT: ${RELAY_EDGE_STATUS_PORT:-18081}
       RELAY_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME}
       TZ: ${TZ:-UTC}
     volumes:
@@ -44,6 +49,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - nginx
+      - edge
       - haproxy
 
   nginx:
@@ -69,6 +75,34 @@ services:
       - relay-nginx:/etc/relay/nginx
     healthcheck:
       test: ["CMD-SHELL", "test -S /run/relay/nginx.sock && wget -q -O /dev/null http://127.0.0.1:$${RELAY_NGINX_STATUS_PORT}/stub_status"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # Relay Edge, the reverse proxy built into the relay binary. Only the proxy
+  # engine selected in Settings → General runs; the other agent idles.
+  edge:
+    image: alpine:3.22
+    container_name: relay-edge
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    labels:
+      relay.engine: edge
+    entrypoint: ["sh", "-c", "until [ -x /opt/relay/bin/relay ]; do sleep 1; done; exec /opt/relay/bin/relay agent --engine edge"]
+    environment:
+      RELAY_EDGE_STATUS_PORT: ${RELAY_EDGE_STATUS_PORT:-18081}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - relay-bin:/opt/relay:ro
+      - relay-data:/data:ro
+      - relay-run:/run/relay
+      - relay-logs:/var/log/relay
+      - relay-edge:/etc/relay/edge
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/relay/edge.sock"]
       interval: 30s
       timeout: 5s
       start_period: 20s
@@ -104,8 +138,9 @@ services:
 
 volumes:
   relay-data:     # SQLite database, certificates, ACME webroot, backups
-  relay-run:      # agent sockets shared between the containers
-  relay-logs:     # nginx access/error logs, ingested by relay
+  relay-run:      # agent sockets and the proxy-engine selection shared between the containers
+  relay-logs:     # proxy engine access/error logs, ingested by relay
   relay-nginx:    # applied nginx releases (survive engine restarts)
+  relay-edge:     # applied Relay Edge releases
   relay-haproxy:  # applied haproxy releases
   relay-bin:      # relay binary for the engine agents (written by relay)

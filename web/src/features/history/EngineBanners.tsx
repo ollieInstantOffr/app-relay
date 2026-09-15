@@ -1,5 +1,5 @@
-// Engine banners (design 22c/22d): nginx not running, HAProxy failed after
-// apply (auto-restored), and unreachable agents.
+// Engine banners (design 22c/22d): the active proxy engine (nginx or Relay Edge)
+// not running, HAProxy failed after apply (auto-restored), and unreachable agents.
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
@@ -103,10 +103,12 @@ export default function EngineBanners() {
   )
 
   if (data) {
-    if (!data.nginx.reachable) banners.push(unreachable('nginx', data.nginx))
-    else if (!data.nginx.running && (data.nginx.configured || enabledHosts > 0)) {
+    const proxy: EngineName = data.proxy === 'edge' ? 'edge' : 'nginx'
+    const ps = data[proxy]
+    if (ps && !ps.reachable) banners.push(unreachable(proxy, ps))
+    else if (ps && !ps.running && (ps.configured || enabledHosts > 0)) {
       const detail = enabledHosts > 0 ? `All ${enabledHosts} host${enabledHosts === 1 ? '' : 's'} unreachable` : 'The default server and ACME challenges are unavailable'
-      banners.push(notRunning('nginx', data.nginx, detail))
+      banners.push(notRunning(proxy, ps, detail))
     }
     const live = versions?.find((v) => v.status === 'live')
     if (hasBackends && !data.haproxy.reachable) banners.push(unreachable('haproxy', data.haproxy))
@@ -126,7 +128,7 @@ export default function EngineBanners() {
       : undefined
 
   if (failed) {
-    const engine = (failed.failedEngine ?? 'nginx') as EngineName
+    const engine = (failed.failedEngine ?? failed.proxyEngine ?? 'nginx') as EngineName
     const label = engineLabel[engine]
     const restored = failed.rolledBackTo ? `v${failed.rolledBackTo} was restored automatically and is serving traffic.` : 'The previous configuration was restored automatically.'
     let title: string

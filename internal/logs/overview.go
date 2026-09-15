@@ -24,8 +24,11 @@ type Overview struct {
 	Latency         OverviewLatency `json:"latency"`
 	BandwidthBytes  int64           `json:"bandwidthBytes"`
 	UnknownHostHits int64           `json:"unknownHostHits"`
-	Nginx           OverviewNginx   `json:"nginx"`
-	LastDataAt      *time.Time      `json:"lastDataAt"`
+	// Nginx describes the active proxy engine (nginx or Relay Edge, see
+	// ProxyEngine); the field name is kept for compatibility.
+	Nginx       OverviewNginx `json:"nginx"`
+	ProxyEngine string        `json:"proxyEngine"` // nginx | edge
+	LastDataAt  *time.Time    `json:"lastDataAt"`
 }
 
 type OverviewHosts struct {
@@ -166,13 +169,20 @@ func buildOverview(ctx context.Context, app *core.App, key string, spec rangeSpe
 		ov.Traffic.Buckets[i] = TrafficBucket{T: time.Unix((bStart+int64(i)*stepMin)*60, 0).UTC(), Requests: b.Requests, S5xx: b.S5xx}
 	}
 
-	// nginx
+	// Proxy engine (nginx or Relay Edge)
+	ov.ProxyEngine = app.ProxyEngine(ctx)
 	if app.Engine != nil {
 		sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		es, err := app.Engine.Status(sctx)
 		cancel()
 		if err == nil && es != nil {
+			if es.Proxy != "" {
+				ov.ProxyEngine = es.Proxy
+			}
 			n := es.Nginx
+			if ov.ProxyEngine == "edge" {
+				n = es.Edge
+			}
 			ov.Nginx = OverviewNginx{Version: n.Version, Running: n.Running, Reachable: n.Reachable}
 			if n.Running && n.StartedAt != nil {
 				up := int64(now.Sub(*n.StartedAt).Seconds())

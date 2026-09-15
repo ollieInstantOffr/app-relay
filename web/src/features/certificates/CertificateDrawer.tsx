@@ -54,7 +54,7 @@ function TestOnHostDialog({ open, onClose, cert, usage }: { open: boolean; onClo
       onClose={onClose}
       width={500}
       title="Test on host"
-      description="Opens a TLS connection to nginx on this machine with the host's name (SNI) and compares the certificate it serves."
+      description="Opens a TLS connection to the reverse proxy on this machine with the host's name (SNI) and compares the certificate it serves."
       footer={
         <>
           <Button onClick={onClose}>Close</Button>
@@ -66,14 +66,14 @@ function TestOnHostDialog({ open, onClose, cert, usage }: { open: boolean; onClo
         <Select value={hostId} onChange={setHostId} options={options} placeholder={options.length ? undefined : 'No hosts yet'} />
       </Field>
       {result?.ok && result.matches && (
-        <Callout tone="ok" title={`nginx serves ${cert.name} for ${result.sni}`}>
+        <Callout tone="ok" title={`The proxy serves ${cert.name} for ${result.sni}`}>
           <span className="mono">{result.address} · {result.servedFingerprint?.slice(0, 23)}…</span>
         </Callout>
       )}
       {result?.ok && !result.matches && (
-        <Callout tone="warn" title="nginx serves a different certificate">
+        <Callout tone="warn" title="The proxy serves a different certificate">
           {result.servedSubject} · issued by {result.servedIssuer || '—'} · expires {date(result.servedNotAfter)}.{' '}
-          {result.hostUsesCert ? 'Apply pending changes so nginx picks up this certificate.' : 'This host is not configured to use this certificate.'}
+          {result.hostUsesCert ? 'Apply pending changes so the proxy picks up this certificate.' : 'This host is not configured to use this certificate.'}
         </Callout>
       )}
       {result && !result.ok && <Callout tone="danger" title="Handshake failed">{result.error}</Callout>}

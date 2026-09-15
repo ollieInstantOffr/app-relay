@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/netip"
 	"reflect"
@@ -90,6 +91,10 @@ func (s *Service) generalBeforeSave(r *http.Request, prev, next any) error {
 	n.LANCIDR = strings.TrimSpace(n.LANCIDR)
 	n.Defaults.AccessListID = strings.TrimSpace(n.Defaults.AccessListID)
 	n.Defaults.CertificateID = strings.TrimSpace(n.Defaults.CertificateID)
+	n.ProxyEngine = strings.ToLower(strings.TrimSpace(n.ProxyEngine))
+	if n.ProxyEngine == "" {
+		n.ProxyEngine = "nginx"
+	}
 
 	e := model.Errs{}
 	switch {
@@ -136,6 +141,17 @@ func (s *Service) generalBeforeSave(r *http.Request, prev, next any) error {
 			e.Add("lanCidr", "Host bits are set — did you mean %s?", pfx.Masked())
 		}
 	}
+	switch n.ProxyEngine {
+	case "nginx":
+	case "edge":
+		if msg, err := s.customNginxBlocker(ctx); err != nil {
+			return err
+		} else if msg != "" {
+			e.Add("proxyEngine", "%s", msg)
+		}
+	default:
+		e.Add("proxyEngine", "Pick nginx or Relay Edge")
+	}
 	if id := n.Defaults.AccessListID; id != "" {
 		if _, err := s.app.Store.AccessLists().Get(ctx, id); errors.Is(err, store.ErrNotFound) {
 			e.Add("defaults.accessListId", "That access list no longer exists")
@@ -151,6 +167,29 @@ func (s *Service) generalBeforeSave(r *http.Request, prev, next any) error {
 		}
 	}
 	return e.Err()
+}
+
+// customNginxBlocker explains why Relay Edge can't be selected: hosts with
+// custom nginx snippets ("" when there are none).
+func (s *Service) customNginxBlocker(ctx context.Context) (string, error) {
+	hosts, err := s.app.Store.Hosts().List(ctx)
+	if err != nil {
+		return "", err
+	}
+	var names []string
+	for _, h := range hosts {
+		if strings.TrimSpace(h.CustomNginx) != "" {
+			names = append(names, firstDomain(h))
+		}
+	}
+	if len(names) == 0 {
+		return "", nil
+	}
+	list := strings.Join(names, ", ")
+	if len(names) > 5 {
+		list = fmt.Sprintf("%s and %d more", strings.Join(names[:5], ", "), len(names)-5)
+	}
+	return "Relay Edge can't run custom nginx snippets: remove them from " + list, nil
 }
 
 func (s *Service) generalAfterSave(r *http.Request, prev, next any) {

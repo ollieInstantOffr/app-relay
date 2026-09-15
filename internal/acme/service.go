@@ -374,9 +374,9 @@ func (s *Service) run(ctx context.Context, id string, opts launchOpts) {
 	s.publish(id, updated.Status)
 	detail := providerLabel(cert.Provider) + " · " + challengeLabel(cert.Challenge)
 	if renewal {
-		if s.certInLiveConfig(ctx, id) && s.app.Nginx != nil {
+		if pc, engine := s.app.Proxy(ctx); s.certInLiveConfig(ctx, id) && pc != nil {
 			rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-			resp, rerr := s.app.Nginx.Reload(rctx)
+			resp, rerr := pc.Reload(rctx)
 			cancel()
 			if rerr != nil || (resp != nil && !resp.OK) {
 				out := ""
@@ -384,7 +384,7 @@ func (s *Service) run(ctx context.Context, id string, opts launchOpts) {
 					out = resp.Output
 				}
 				s.app.Log.Warn("acme: reload after renewal", "cert", id, "err", rerr, "output", out)
-				s.app.Activity(ctx, "cert.reload_failed", "warn", "nginx reload after renewing "+updated.Name+" failed", updated.Name, firstNonEmpty(out, errString(rerr)))
+				s.app.Activity(ctx, "cert.reload_failed", "warn", core.ProxyEngineLabel(engine)+" reload after renewing "+updated.Name+" failed", updated.Name, firstNonEmpty(out, errString(rerr)))
 			}
 		}
 		s.app.Activity(ctx, "cert.renewed", "ok", "Certificate renewed for "+updated.Name, updated.Name, detail)

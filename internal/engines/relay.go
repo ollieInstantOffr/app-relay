@@ -149,7 +149,7 @@ fi
 
 if [ "${RELAY_RESTART_ENGINES:-0}" = 1 ]; then
   ids=$(docker ps -q --filter label=relay.engine --filter "label=com.docker.compose.project=$RELAY_PROJECT")
-  if [ -n "$ids" ]; then docker restart $ids >/dev/null 2>&1 && echo "Restarted nginx and HAProxy"; fi
+  if [ -n "$ids" ]; then docker restart $ids >/dev/null 2>&1 && echo "Restarted the engines"; fi
 fi
 echo "::done $TO"
 `

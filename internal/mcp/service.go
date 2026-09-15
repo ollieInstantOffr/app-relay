@@ -36,7 +36,7 @@ const (
 	stdioClientName = "relay-mcp-stdio"
 )
 
-const serverInstructions = `Relay manages an nginx reverse proxy and a HAProxy load balancer.
+const serverInstructions = `Relay manages a reverse proxy (nginx or Relay Edge) and a HAProxy load balancer.
 Configuration writes (create_host, update_host, delete_host) are saved as pending changes and are not live until apply_changes runs.
 Some write tools wait for a human to approve the call in Relay's approvals inbox; the call returns once it was approved, denied or expired.
 Tokens can be limited to certain domains or backends; objects outside that scope are invisible.`

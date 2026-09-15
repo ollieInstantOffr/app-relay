@@ -17,22 +17,26 @@ working end-to-end (no fake data in the UI): if a value can't be known, show
 ## Architecture
 
 ```
-docker compose (network_mode: host for all three)
+docker compose (network_mode: host for all four)
 ├─ relay          Go app: REST API /api, SPA, MCP /mcp, SQLite /data/relay.db, ACME, docker discovery
 ├─ relay-nginx    nginx + `relay agent --engine nginx`   (PID 1 supervises nginx)
+├─ relay-edge     alpine + `relay agent --engine edge`   (PID 1 supervises `relay edge run`, Relay Edge)
 └─ relay-haproxy  haproxy + `relay agent --engine haproxy`
-shared volumes: relay-data:/data (ro in engines), relay-run:/run/relay (agent sockets),
-                relay-logs:/var/log/relay (nginx access/error logs)
+shared volumes: relay-data:/data (ro in engines), relay-run:/run/relay (agent sockets, proxy-engine),
+                relay-logs:/var/log/relay (proxy engine access/error logs)
                 relay-bin:/opt/relay (relay copies its static binary here; engines run it)
 ```
 
 - Desired config = SQLite documents (`internal/model`, `internal/store`).
+- The **proxy engine** (`general.proxyEngine`: `nginx` | `edge`) serves the
+  HTTP/HTTPS ports and streams; only the selected one runs (`docs/EDGE.md`).
+  `app.Proxy(ctx)` returns its agent client, `app.ProxyEngine(ctx)` its name.
 - Edits are saved immediately and become **pending changes**. **Apply** renders
-  nginx files + haproxy.cfg, sends them to the agents (validate → atomic swap →
+  the proxy engine's files + haproxy.cfg, sends them to the agents (validate → atomic swap →
   reload), health-checks for 10 s and rolls back automatically on failure.
   Each apply is a config **version** with a full snapshot (rollback restores it).
 - Agents speak `internal/agent/protocol.go` over unix sockets
-  `/run/relay/nginx.sock` and `/run/relay/haproxy.sock`.
+  `/run/relay/nginx.sock`, `/run/relay/edge.sock` and `/run/relay/haproxy.sock`.
 - Because all containers use host networking, HAProxy frontends bound to
   `127.0.0.1:10080` are reachable from nginx (Expose wizard).
 
@@ -129,10 +133,10 @@ All JSON, camelCase, types in `web/src/lib/types.ts`. Errors:
 | `POST /api/apply` `{summary?}` → `Version` | engine | synchronous; progress via `apply.progress` events |
 | `POST /api/pending/discard` | engine | restores live snapshot |
 | `GET /api/versions` → `Version[]`, `GET /api/versions/{id}`, `GET /api/versions/{id}/diff?against=` , `POST /api/versions/{id}/rollback` | engine | |
-| `GET /api/engines` → `EnginesStatus`; `POST /api/engines/{engine}/{start|stop|reload}`; `GET /api/engines/{engine}/logs`; `GET /api/engines/{engine}/listeners` | engine | |
+| `GET /api/engines` → `EnginesStatus` (`nginx`, `edge`, `haproxy`, `proxy`); `POST /api/engines/{engine}/{start|stop|reload}`; `GET /api/engines/{engine}/logs`; `GET /api/engines/{engine}/listeners` | engine | engine = nginx \| edge \| haproxy |
 | `GET /api/engines/updates` → `EngineUpdates`; `POST /api/engines/updates/check` (admin); `POST /api/engines/{engine}/upgrade` `{version}` (admin, 202 → `UpgradeJob`); `GET /api/engines/upgrade-status` → `{job}`; `POST /api/engines/{engine}/keep-image` (admin) | engine | image version check + in-place upgrade (`internal/engines`); progress on `engine.upgrade`; settings key `engines`; see `deploy/UPGRADES.md` |
-| `POST /api/preview/nginx/host` `{host}` → `ConfigPreview` | engine | renders one server block (+ validates full config with the draft) |
-| `POST /api/preview/nginx/stream` `{stream}` → `ConfigPreview` | engine | |
+| `POST /api/preview/proxy/host` `{host}` → `ConfigPreview` | engine | active proxy engine: renders one host (+ validates the full config with the draft); `engine` in the response; `/api/preview/nginx/host` is an alias |
+| `POST /api/preview/proxy/stream` `{stream}` → `ConfigPreview` | engine | alias `/api/preview/nginx/stream` |
 | `POST /api/preview/haproxy/backend` `{backend}`, `/frontend` `{frontend}` → `ConfigPreview` | lb | |
 | `GET /api/haproxy/config` → `{config}` | lb | full haproxy.cfg (live) |
 | `GET /api/lb/stats` → `LBStats` | lb | |
@@ -169,7 +173,7 @@ The Expose wizard (lb) creates a HAProxy frontend bound to
 `127.0.0.1:<port>` (first free port ≥ `haproxy.exposePortStart`) with
 `hostId` set, and a proxy host whose upstream is
 `{scheme: "http", host: "127.0.0.1", port: <port>, backendId: <backend id>}`.
-The nginx renderer simply proxies to host:port; `backendId` is informational.
+The proxy engine renderers simply proxy to host:port; `backendId` is informational.
 A stream with `backendId` proxies to the first enabled TCP frontend bound to
 127.0.0.1 whose default backend is that backend (validation error otherwise).
 

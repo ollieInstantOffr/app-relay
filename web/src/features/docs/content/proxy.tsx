@@ -119,7 +119,7 @@ server { listen 80; server_name app.example.com; return 301 https://$host$reques
         <li>Disabling a host keeps its configuration but stops serving it after the next apply.</li>
       </List>
       <Warn title="Getting 502 Bad Gateway?">
-        nginx can’t reach the upstream. Check that the app is running, that the port is right, and that a firewall on the app’s machine allows
+        The proxy can’t reach the upstream. Check that the app is running, that the port is right, and that a firewall on the app’s machine allows
         connections from Relay’s host. The <UI>Logs → Error</UI> tab shows the exact reason (for example <C>connect() failed (111: Connection refused)</C>).
       </Warn>
     </>
@@ -210,7 +210,7 @@ function Redirects() {
         rows={[
           ['Domain names', 'The names to redirect. Wildcards allowed.'],
           ['From path', 'Leave empty to redirect every path, or enter one path such as /blog.'],
-          ['Redirect to', <>A full URL. nginx variables like <C>$host</C> are allowed.</>],
+          ['Redirect to', <>A full URL. Variables like <C>$host</C> are allowed.</>],
           ['Status code', '301 permanent · 302 temporary · 307/308 keep the method (POST stays POST).'],
           ['Keep path', <><C>/pricing?x=1</C> is appended to the target.</>],
           ['Force HTTPS', 'First upgrade http:// to https:// on the old domain.'],
@@ -252,7 +252,7 @@ Status code    302`} />
           ['Serve a proxy host', 'Treat one existing host as the catch-all.'],
         ]}
       />
-      <Note>For HTTPS requests to unknown names, nginx answers with a self-signed placeholder certificate (CN=localhost) so your real certificates aren’t revealed.</Note>
+      <Note>For HTTPS requests to unknown names, the proxy answers with a self-signed placeholder certificate (CN=localhost) so your real certificates aren’t revealed.</Note>
     </>
   )
 }
@@ -319,10 +319,10 @@ function Protection() {
 
       <H2>Single sign-on (forward auth)</H2>
       <P>
-        Put apps behind a login portal like <strong>Authelia</strong>, <strong>Authentik</strong> or <strong>oauth2-proxy</strong>. Before each request, nginx
+        Put apps behind a login portal like <strong>Authelia</strong>, <strong>Authentik</strong> or <strong>oauth2-proxy</strong>. Before each request, the reverse proxy
         asks the portal whether the visitor is signed in. If not, the visitor is sent to the sign-in page.
       </P>
-      <Flow steps={[{ label: 'Browser' }, { label: 'nginx', sub: 'auth_request' }, { label: 'Authelia', sub: 'verify URL' }, { label: 'Your app', sub: 'if 2xx' }]} />
+      <Flow steps={[{ label: 'Browser' }, { label: 'Reverse proxy', sub: 'forward auth' }, { label: 'Authelia', sub: 'verify URL' }, { label: 'Your app', sub: 'if 2xx' }]} />
       <Steps>
         <Step title="Pick a provider">Under <UI>Authentication</UI>, choose Authelia, Authentik or oauth2-proxy. Relay fills in typical URLs.</Step>
         <Step title="Adjust the URLs to your setup">
@@ -352,13 +352,13 @@ Exempt     LAN only    (your own network is never limited)`}
       <P>
         Allow or block visitors by country using two-letter codes (<C>NO</C>, <C>SE</C>, <C>DE</C>). Press <Kbd>⏎</Kbd> after each code.
       </P>
-      <Note>The official nginx image has no GeoIP2 module, so country rules are saved but not enforced. <UI>Settings → Updates</UI> shows the current status.</Note>
+      <Note>The official nginx image has no GeoIP2 module and Relay Edge doesn’t support country rules, so they are saved but not enforced. <UI>Settings → Updates</UI> shows the current status.</Note>
 
       <H2>Other options</H2>
       <Table
         head={['Option', 'Example', 'Why']}
         rows={[
-          ['Max upload size', '512 MB', <>Uploads larger than nginx’s default fail with <C>413</C>. Raise it for Nextcloud, Immich, file shares.</>],
+          ['Max upload size', '512 MB', <>Uploads larger than the default (1 MB) fail with <C>413</C>. Raise it for Nextcloud, Immich, file shares.</>],
           ['Proxy timeouts', '300 s', 'Long-running requests: exports, AI streaming, large reports. Empty means 60 s.'],
           ['Hide from search engines', 'on', <>Adds <C>X-Robots-Tag: noindex</C> to staging and internal tools.</>],
         ]}
@@ -369,6 +369,10 @@ Exempt     LAN only    (your own network is never limited)`}
         For anything Relay has no switch for, add raw nginx directives. They are inserted into the host’s <C>server</C> block. Relay checks for balanced
         braces when you save, and <C>nginx -t</C> validates everything before the reload, so a mistake can’t take the proxy down.
       </P>
+      <Note title="nginx only">
+        Relay Edge can’t run snippets. While it is the proxy engine the field is read-only, and switching to Relay Edge is refused while any host still has one.
+        {' '}<See id="relay-edge">Relay Edge →</See>
+      </Note>
       <Example
         lang="nginx"
         title="Examples"
@@ -394,7 +398,7 @@ function Streams() {
         A stream forwards raw <strong>TCP or UDP</strong> traffic from a port on Relay’s host to another machine. There are no domains, no TLS termination and no access lists: bytes in,
         bytes out. Use them for databases, game servers, MQTT, SSH or VPNs.
       </P>
-      <Flow steps={[{ label: 'Client', sub: 'relay-host:25565' }, { label: 'nginx stream', sub: 'tcp' }, { label: 'Server', sub: '192.168.1.40:25565' }]} />
+      <Flow steps={[{ label: 'Client', sub: 'relay-host:25565' }, { label: 'Reverse proxy', sub: 'tcp stream' }, { label: 'Server', sub: '192.168.1.40:25565' }]} />
 
       <H2>Creating a stream</H2>
       <Table
@@ -426,7 +430,7 @@ function Streams() {
       <Warn title="Don’t expose databases to the internet">
         Streams can’t check passwords or IPs. For databases, listen on <C>127.0.0.1</C> or a LAN address and use your firewall, or connect over a VPN.
       </Warn>
-      <Note>Ports 80, 443 (nginx) and 8181 (Relay UI) are taken. Remember to open or forward the stream’s port on your firewall or router.</Note>
+      <Note>Ports 80, 443 (reverse proxy) and 8181 (Relay UI) are taken. Remember to open or forward the stream’s port on your firewall or router.</Note>
       <Tip>Disabled streams keep their configuration but release the port after the next apply.</Tip>
     </>
   )

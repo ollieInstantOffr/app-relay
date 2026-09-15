@@ -8,10 +8,10 @@ import {
 } from '../../components/ui'
 import { errorMessage } from '../../lib/api'
 import { useBusEvent } from '../../lib/events'
-import { usePending, useRole } from '../../lib/queries'
+import { usePending, useProxyEngine, useRole } from '../../lib/queries'
 import { ago, ms, pluralize } from '../../lib/format'
 import {
-  useApplyRunner, usePendingDiff, useVersionDiff, useVersions,
+  engineLabel, useApplyRunner, usePendingDiff, useVersionDiff, useVersions,
   type ApplyFinished, type ApplyProgress, type DiffResponse, type PendingInfo, type VersionInfo,
 } from './api'
 import DiscardDialog from './DiscardDialog'
@@ -86,10 +86,11 @@ export default function HistoryPage() {
                       {pending?.summary && <div className="hist-summary">{pending.summary}</div>}
                     </button>
                   )}
-                  {versions.map((v) => (
+                  {versions.map((v, i) => (
                     <VersionRow
                       key={v.id}
                       v={v}
+                      older={versions[i + 1]}
                       selected={selection?.kind === 'version' && selection.id === v.id}
                       onSelect={() => select({ kind: 'version', id: v.id })}
                     />
@@ -149,12 +150,25 @@ function StatusBadge({ v }: { v: VersionInfo }) {
   return null
 }
 
-function VersionRow({ v, selected, onSelect }: { v: VersionInfo; selected: boolean; onSelect: () => void }) {
+/** Proxy engine badge: every Relay Edge version, plus the version that switched engines. */
+function EngineBadge({ v, older }: { v: VersionInfo; older?: VersionInfo }) {
+  const engine = v.proxyEngine ?? 'nginx'
+  const switched = !!older && (older.proxyEngine ?? 'nginx') !== engine
+  if (engine !== 'edge' && !switched) return null
+  return (
+    <Badge tone={switched ? 'info' : undefined} title={switched ? `Proxy engine: ${engineLabel[older?.proxyEngine ?? 'nginx']} → ${engineLabel[engine]}` : 'Rendered for Relay Edge'}>
+      {switched ? `→ ${engineLabel[engine]}` : engineLabel[engine]}
+    </Badge>
+  )
+}
+
+function VersionRow({ v, older, selected, onSelect }: { v: VersionInfo; older?: VersionInfo; selected: boolean; onSelect: () => void }) {
   return (
     <button type="button" className={cx('hist-row', selected && 'selected')} onClick={onSelect}>
       <div className="row gap-8">
         <span className="hist-ver">v{v.id}</span>
         <StatusBadge v={v} />
+        <EngineBadge v={v} older={older} />
         <span className="spacer" />
         <span className="hist-meta">
           {ago(v.createdAt)} · <ActorLabel actor={v.actor} />
@@ -172,6 +186,9 @@ function VersionRow({ v, selected, onSelect }: { v: VersionInfo; selected: boole
 
 function fileLabel(path: string) {
   if (path === 'haproxy.cfg' || path === 'nginx.conf') return path
+  // Relay Edge files: edge/edge.json, edge/htpasswd/<access list id>
+  if (path === 'edge/edge.json') return 'edge.json'
+  if (path.startsWith('edge/htpasswd/')) return `htpasswd/${path.slice('edge/htpasswd/'.length)}`
   const base = path.split('/').pop() ?? path
   return base.replace(/\.conf$/, '')
 }
@@ -266,6 +283,7 @@ function VersionDiff({ version, versions, against, canWrite, pendingCount }: {
       <div className="hist-diff-head">
         <span className="hist-diff-title">{title}</span>
         <StatusBadge v={version} />
+        {version.proxyEngine && <Badge title="Proxy engine this version was rendered for">{engineLabel[version.proxyEngine]}</Badge>}
         <span className="faint small">{version.summary}</span>
         <div className="spacer" />
         <a className="btn btn-sm" href={`/api/versions/${version.id}/download`} download>
@@ -286,7 +304,7 @@ function VersionDiff({ version, versions, against, canWrite, pendingCount }: {
           </Callout>
         </div>
       )}
-      <DiffBody data={diff.data} isLoading={diff.isLoading} error={diff.error} emptyText="The rendered nginx and HAProxy configuration is identical to the compared version." />
+      <DiffBody data={diff.data} isLoading={diff.isLoading} error={diff.error} emptyText="The rendered proxy and HAProxy configuration is identical to the compared version." />
       {target && (
         <ConfirmDialog
           open={confirm}
@@ -352,13 +370,15 @@ function DraftDiff({ pending, liveId, canWrite }: { pending?: PendingInfo; liveI
 
 const STEPS: { id: string; label: string; sub?: string }[] = [
   { id: 'render', label: 'Render' },
-  { id: 'validate', label: 'Validate', sub: 'nginx -t · haproxy -c' },
+  { id: 'validate', label: 'Validate' },
   { id: 'swap', label: 'Atomic swap' },
   { id: 'reload', label: 'Reload' },
   { id: 'health', label: 'Health check', sub: '10 s' },
 ]
 
 function PipelineStrip() {
+  const proxy = useProxyEngine().engine
+  const validateSub = `${proxy === 'edge' ? 'relay edge check' : 'nginx -t'} · haproxy -c`
   const [active, setActive] = useState<string | null>(null)
   const [result, setResult] = useState<'ok' | 'failed' | null>(null)
   const timer = useRef<number | undefined>(undefined)
@@ -399,7 +419,7 @@ function PipelineStrip() {
             <span className={cx('hist-step', state)}>
               {state === 'done' && <Icon name="check" size={12} />}
               {s.label}
-              {s.sub && <span className="sub">{s.sub}</span>}
+              {(s.id === 'validate' ? validateSub : s.sub) && <span className="sub">{s.id === 'validate' ? validateSub : s.sub}</span>}
             </span>
           </span>
         )

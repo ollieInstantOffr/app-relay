@@ -235,7 +235,10 @@ func (s *Service) runUpgrade(ctx context.Context, cli *client.Client, ops applyO
 		fail("validate", "Couldn't load the live configuration — nothing was changed.", err.Error(), "")
 		return
 	}
+	active := s.activeProxy(ctx, engine)
 	switch {
+	case agent.IsProxyEngine(engine) && !active:
+		s.step("validate", "skipped", name+" isn't the selected proxy engine", 50, "")
 	case files == nil:
 		s.step("validate", "skipped", "Nothing applied yet", 50, "")
 	case engine == "haproxy" && !running:
@@ -266,7 +269,7 @@ func (s *Service) runUpgrade(ctx context.Context, cli *client.Client, ops applyO
 
 	// Which hosts are healthy now (only those can regress).
 	var healthy []string
-	if engine == "nginx" || running {
+	if active || running {
 		healthy = ops.HealthyHosts(ctx)
 	}
 
@@ -312,7 +315,7 @@ func (s *Service) runUpgrade(ctx context.Context, cli *client.Client, ops applyO
 		restoreName()
 		startErr := cli.ContainerStart(rctx, old.ID, container.StartOptions{})
 		if startErr == nil {
-			s.waitAgent(rctx, cli, old.ID, engine, "", 60*time.Second, engine == "nginx" || running)
+			s.waitAgent(rctx, cli, old.ID, engine, "", 60*time.Second, active || running)
 		}
 		msg := fmt.Sprintf("%s %s failed after the swap (%s). %s is running again.", name, job.To, reason, job.FromImage)
 		if startErr != nil {
@@ -335,7 +338,7 @@ func (s *Service) runUpgrade(ctx context.Context, cli *client.Client, ops applyO
 	s.step("swap", "done", fmt.Sprintf("%s → %s", job.FromImage, job.ToImage), 75, "Waiting for the "+name+" agent")
 
 	// 6. Agent up, live version pushed, hosts healthy.
-	needRunning := engine == "nginx" || running
+	needRunning := active || running
 	s.step("health", "running", "", 78, "Waiting for "+name+" "+job.To)
 	if err := s.waitAgent(ctx, cli, newID, engine, job.To, 90*time.Second, needRunning); err != nil {
 		rollback("the agent didn't come up", err.Error())

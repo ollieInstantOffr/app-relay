@@ -4,12 +4,35 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
+
+// streamRT is a compiled Stream. Listeners keep a pointer to it that reloads
+// swap, so forward targets and timeouts change without rebinding.
+type streamRT struct {
+	id            string
+	forwardHost   string
+	listenLo      int
+	forwardLo     int
+	forwardHi     int
+	proxyProtocol bool
+	idle          time.Duration
+	connect       time.Duration
+}
+
+// target maps a listen port to the upstream "host:port". Hostnames are
+// resolved by the dialer on every connection.
+func (s *streamRT) target(listenPort int) string {
+	port := s.forwardLo
+	if s.forwardHi != s.forwardLo {
+		port = s.forwardLo + (listenPort - s.listenLo)
+	}
+	return joinHostPort(s.forwardHost, port)
+}
 
 // proxyProtocolV1 returns the PROXY protocol v1 header nginx sends with
 // `proxy_protocol on` for a connection from src to dst.
@@ -24,32 +47,50 @@ func proxyProtocolV1(src, dst net.Addr) []byte {
 	if sip == nil || dip == nil {
 		family, sip, dip = "TCP6", sa.IP.To16(), da.IP.To16()
 	}
-	return []byte(fmt.Sprintf("PROXY %s %s %s %d %d\r\n", family, sip, dip, sa.Port, da.Port))
+	return fmt.Appendf(nil, "PROXY %s %s %s %d %d\r\n", family, sip, dip, sa.Port, da.Port)
 }
 
 // StreamStats is reported per finished stream session (for the access log).
 type StreamStats struct {
-	Proto      string
-	Client     net.Addr
-	Upstream   string
-	BytesIn    int64 // client → upstream
-	BytesOut   int64 // upstream → client
-	Duration   time.Duration
-	Err        error
-	ListenPort int
+	Proto       string // tcp | udp
+	Client      net.Addr
+	Upstream    string
+	BytesIn     int64 // client → upstream
+	BytesOut    int64 // upstream → client
+	Duration    time.Duration
+	Connected   bool
+	ConnectTime time.Duration
+	Err         error
+	ListenPort  int
 }
 
+// status mirrors nginx's stream $status: 200 ok, 502 upstream unreachable,
+// 500 internal failure after connecting.
+func (st StreamStats) status() int {
+	switch {
+	case st.Err == nil:
+		return 200
+	case !st.Connected:
+		return 502
+	}
+	return 500
+}
+
+type streamDone func(spec *streamRT, st StreamStats)
+
 type tcpStream struct {
-	ln            net.Listener
-	target        func(listenPort int) string
-	proxyProtocol bool
-	idle          time.Duration
-	onDone        func(StreamStats)
+	ln     net.Listener
+	spec   *atomic.Pointer[streamRT]
+	onDone streamDone
 
 	wg     sync.WaitGroup
 	mu     sync.Mutex
 	conns  map[net.Conn]struct{}
 	closed bool
+}
+
+func newTCPStream(ln net.Listener, spec *atomic.Pointer[streamRT], onDone streamDone) *tcpStream {
+	return &tcpStream{ln: ln, spec: spec, onDone: onDone, conns: map[net.Conn]struct{}{}}
 }
 
 func (t *tcpStream) serve() {
@@ -86,12 +127,13 @@ func (t *tcpStream) track(c net.Conn, add bool) bool {
 }
 
 func (t *tcpStream) handle(client net.Conn, port int) {
+	spec := t.spec.Load()
 	start := time.Now()
 	st := StreamStats{Proto: "tcp", Client: client.RemoteAddr(), ListenPort: port}
 	defer func() {
 		st.Duration = time.Since(start)
 		if t.onDone != nil {
-			t.onDone(st)
+			t.onDone(spec, st)
 		}
 	}()
 	if !t.track(client, true) {
@@ -101,14 +143,22 @@ func (t *tcpStream) handle(client net.Conn, port int) {
 	defer t.track(client, false)
 	defer client.Close()
 
-	st.Upstream = t.target(port)
-	upstream, err := net.DialTimeout("tcp", st.Upstream, 10*time.Second)
+	target := spec.target(port)
+	st.Upstream = target
+	upstream, err := net.DialTimeout("tcp", target, spec.connect)
 	if err != nil {
 		st.Err = err
 		return
 	}
+	st.Connected, st.ConnectTime, st.Upstream = true, time.Since(start), upstream.RemoteAddr().String()
+	if !t.track(upstream, true) {
+		upstream.Close()
+		return
+	}
+	defer t.track(upstream, false)
 	defer upstream.Close()
-	if t.proxyProtocol {
+	if spec.proxyProtocol {
+		upstream.SetWriteDeadline(time.Now().Add(spec.connect))
 		if _, err := upstream.Write(proxyProtocolV1(client.RemoteAddr(), client.LocalAddr())); err != nil {
 			st.Err = err
 			return
@@ -118,20 +168,25 @@ func (t *tcpStream) handle(client net.Conn, port int) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		st.BytesIn = copyIdle(upstream, client, t.idle)
+		st.BytesIn = copyIdle(upstream, client, spec.idle)
 		closeWrite(upstream)
 	}()
 	go func() {
 		defer wg.Done()
-		st.BytesOut = copyIdle(client, upstream, t.idle)
+		st.BytesOut = copyIdle(client, upstream, spec.idle)
 		closeWrite(client)
 	}()
 	wg.Wait()
 }
 
-// copyIdle copies src to dst, giving up when neither side sees traffic for idle.
+var copyBufPool = sync.Pool{New: func() any { b := make([]byte, 32<<10); return &b }}
+
+// copyIdle copies src to dst, giving up when src sees no traffic for idle
+// (nginx proxy_timeout applies to each direction separately).
 func copyIdle(dst, src net.Conn, idle time.Duration) int64 {
-	buf := make([]byte, 32*1024)
+	bp := copyBufPool.Get().(*[]byte)
+	defer copyBufPool.Put(bp)
+	buf := *bp
 	var n int64
 	for {
 		if idle > 0 {
@@ -145,10 +200,15 @@ func copyIdle(dst, src net.Conn, idle time.Duration) int64 {
 			w, werr := dst.Write(buf[:r])
 			n += int64(w)
 			if werr != nil {
+				// Unblock the other direction too.
+				src.Close()
 				return n
 			}
 		}
 		if err != nil {
+			if isTimeout(err) {
+				dst.Close()
+			}
 			return n
 		}
 	}
@@ -184,19 +244,23 @@ func (t *tcpStream) shutdown(ctx context.Context) {
 
 // ---------------------------------------------------------------- UDP
 
+// maxUDPSessions bounds the per-port session table.
+const maxUDPSessions = 16384
+
 type udpStream struct {
 	pc     net.PacketConn
-	target func(listenPort int) string
-	idle   time.Duration
-	onDone func(StreamStats)
+	spec   *atomic.Pointer[streamRT]
+	onDone streamDone
 
 	mu       sync.Mutex
 	sessions map[string]*udpSession
 	closed   bool
 	wg       sync.WaitGroup
+	stop     chan struct{}
 }
 
 type udpSession struct {
+	spec     *streamRT
 	client   net.Addr
 	upstream *net.UDPConn
 	started  time.Time
@@ -204,13 +268,17 @@ type udpSession struct {
 	in, out  int64
 }
 
+func newUDPStream(pc net.PacketConn, spec *atomic.Pointer[streamRT], onDone streamDone) *udpStream {
+	return &udpStream{pc: pc, spec: spec, onDone: onDone, sessions: map[string]*udpSession{}, stop: make(chan struct{})}
+}
+
 func (u *udpStream) serve() {
 	port := u.pc.LocalAddr().(*net.UDPAddr).Port
-	idle := u.idle
-	if idle <= 0 {
-		idle = 30 * time.Second
-	}
-	go u.reap(idle)
+	u.wg.Add(1)
+	go func() {
+		defer u.wg.Done()
+		u.reap()
+	}()
 	buf := make([]byte, 65535)
 	for {
 		n, addr, err := u.pc.ReadFrom(buf)
@@ -220,8 +288,8 @@ func (u *udpStream) serve() {
 			}
 			continue
 		}
-		s, err := u.session(addr, port)
-		if err != nil {
+		s := u.session(addr, port)
+		if s == nil {
 			continue
 		}
 		if w, err := s.upstream.Write(buf[:n]); err == nil {
@@ -233,34 +301,39 @@ func (u *udpStream) serve() {
 	}
 }
 
-func (u *udpStream) session(addr net.Addr, port int) (*udpSession, error) {
+func (u *udpStream) session(addr net.Addr, port int) *udpSession {
 	key := addr.String()
 	u.mu.Lock()
 	if s := u.sessions[key]; s != nil {
 		u.mu.Unlock()
-		return s, nil
+		return s
 	}
-	if u.closed {
+	if u.closed || len(u.sessions) >= maxUDPSessions {
 		u.mu.Unlock()
-		return nil, net.ErrClosed
+		return nil
 	}
 	u.mu.Unlock()
-	target := u.target(port)
+	spec := u.spec.Load()
+	start := time.Now()
+	target := spec.target(port)
 	raddr, err := net.ResolveUDPAddr("udp", target)
-	if err != nil {
-		return nil, err
+	var conn *net.UDPConn
+	if err == nil {
+		conn, err = net.DialUDP("udp", nil, raddr)
 	}
-	conn, err := net.DialUDP("udp", nil, raddr)
 	if err != nil {
-		return nil, err
+		if u.onDone != nil {
+			u.onDone(spec, StreamStats{Proto: "udp", Client: addr, Upstream: target, Err: err, ListenPort: port, Duration: time.Since(start)})
+		}
+		return nil
 	}
 	now := time.Now()
-	s := &udpSession{client: addr, upstream: conn, started: now, last: now}
+	s := &udpSession{spec: spec, client: addr, upstream: conn, started: start, last: now}
 	u.mu.Lock()
-	if existing := u.sessions[key]; existing != nil {
+	if existing := u.sessions[key]; existing != nil || u.closed {
 		u.mu.Unlock()
 		conn.Close()
-		return existing, nil
+		return existing
 	}
 	u.sessions[key] = s
 	u.mu.Unlock()
@@ -281,21 +354,22 @@ func (u *udpStream) session(addr net.Addr, port int) (*udpSession, error) {
 			}
 		}
 	}()
-	return s, nil
+	return s
 }
 
-func (u *udpStream) reap(idle time.Duration) {
-	t := time.NewTicker(idle / 3)
+func (u *udpStream) reap() {
+	t := time.NewTicker(time.Second)
 	defer t.Stop()
-	for range t.C {
-		u.mu.Lock()
-		if u.closed {
-			u.mu.Unlock()
+	for {
+		select {
+		case <-u.stop:
 			return
+		case <-t.C:
 		}
+		u.mu.Lock()
 		now := time.Now()
 		for k, s := range u.sessions {
-			if now.Sub(s.last) > idle {
+			if now.Sub(s.last) > s.spec.idle {
 				delete(u.sessions, k)
 				u.finish(s)
 			}
@@ -308,15 +382,19 @@ func (u *udpStream) reap(idle time.Duration) {
 func (u *udpStream) finish(s *udpSession) {
 	s.upstream.Close()
 	if u.onDone != nil {
-		st := StreamStats{Proto: "udp", Client: s.client, Upstream: s.upstream.RemoteAddr().String(), BytesIn: s.in, BytesOut: s.out, Duration: s.last.Sub(s.started), ListenPort: u.pc.LocalAddr().(*net.UDPAddr).Port}
-		go u.onDone(st)
+		st := StreamStats{Proto: "udp", Client: s.client, Upstream: s.upstream.RemoteAddr().String(), BytesIn: s.in, BytesOut: s.out,
+			Duration: s.last.Sub(s.started), Connected: true, ListenPort: u.pc.LocalAddr().(*net.UDPAddr).Port}
+		go u.onDone(s.spec, st)
 	}
 }
 
 func (u *udpStream) shutdown() {
 	u.pc.Close()
 	u.mu.Lock()
-	u.closed = true
+	if !u.closed {
+		u.closed = true
+		close(u.stop)
+	}
 	for k, s := range u.sessions {
 		delete(u.sessions, k)
 		u.finish(s)
@@ -328,5 +406,3 @@ func (u *udpStream) shutdown() {
 func joinHostPort(host string, port int) string {
 	return net.JoinHostPort(host, strconv.Itoa(port))
 }
-
-var _ = io.EOF

@@ -1,9 +1,10 @@
 // Shared TanStack Query hooks for entities, settings and cross-slice resources.
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query'
 import { api } from './api'
+import { proxyEngineLabel } from './types'
 import type {
-  Approval, Container, EngineState, EnginesStatus, EntityKind, EntityMap, HealthStatus, LBStats, Pending, Session,
-  SettingsKey, SettingsMap,
+  Approval, Container, EngineKind, EngineState, EnginesStatus, EntityKind, EntityMap, HealthStatus, LBStats, Pending, Session,
+  ProxyEngineName, SettingsKey, SettingsMap,
 } from './types'
 
 export const keys = {
@@ -98,8 +99,15 @@ export function useEngines() {
   return useQuery({ queryKey: keys.engines, queryFn: () => api.get<EnginesStatus>('/api/engines'), refetchInterval: 10_000 })
 }
 
-export function useEngine(engine: 'nginx' | 'haproxy'): EngineState | undefined {
+export function useEngine(engine: EngineKind): EngineState | undefined {
   return useEngines().data?.[engine]
+}
+
+/** The active reverse proxy engine (nginx or Relay Edge) and its state. */
+export function useProxyEngine(): { engine: ProxyEngineName; label: string; state: EngineState | undefined; loaded: boolean } {
+  const { data } = useEngines()
+  const engine: ProxyEngineName = data?.proxy === 'edge' ? 'edge' : 'nginx'
+  return { engine, label: proxyEngineLabel[engine], state: data?.[engine], loaded: !!data }
 }
 
 export function useHealth() {

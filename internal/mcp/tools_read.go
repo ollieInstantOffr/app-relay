@@ -202,13 +202,13 @@ type manageUsersArgs struct {
 
 func (s *Service) registerReadTools() {
 	addRead(s, toolInfo{Name: "list_hosts", Title: "List proxy hosts",
-		Description: "List nginx proxy hosts with their upstream, health (healthy/degraded/down/disabled/unknown), TLS certificate and days until expiry, access list and websockets flag. Filter by domain substring or enabled state. Use get_host for the full configuration of one host."},
+		Description: "List reverse proxy (nginx or Relay Edge) hosts with their upstream, health (healthy/degraded/down/disabled/unknown), TLS certificate and days until expiry, access list and websockets flag. Filter by domain substring or enabled state. Use get_host for the full configuration of one host."},
 		nil, s.toolListHosts)
 	addRead(s, toolInfo{Name: "get_host", Title: "Get a proxy host",
-		Description: "Get one proxy host by id or domain: summary (health, TLS, access list) plus the complete stored configuration including custom locations, forward auth, rate limiting and advanced nginx settings."},
+		Description: "Get one proxy host by id or domain: summary (health, TLS, access list) plus the complete stored configuration including custom locations, forward auth, rate limiting and advanced proxy settings (custom nginx snippets only apply with nginx)."},
 		nil, s.toolGetHost)
 	addRead(s, toolInfo{Name: "query_logs", Title: "Query access logs",
-		Description: "Search nginx access logs, newest first. Filter by host, status (502, 5xx, >=500), client IP, free text and time window (since: 15m, 1h, 7d). Returns method, path, status, upstream status, client IP, request time and user agent; at most 200 entries."},
+		Description: "Search reverse proxy (nginx or Relay Edge) access logs, newest first. Filter by host, status (502, 5xx, >=500), client IP, free text and time window (since: 15m, 1h, 7d). Returns method, path, status, upstream status, client IP, request time and user agent; at most 200 entries."},
 		nil, s.toolQueryLogs)
 	addRead(s, toolInfo{Name: "list_backends", Title: "List load balancer backends",
 		Description: "List HAProxy backends with mode, balancing algorithm, health check and each server's address, weight, role and admin state (ready/drain/maint), merged with live status when HAProxy is running."},
@@ -223,7 +223,7 @@ func (s *Service) registerReadTools() {
 		Description: "List access lists (IP allow/deny rules and whether basic auth is on) with the hosts using each. Pass an access list name to create_host or update_host."},
 		nil, s.toolListAccessLists)
 	addRead(s, toolInfo{Name: "list_streams", Title: "List TCP/UDP streams",
-		Description: "List TCP/UDP stream forwards (nginx stream module): protocol, listen address and ports, forward target, PROXY protocol, enabled flag and health."},
+		Description: "List TCP/UDP stream forwards served by the reverse proxy (nginx or Relay Edge): protocol, listen address and ports, forward target, PROXY protocol, enabled flag and health."},
 		nil, s.toolListStreams)
 	addRead(s, toolInfo{Name: "get_pending_changes", Title: "Get pending changes",
 		Description: "List configuration changes that are saved but not yet live (created/updated/deleted hosts, backends, settings…) and the live config version. apply_changes makes them live."},

@@ -5,7 +5,8 @@ import {
   ToggleCard, cx, useToast,
 } from '../../components/ui'
 import { api, errorMessage } from '../../lib/api'
-import { keys, useEntities, usePending, useSettings } from '../../lib/queries'
+import { keys, useEntities, usePending, useProxyEngine, useSettings } from '../../lib/queries'
+import { proxyEngineLabel } from '../../lib/types'
 import { daysUntil, pluralize } from '../../lib/format'
 import type { Certificate, ForwardAuth, RateLimit } from '../../lib/types'
 import {
@@ -99,6 +100,10 @@ export default function ExposeWizard({ backendId, onClose }: { backendId: string
   const mode = req.certificate.mode
   const challenge = req.certificate.challenge || tls?.preferredChallenge || 'http-01'
   const tlsOn = mode !== 'none'
+  const liveProxy = useProxyEngine()
+  const proxyEngine = preview?.engine ?? liveProxy.engine
+  const proxyLabel = proxyEngineLabel[proxyEngine]
+  const proxyCheck = proxyEngine === 'edge' ? 'relay edge check' : 'nginx -t'
   const scheme = tlsOn ? 'https' : 'http'
   const port = preview?.port ?? nextFreePort(frontends, haproxy?.exposePortStart ?? 10080)
   const list = lists.find((l) => l.id === req.access.accessListId)
@@ -236,7 +241,7 @@ export default function ExposeWizard({ backendId, onClose }: { backendId: string
       <div className="lb-path-arrow">↓</div>
       <div className="lb-path-node new">
         <div className="k">Reverse proxy <span className="lb-tag-new">new host</span></div>
-        <div className="v">nginx · {tlsOn ? 'TLS' : 'HTTP'} · {req.access.mode === 'list' ? list?.name ?? 'access list' : 'public'}</div>
+        <div className="v">{proxyLabel} · {tlsOn ? 'TLS' : 'HTTP'} · {req.access.mode === 'list' ? list?.name ?? 'access list' : 'public'}</div>
       </div>
       <div className="lb-path-arrow">↓</div>
       <div className="lb-path-node new">
@@ -515,7 +520,7 @@ export default function ExposeWizard({ backendId, onClose }: { backendId: string
             </div>
             {previewErr && <Callout tone="danger">{previewErr}</Callout>}
             <div className="lb-review">
-              <ReviewCard title="Reverse proxy" tag="+1 host" label="nginx -t" valid={preview?.nginxValid} output={preview?.nginxOutput} code={preview?.nginx} loading={!preview && !previewErr} />
+              <ReviewCard title={`Reverse proxy · ${proxyLabel}`} tag="+1 host" label={proxyCheck} valid={preview?.nginxValid} output={preview?.nginxOutput} code={preview?.nginx} loading={!preview && !previewErr} />
               <ReviewCard title="Load balancer" tag="+1 frontend" label="haproxy -c" valid={preview?.haproxyValid} output={preview?.haproxyOutput} code={preview?.haproxy} loading={!preview && !previewErr} />
             </div>
             <div>
@@ -524,7 +529,7 @@ export default function ExposeWizard({ backendId, onClose }: { backendId: string
                 {[
                   mode === 'request' && `Request certificate (${challenge.toUpperCase()}${challenge === 'http-01' ? ', ~30 s' : ''})`,
                   'Add HAProxy frontend, hot-reload (0 dropped connections)',
-                  'Add nginx host, reload, health-check for 10 s — auto-rollback on failure',
+                  'Add proxy host, reload, health-check for 10 s — auto-rollback on failure',
                   `Saved as config version v${(pending?.liveVersion ?? 0) + 1}`,
                 ]
                   .filter(Boolean)

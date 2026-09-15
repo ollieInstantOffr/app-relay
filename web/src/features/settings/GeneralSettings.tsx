@@ -1,8 +1,9 @@
 // Settings → General (design 15a).
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Card, Field, Input, SectionHeader, Select, Skeleton, Toggle, ToggleRow, useToast } from '../../components/ui'
-import { useEntities, useRole, useSaveSettings, useSettings } from '../../lib/queries'
-import type { GeneralSettings as General, HostDefaults } from '../../lib/types'
+import { Link } from 'react-router-dom'
+import { Badge, Button, Callout, Card, Field, Input, RadioCard, SectionHeader, Select, Skeleton, Toggle, ToggleRow, useToast } from '../../components/ui'
+import { useEngines, useEntities, useRole, useSaveSettings, useSettings } from '../../lib/queries'
+import { proxyEngineLabel, type GeneralSettings as General, type HostDefaults, type ProxyEngineName } from '../../lib/types'
 import NotAllowed from '../auth/NotAllowed'
 import { fieldErrors } from '../auth/authApi'
 import '../auth/auth.css'
@@ -13,6 +14,8 @@ export default function GeneralSettings() {
   const { data, isLoading } = useSettings('general')
   const save = useSaveSettings('general')
   const lists = useEntities('access-lists').data ?? []
+  const hosts = useEntities('hosts').data
+  const liveEngine = useEngines().data?.proxy
   const { isAdmin } = useRole()
   const toast = useToast()
   const [draft, setDraft] = useState<General | null>(null)
@@ -106,12 +109,23 @@ export default function GeneralSettings() {
         void followAdminPort(saved, before.adminPort)
         return
       }
+      const from = before?.proxyEngine ?? 'nginx'
+      const to = saved.proxyEngine ?? 'nginx'
+      if (from !== to && !portMoved) {
+        toast.show({
+          kind: 'success',
+          title: `Proxy engine: ${proxyEngineLabel[from]} → ${proxyEngineLabel[to]}`,
+          message: 'Added to pending changes. Applying validates the new engine, health-checks every host and rolls back automatically if something breaks.',
+          actions: [applyAction],
+        })
+        return
+      }
       toast.show({
         kind: 'success',
         title: 'Settings saved',
         message: portMoved
           ? `Relay now also listens on port ${saved.adminPort}. Apply to point the admin domain at it — port ${before.adminPort} closes once ${saved.adminPort} is in use.`
-          : 'Changes that affect nginx were added to pending changes.',
+          : 'Changes that affect the proxy were added to pending changes.',
         actions: [applyAction],
       })
     } catch (err) {
@@ -193,6 +207,19 @@ export default function GeneralSettings() {
         {portRow('adminPort', 'Admin UI', 'Relay listens here directly · the admin domain proxies to it · changes take effect without a restart')}
       </Card>
 
+      <ProxyEngineCard
+        value={draft.proxyEngine ?? 'nginx'}
+        saved={data?.proxyEngine ?? 'nginx'}
+        live={liveEngine}
+        snippetHosts={(hosts ?? []).filter((h) => h.customNginx?.trim())}
+        error={errors.proxyEngine}
+        disabled={disabled}
+        onChange={(v) => {
+          set('proxyEngine', v)
+          setErrors(({ proxyEngine: _drop, ...rest }) => rest)
+        }}
+      />
+
       <Card title="Defaults for new hosts">
         <div className="defaults-grid">
           <div className="row">
@@ -263,5 +290,74 @@ export default function GeneralSettings() {
         </div>
       )}
     </>
+  )
+}
+
+const ENGINES: { value: ProxyEngineName; description: string }[] = [
+  { value: 'nginx', description: 'Industry standard · supports custom nginx snippets' },
+  { value: 'edge', description: "Relay's own engine: zero-downtime reloads, upstream keep-alive, built-in metrics, post-quantum TLS" },
+]
+
+function ProxyEngineCard({ value, saved, live, snippetHosts, error, disabled, onChange }: {
+  value: ProxyEngineName
+  saved: ProxyEngineName
+  /** Engine serving traffic right now (undefined while loading). */
+  live?: ProxyEngineName
+  snippetHosts: { id: string; domains: string[] }[]
+  error?: string
+  disabled: boolean
+  onChange: (v: ProxyEngineName) => void
+}) {
+  const switchPending = !!live && saved !== live && value === saved
+  const shown = snippetHosts.slice(0, 5)
+  return (
+    <Card
+      title="Proxy engine"
+      sub={live ? <>Serving traffic: <b>{proxyEngineLabel[live]}</b></> : undefined}
+      actions={
+        switchPending ? (
+          <Button size="sm" variant="primary" onClick={() => window.dispatchEvent(new CustomEvent('relay:apply'))}>
+            Apply switch
+          </Button>
+        ) : undefined
+      }
+    >
+      <div className="card-body col gap-12" style={{ padding: '16px 18px' }}>
+        <div className="grid-2" style={{ gap: 10 }}>
+          {ENGINES.map((e) => (
+            <RadioCard
+              key={e.value}
+              selected={value === e.value}
+              disabled={disabled}
+              onSelect={() => onChange(e.value)}
+              title={
+                <span className="row gap-6">
+                  {proxyEngineLabel[e.value]}
+                  {live === e.value && <Badge tone="ok">live</Badge>}
+                  {live && live !== e.value && saved === e.value && <Badge tone="pending">pending apply</Badge>}
+                </span>
+              }
+              description={e.description}
+            />
+          ))}
+        </div>
+        <div className="small muted">
+          Switching is applied like any change: validated, health-checked, and rolled back automatically if something breaks.
+        </div>
+        {value === 'edge' && snippetHosts.length > 0 && (
+          <Callout tone="warn" title={`${snippetHosts.length === 1 ? '1 host has' : `${snippetHosts.length} hosts have`} a custom nginx snippet`}>
+            Relay Edge can't run nginx snippets. Remove them before switching:{' '}
+            {shown.map((h, i) => (
+              <span key={h.id}>
+                {i > 0 && ', '}
+                <Link to={`/hosts?edit=${h.id}&tab=advanced`} className="mono">{h.domains[0] ?? h.id}</Link>
+              </span>
+            ))}
+            {snippetHosts.length > shown.length && ` and ${snippetHosts.length - shown.length} more`}.
+          </Callout>
+        )}
+        {error && <div className="field-error">{error}</div>}
+      </div>
+    </Card>
   )
 }

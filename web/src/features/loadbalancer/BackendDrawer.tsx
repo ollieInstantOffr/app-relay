@@ -444,7 +444,7 @@ export default function BackendDrawer({ initial, onClose, onExpose }: { initial:
         <>
           <div>
             <div className="section-title">Frontends routing to this backend</div>
-            <div className="section-desc">A frontend is a listening port. The Expose wizard adds a localhost frontend and a proxy host so nginx handles TLS and the domain.</div>
+            <div className="section-desc">A frontend is a listening port. The Expose wizard adds a localhost frontend and a proxy host so the reverse proxy handles TLS and the domain.</div>
           </div>
           {isNew ? (
             <Callout>Save the backend first, then expose it online or attach it to a frontend.</Callout>

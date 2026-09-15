@@ -1,7 +1,11 @@
-// Owner: slice hosts. Generated nginx config preview + validation status.
+// Owner: slice hosts. Generated proxy config preview (nginx or Relay Edge JSON) + validation status.
 import { useState } from 'react'
 import { Dot, Icon, Skeleton, Spinner } from '../../components/ui'
 import { extractLocationBlocks, type PreviewState } from './lib'
+
+/** Validator named in the preview status for the engine that rendered the preview. */
+export const previewCheck = (engine?: string) => (engine === 'edge' ? 'relay edge check' : engine === 'haproxy' ? 'haproxy -c' : 'nginx -t')
+export const previewTitle = (engine?: string) => (engine === 'edge' ? 'Relay Edge config (JSON)' : 'Generated nginx config')
 
 export function PreviewStatus({ state }: { state: PreviewState }) {
   if (state.status === 'loading') {
@@ -13,10 +17,11 @@ export function PreviewStatus({ state }: { state: PreviewState }) {
     )
   }
   if (state.status === 'ready' && state.preview) {
+    const check = state.preview.engine ? previewCheck(state.preview.engine) : undefined
     return state.preview.valid ? (
-      <span className="row gap-6 small muted"><Dot tone="ok" />Config valid</span>
+      <span className="row gap-6 small muted" title={check}><Dot tone="ok" />Config valid{check && <span className="faint mono">· {check}</span>}</span>
     ) : (
-      <span className="row gap-6 small danger-text"><Dot tone="danger" />Config invalid</span>
+      <span className="row gap-6 small danger-text" title={check}><Dot tone="danger" />Config invalid{check && <span className="faint mono">· {check}</span>}</span>
     )
   }
   if (state.status === 'unavailable') {
@@ -25,7 +30,7 @@ export function PreviewStatus({ state }: { state: PreviewState }) {
   return null
 }
 
-export function ConfigPreviewPanel({ state, collapsible, extract, title = 'Generated config preview' }: {
+export function ConfigPreviewPanel({ state, collapsible, extract, title }: {
   state: PreviewState
   collapsible?: boolean
   extract?: 'location'
@@ -33,7 +38,10 @@ export function ConfigPreviewPanel({ state, collapsible, extract, title = 'Gener
 }) {
   const [open, setOpen] = useState(true)
   const config = state.preview?.config ?? ''
-  const shown = extract === 'location' ? extractLocationBlocks(config) || config : config
+  const edge = state.preview?.engine === 'edge'
+  // Location extraction only understands nginx syntax; Relay Edge previews are JSON.
+  const shown = extract === 'location' && !edge ? extractLocationBlocks(config) || config : config
+  title ??= state.preview?.engine ? previewTitle(state.preview.engine) : 'Generated config preview'
   return (
     <div className="hosts-preview">
       <div className="row between">

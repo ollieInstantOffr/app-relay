@@ -50,6 +50,9 @@ func Routes(app *core.App, r chi.Router) {
 	r.Post("/engines/{engine}/{action}", h.engineAction)
 	r.Get("/engines/{engine}/logs", h.engineLogs)
 	r.Get("/engines/{engine}/listeners", h.engineListeners)
+	r.Post("/preview/proxy/host", h.previewHost)
+	r.Post("/preview/proxy/stream", h.previewStream)
+	// Aliases kept for older clients; they preview the active proxy engine too.
 	r.Post("/preview/nginx/host", h.previewHost)
 	r.Post("/preview/nginx/stream", h.previewStream)
 }
@@ -133,10 +136,7 @@ func (h *handlers) pendingDiff(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
-	newFiles := map[string]string{}
-	for p, c := range rd.nginx {
-		newFiles[p] = c
-	}
+	newFiles := proxyFileMap(rd.proxyEngine, rd.proxy)
 	newFiles["haproxy.cfg"] = rd.haproxy["haproxy.cfg"]
 	resp.Files, resp.Paths = diffMaps(redactFiles(oldFiles), redactFiles(newFiles), r.URL.Query().Get("file"))
 	httpx.WriteJSON(w, http.StatusOK, resp)
@@ -192,14 +192,16 @@ type versionJSON struct {
 	FailedEngine   string `json:"failedEngine,omitempty"`
 	FailedStage    string `json:"failedStage,omitempty"`
 	Output         string `json:"output,omitempty"`
-	NginxHash      string `json:"nginxHash"`
+	ProxyEngine    string `json:"proxyEngine"` // nginx | edge
+	ProxyHash      string `json:"proxyHash"`
+	NginxHash      string `json:"nginxHash"` // proxy engine hash (kept for compatibility)
 	HAProxyHash    string `json:"haproxyHash"`
 	HAProxyRunning bool   `json:"haproxyRunning"`
 }
 
 func toVersionJSON(row *store.VersionRow) versionJSON {
 	return versionJSON{Version: toVersion(row), FailedEngine: row.FailedEngine, FailedStage: row.FailedStage, Output: row.Output,
-		NginxHash: row.NginxHash, HAProxyHash: row.HAProxyHash, HAProxyRunning: row.HAProxyRunning}
+		ProxyEngine: rowEngine(row), ProxyHash: row.NginxHash, NginxHash: row.NginxHash, HAProxyHash: row.HAProxyHash, HAProxyRunning: row.HAProxyRunning}
 }
 
 func (h *handlers) versions(w http.ResponseWriter, r *http.Request) {
@@ -240,14 +242,18 @@ func (h *handlers) version(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal([]byte(row.NginxFiles), &files)
 	httpx.WriteJSON(w, http.StatusOK, struct {
 		versionJSON
+		// NginxFiles holds the proxy engine's files (see proxyEngine).
 		NginxFiles map[string]string `json:"nginxFiles"`
 		HAProxyCfg string            `json:"haproxyCfg"`
 	}{toVersionJSON(row), redactFiles(files), row.HAProxyCfg})
 }
 
+// versionFileMap returns a version's files for diffs: proxy engine files
+// (Relay Edge ones under edge/) plus haproxy.cfg.
 func versionFileMap(row *store.VersionRow) map[string]string {
-	files := map[string]string{}
-	json.Unmarshal([]byte(row.NginxFiles), &files)
+	raw := map[string]string{}
+	json.Unmarshal([]byte(row.NginxFiles), &raw)
+	files := proxyFileMap(rowEngine(row), raw)
 	if row.HAProxyCfg != "" {
 		files["haproxy.cfg"] = row.HAProxyCfg
 	}
@@ -314,7 +320,7 @@ var htpasswdLine = regexp.MustCompile(`(?m)^([^#:\n][^:\n]*):\S+$`)
 func redactFiles(files map[string]string) map[string]string {
 	out := make(map[string]string, len(files))
 	for p, c := range files {
-		if strings.HasPrefix(p, "htpasswd/") {
+		if strings.HasPrefix(p, "htpasswd/") || strings.HasPrefix(p, "edge/htpasswd/") {
 			c = htpasswdLine.ReplaceAllString(c, "$1:<bcrypt hash>")
 		}
 		out[p] = c
@@ -351,8 +357,9 @@ func (h *handlers) download(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
+	engine := rowEngine(row)
 	for _, p := range paths {
-		add("nginx/"+p, files[p])
+		add(engine+"/"+p, files[p])
 	}
 	if row.HAProxyCfg != "" {
 		add("haproxy/haproxy.cfg", row.HAProxyCfg)
@@ -408,8 +415,10 @@ func (h *handlers) client(r *http.Request) (*agent.Client, string, error) {
 		return h.app.Nginx, e, nil
 	case agent.EngineHAProxy:
 		return h.app.HAProxy, e, nil
+	case agent.EngineEdge:
+		return h.app.Edge, e, nil
 	}
-	return nil, "", httpx.Errorf(http.StatusNotFound, "not_found", "unknown engine (nginx | haproxy)")
+	return nil, "", httpx.Errorf(http.StatusNotFound, "not_found", "unknown engine (nginx | haproxy | edge)")
 }
 
 func (h *handlers) engineAction(w http.ResponseWriter, r *http.Request) {
@@ -493,6 +502,7 @@ type configPreview struct {
 	Config string `json:"config"`
 	Valid  bool   `json:"valid"`
 	Output string `json:"output"`
+	Engine string `json:"engine"` // proxy engine that rendered it: nginx | edge
 }
 
 func (h *handlers) previewHost(w http.ResponseWriter, r *http.Request) {
@@ -518,25 +528,31 @@ func (h *handlers) previewHost(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	env := s.env(ctx)
+	engine := h.app.ProxyEngine(ctx)
+	pr, err := rendererFor(engine)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	env := s.envFor(ctx, engine)
 	ensureDefaultCert(env)
 	rs := s.renderSnapshot(snap, env)
 	host := *body.Host
-	cfg, rerr := nginx.RenderHost(rs, &host, env)
-	resp := configPreview{Config: cfg, Valid: rerr == nil}
+	cfg, rerr := pr.host(rs, &host, env)
+	resp := configPreview{Config: cfg, Valid: rerr == nil, Engine: engine}
 	if rerr != nil {
 		resp.Output = rerr.Error()
 		httpx.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
 	host.Enabled = true
-	files, err := nginx.Render(nginx.WithHost(rs, &host), env)
+	files, err := pr.render(nginx.WithHost(rs, &host), env)
 	if err != nil {
 		resp.Valid, resp.Output = false, err.Error()
 		httpx.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
-	h.validatePreview(ctx, files, &resp)
+	h.validatePreview(ctx, engine, files, &resp)
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
@@ -563,38 +579,44 @@ func (h *handlers) previewStream(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	env := s.env(ctx)
+	engine := h.app.ProxyEngine(ctx)
+	pr, err := rendererFor(engine)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	env := s.envFor(ctx, engine)
 	ensureDefaultCert(env)
 	rs := s.renderSnapshot(snap, env)
 	st := *body.Stream
-	cfg, rerr := nginx.RenderStream(rs, &st, env)
-	resp := configPreview{Config: cfg, Valid: rerr == nil}
+	cfg, rerr := pr.stream(rs, &st, env)
+	resp := configPreview{Config: cfg, Valid: rerr == nil, Engine: engine}
 	if rerr != nil {
 		resp.Output = rerr.Error()
 		httpx.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
 	st.Enabled = true
-	files, err := nginx.Render(nginx.WithStream(rs, &st), env)
+	files, err := pr.render(nginx.WithStream(rs, &st), env)
 	if err != nil {
 		resp.Valid, resp.Output = false, err.Error()
 		httpx.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
-	h.validatePreview(ctx, files, &resp)
+	h.validatePreview(ctx, engine, files, &resp)
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
-func (h *handlers) validatePreview(ctx context.Context, files agent.Files, resp *configPreview) {
+func (h *handlers) validatePreview(ctx context.Context, engine string, files agent.Files, resp *configPreview) {
 	vctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	vr, err := h.app.Nginx.Validate(vctx, files)
+	vr, err := h.app.Client(engine).Validate(vctx, files)
 	var ua agent.ErrUnavailable
 	switch {
 	case errors.As(err, &ua):
-		resp.Output = "Rendered, but not checked with nginx -t: the nginx engine is unreachable."
+		resp.Output = "Rendered, but not checked with " + checkName(engine) + ": the " + engineLabel(engine) + " engine is unreachable."
 	case err != nil:
-		resp.Output = "Rendered, but not checked with nginx -t: " + err.Error()
+		resp.Output = "Rendered, but not checked with " + checkName(engine) + ": " + err.Error()
 	default:
 		resp.Valid = vr.OK
 		resp.Output = vr.Output

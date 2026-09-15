@@ -51,6 +51,9 @@ type ingester struct {
 	log   *slog.Logger
 	names *nameCache
 	in    chan chunk
+	// proxyEngine returns the active proxy engine; error.log lines are
+	// recorded with it as the source (nginx | edge).
+	proxyEngine func() string
 
 	access  []store.AccessRecord
 	errs    []store.ErrorRecord
@@ -68,9 +71,10 @@ type ingester struct {
 func newIngester(app *core.App, names *nameCache) *ingester {
 	return &ingester{
 		st: app.Store, bus: app.Bus, log: app.Log, names: names,
-		in:      make(chan chunk, 64),
-		metrics: map[metricKey]*store.MetricsDelta{},
-		kv:      map[string][]byte{},
+		proxyEngine: func() string { return app.ProxyEngine(context.Background()) },
+		in:          make(chan chunk, 64),
+		metrics:     map[metricKey]*store.MetricsDelta{},
+		kv:          map[string][]byte{},
 	}
 }
 
@@ -131,8 +135,14 @@ func (g *ingester) add(c chunk) {
 			g.aggregate(&r)
 		}
 	case srcNginxError:
+		source := "nginx"
+		if g.proxyEngine != nil && g.proxyEngine() == "edge" {
+			source = "edge"
+		}
 		for _, l := range c.lines {
-			g.errs = append(g.errs, ParseNginxErrorLine(string(l), now))
+			rec := ParseNginxErrorLine(string(l), now)
+			rec.Source = source
+			g.errs = append(g.errs, rec)
 		}
 	case srcHAProxy:
 		g.errs = append(g.errs, c.errs...)

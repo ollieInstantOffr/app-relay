@@ -75,7 +75,7 @@ type applyArgs struct {
 
 func (s *Service) registerWriteTools() {
 	addWrite(s, toolInfo{Name: "create_host", Title: "Create a proxy host",
-		Description: "Create an nginx proxy host for one or more domains pointing at an upstream. Unspecified options use Relay's host defaults; certificate \"auto\" picks a valid certificate covering the domains (for example a wildcard). The host is saved to pending changes and is not live until apply_changes runs. May wait for human approval."},
+		Description: "Create a reverse proxy (nginx or Relay Edge) host for one or more domains pointing at an upstream. Unspecified options use Relay's host defaults; certificate \"auto\" picks a valid certificate covering the domains (for example a wildcard). The host is saved to pending changes and is not live until apply_changes runs. May wait for human approval."},
 		nil, false, s.planCreateHost)
 	addWrite(s, toolInfo{Name: "update_host", Title: "Update a proxy host",
 		Description: "Change an existing proxy host (found by id or domain): domains, upstream, websockets, access list, certificate, force HTTPS, exploit blocking, HTTP/2, asset caching or enabled. Only the fields you pass change. Saved to pending changes; not live until apply_changes. May wait for human approval."},
@@ -90,7 +90,7 @@ func (s *Service) registerWriteTools() {
 		Description: "Request a Let's Encrypt certificate for one or more domains (wildcards need dns-01 and a configured DNS provider). Issuance runs in the background; check list_certificates for the result, then attach it with update_host. May wait for human approval."},
 		map[string][]any{"challenge": {model.ChallengeHTTP01, model.ChallengeDNS01}}, false, s.planRequestCertificate)
 	addWrite(s, toolInfo{Name: "apply_changes", Title: "Apply pending changes",
-		Description: "Make all pending configuration changes live: render nginx and HAProxy config, validate, reload, health-check for 10 s and roll back automatically on failure. Returns the new config version. Affects every pending change, not only yours — check get_pending_changes first. May wait for human approval."},
+		Description: "Make all pending configuration changes live: render the reverse proxy (nginx or Relay Edge) and HAProxy config, validate, reload, health-check for 10 s and roll back automatically on failure. Returns the new config version. Affects every pending change, not only yours — check get_pending_changes first. May wait for human approval."},
 		nil, true, s.planApply)
 }
 

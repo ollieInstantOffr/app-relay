@@ -20,7 +20,7 @@ cd relay`} />
         </Step>
         <Step title="Start the stack">
           <Example lang="bash" code={`make up`} />
-          <C>make up</C> runs <C>docker compose up -d --build</C> with the version and commit taken from git, so the UI shows the right version. This starts <C>relay</C>, <C>relay-nginx</C> and <C>relay-haproxy</C>. Check them with <C>docker compose ps</C>.
+          <C>make up</C> runs <C>docker compose up -d --build</C> with the version and commit taken from git, so the UI shows the right version. This starts <C>relay</C>, <C>relay-nginx</C>, <C>relay-edge</C> (on standby) and <C>relay-haproxy</C>. Check them with <C>docker compose ps</C>.
         </Step>
         <Step title="Open the UI">
           Browse to <C>http://&lt;server-ip&gt;:8181</C>, e.g. <C>http://192.168.1.10:8181</C>.
@@ -44,13 +44,14 @@ cd relay`} />
           ['RELAY_NGINX_IMAGE', 'nginx:1.30.4-alpine', 'Pin a different nginx version.'],
           ['RELAY_HAPROXY_IMAGE', 'haproxy:3.4.4-alpine', 'Pin a different HAProxy version.'],
           ['RELAY_NGINX_STATUS_PORT', '18080', 'Local nginx status port, if 18080 is taken.'],
+          ['RELAY_EDGE_STATUS_PORT', '18081', 'Local Relay Edge status and metrics port, if 18081 is taken.'],
         ]}
       />
       <Example lang="bash" title=".env (example)" code={`TZ=Europe/Oslo`} />
 
       <H2>Ports 80/443 already in use?</H2>
       <P>
-        Relay uses host networking, so nginx binds directly to the machine’s ports. If another service must keep 80/443, change the HTTP and HTTPS ports under
+        Relay uses host networking, so the reverse proxy binds directly to the machine’s ports. If another service must keep 80/443, change the HTTP and HTTPS ports under
         {' '}<UI>Settings → General → Listening ports</UI>. Let’s Encrypt HTTP-01 then only works if something forwards port 80 to Relay; use DNS-01 instead.
       </P>
       <Example lang="bash" title="Find what is using port 80" code={`sudo ss -ltnp 'sport = :80'`} />
@@ -62,8 +63,8 @@ cd relay`} />
       <Example lang="bash" code={`git pull
 make up
 # optional: restart the engines so their agents use the new binary (brief interruption)
-docker compose restart nginx haproxy`} />
-      <Note>nginx and HAProxy keep serving the last applied configuration while <C>relay</C> restarts, so updating Relay doesn’t interrupt traffic. nginx and HAProxy versions are upgraded separately on the same page.</Note>
+docker compose restart nginx edge haproxy`} />
+      <Note>The engines keep serving the last applied configuration while <C>relay</C> restarts, so updating Relay doesn’t interrupt traffic. Relay Edge ships with Relay and runs the new version once its container restarts; nginx and HAProxy versions are upgraded separately on the same page.</Note>
 
       <H2>What to back up</H2>
       <P>Only the <C>relay-data</C> volume matters: database, certificates and backups. Everything else is rebuilt from it. <See id="backups">Backup &amp; restore →</See></P>

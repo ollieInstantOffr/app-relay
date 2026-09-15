@@ -10,10 +10,13 @@ import { useToast } from '../../components/ui'
 import type { Pending, Version } from '../../lib/types'
 
 export interface VersionInfo extends Version {
-  failedEngine?: 'nginx' | 'haproxy'
+  failedEngine?: EngineName
   failedStage?: string
   output?: string
   nginxHash: string
+  /** Proxy engine this version was rendered for (older versions: absent = nginx). */
+  proxyEngine?: 'nginx' | 'edge'
+  proxyHash?: string
   haproxyHash: string
   haproxyRunning: boolean
 }
@@ -38,8 +41,8 @@ export interface ApplyFinished { version: number; status: string; error: string;
 export interface EngineLogLine { at: string; stream: 'stdout' | 'stderr'; text: string }
 export interface EngineListener { proto: 'tcp' | 'udp'; address: string; port: number; process?: string }
 
-export type EngineName = 'nginx' | 'haproxy'
-export const engineLabel: Record<EngineName, string> = { nginx: 'nginx', haproxy: 'HAProxy' }
+export type EngineName = 'nginx' | 'haproxy' | 'edge'
+export const engineLabel: Record<EngineName, string> = { nginx: 'nginx', haproxy: 'HAProxy', edge: 'Relay Edge' }
 
 export function useVersions(limit = 100) {
   return useQuery({
@@ -103,7 +106,7 @@ export function secondsAgo(iso: string | undefined, now: number): string {
   return `${Math.round(s / 86400)} days ago`
 }
 
-/** "Applying v3… · validated · reloading nginx" → "Validated · reloading nginx" */
+/** "Applying v3… · validated · reloading Relay Edge" → "Validated · reloading Relay Edge" */
 function stageMessage(m: string): string {
   const s = m.replace(/^Applying v\d+…\s*·\s*/, '')
   return s.charAt(0).toUpperCase() + s.slice(1)

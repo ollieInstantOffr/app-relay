@@ -83,7 +83,8 @@ function Rail({ pendingCount, username, role }: { pendingCount: number; username
   const badges = useMemo(() => {
     const b: Record<string, { tone?: 'warn' | 'danger'; count?: number }> = {}
     const hostStates = Object.entries(health ?? {}).filter(([k]) => k.startsWith('host:')).map(([, v]) => v.status)
-    if (engines && engines.nginx.reachable && !engines.nginx.running) b['/hosts'] = { tone: 'danger' }
+    const proxy = engines ? engines[engines.proxy === 'edge' ? 'edge' : 'nginx'] : undefined
+    if (proxy && proxy.reachable && !proxy.running) b['/hosts'] = { tone: 'danger' }
     else if (hostStates.includes('down')) b['/hosts'] = { tone: 'danger' }
     else if (hostStates.includes('degraded')) b['/hosts'] = { tone: 'warn' }
     if (lb?.running) {

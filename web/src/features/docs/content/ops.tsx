@@ -8,8 +8,8 @@ function Logs() {
       <H2>The four log tabs</H2>
       <Defs
         items={[
-          ['Access', 'Every request nginx served: time, host, method, path, status, upstream status, client IP, duration, user agent.'],
-          ['Error', 'nginx errors, such as upstreams refusing connections, timeouts and TLS problems.'],
+          ['Access', 'Every request the reverse proxy served: time, host, method, path, status, upstream status, client IP, duration, user agent.'],
+          ['Error', 'Reverse proxy (nginx or Relay Edge) and HAProxy errors, such as upstreams refusing connections, timeouts and TLS problems.'],
           ['Audit', 'Who changed what and when, whether through the UI, a REST API token or an AI assistant over MCP.'],
           ['Approvals', <>Changes requested by AI assistants that are waiting for you. <See id="mcp">MCP →</See></>],
         ]}
@@ -42,7 +42,7 @@ host:api.example.com method:POST status:>=400`} />
       <Table
         head={['You see', 'Meaning']}
         rows={[
-          [<C>502</C>, 'nginx couldn’t connect to the upstream. Check the Error tab for the reason.'],
+          [<C>502</C>, 'The proxy couldn’t connect to the upstream. Check the Error tab for the reason.'],
           [<C>504</C>, 'The upstream took too long. Raise proxy timeouts on the host or fix the slow endpoint.'],
           [<C>413</C>, 'Upload too large. Raise Max upload size on the host’s Advanced tab.'],
           [<C>429</C>, 'The rate limit kicked in.'],
@@ -73,7 +73,8 @@ function History() {
       <List>
         <li>Select a version to see a per-file diff against the version before it.</li>
         <li>Compare any two versions, for example “what changed between Monday and now?”.</li>
-        <li>Download a version’s rendered nginx and HAProxy files.</li>
+        <li>Download a version’s rendered proxy (nginx or Relay Edge) and HAProxy files.</li>
+        <li>Each version records its proxy engine; the version that switched engines carries a badge such as <C>→ Relay Edge</C>.</li>
       </List>
 
       <H2>Rolling back</H2>
@@ -306,7 +307,7 @@ function Engines() {
           You also get an <C>engine_update_available</C> notification for each new version.
         </Step>
         <Step title="Update">
-          Click <UI>Upgrade to 0.4.2</UI> on the Relay card. Optionally tick <UI>Also restart nginx and HAProxy</UI> so the engines pick up the new agent (a 1–3 second pause in traffic).
+          Click <UI>Upgrade to 0.4.2</UI> on the Relay card. Optionally tick <UI>Also restart the proxy and load balancer engines</UI> so the engines pick up the new agent, and Relay Edge its new version (a 1–3 second pause in traffic).
         </Step>
         <Step title="Watch it run">
           The progress panel shows pull, build and restart. <UI>Show build output</UI> streams the docker build log. Building takes a few minutes the first time and is much faster afterwards thanks to the build cache.
@@ -328,7 +329,7 @@ function Engines() {
         <li>git only fast-forwards and runs as the owner of the folder, so your checkout is never rewritten or left owned by root.</li>
         <li>If the build fails, Relay keeps running the current version.</li>
         <li>If the new version doesn’t become healthy after the restart, the previous image is restored automatically.</li>
-        <li>nginx and HAProxy keep serving traffic throughout (unless you choose to restart them).</li>
+        <li>The proxy engine and HAProxy keep serving traffic throughout (unless you choose to restart them).</li>
         <li>The work runs in a short-lived helper container (<C>docker:29.8.0-cli</C>) that survives Relay’s own restart; the restarted Relay reports the result.</li>
       </List>
       <H3>Version numbers</H3>
@@ -357,6 +358,10 @@ function Engines() {
         nginx and HAProxy run from the official Docker Hub images. <UI>Settings → Updates</UI> shows the running version of each, checks Docker Hub for new releases,
         and upgrades the containers in place with automatic rollback.
       </P>
+      <Note>
+        Relay Edge has no card: it is part of Relay and updates with it. While Relay Edge is the proxy engine, the nginx card shows <C>Not in use</C> and nginx isn’t
+        checked for upgrades or problems. <See id="relay-edge">Relay Edge →</See>
+      </Note>
 
       <H2>Update checks</H2>
       <List>

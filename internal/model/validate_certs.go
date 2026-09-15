@@ -592,7 +592,7 @@ func ValidateCertRequestFields(domains []string, challenge, dnsProviderID string
 			e.Add("challenge", "Wildcard domains (%s) need the DNS-01 challenge", wildcard)
 		}
 	case ChallengeTLSALPN01:
-		e.Add("challenge", "TLS-ALPN-01 is unavailable while nginx owns port 443 — use HTTP-01 or DNS-01")
+		e.Add("challenge", "TLS-ALPN-01 is unavailable while the reverse proxy (nginx or Relay Edge) owns port 443 — use HTTP-01 or DNS-01")
 	case "":
 		e.Add("challenge", "Pick a challenge")
 	default:
@@ -954,7 +954,7 @@ func (t *TLSSettings) Validate() error {
 	switch t.PreferredChallenge {
 	case ChallengeHTTP01, ChallengeDNS01:
 	case ChallengeTLSALPN01:
-		e.Add("preferredChallenge", "TLS-ALPN-01 is unavailable while nginx owns port 443")
+		e.Add("preferredChallenge", "TLS-ALPN-01 is unavailable while the reverse proxy (nginx or Relay Edge) owns port 443")
 	default:
 		e.Add("preferredChallenge", "Pick HTTP-01 or DNS-01")
 	}

@@ -197,6 +197,9 @@ export interface HostDefaults {
   accessListId?: string
   certificateId?: string
 }
+export type ProxyEngineName = 'nginx' | 'edge'
+export const proxyEngineLabel: Record<ProxyEngineName, string> = { nginx: 'nginx', edge: 'Relay Edge' }
+
 export interface GeneralSettings {
   instanceName: string
   adminDomain: string
@@ -207,6 +210,8 @@ export interface GeneralSettings {
   adminPort: number
   http3: boolean
   lanCidr: string
+  /** Reverse proxy engine for the HTTP/HTTPS ports and streams. */
+  proxyEngine: ProxyEngineName
   defaults: HostDefaults
   setupDone: boolean
 }
@@ -386,8 +391,9 @@ export interface Version {
 }
 
 /** GET /api/engines (slice engine) */
+export type EngineKind = ProxyEngineName | 'haproxy'
 export interface EngineState {
-  engine: 'nginx' | 'haproxy'
+  engine: EngineKind
   reachable: boolean
   error?: string
   running: boolean
@@ -403,7 +409,13 @@ export interface EngineState {
   configLines: number
   configured: boolean
 }
-export interface EnginesStatus { nginx: EngineState; haproxy: EngineState }
+export interface EnginesStatus {
+  nginx: EngineState
+  haproxy: EngineState
+  edge: EngineState
+  /** Active proxy engine: the live version's, or the General setting before the first apply. */
+  proxy: ProxyEngineName
+}
 
 /** Settings → Updates (slice engine). GET/PUT /api/settings/engines */
 export interface EnginesSettings {
@@ -437,6 +449,8 @@ export interface EngineUpdateInfo {
   changesUrl: string
   modules: string[]
   missingModules: string[]
+  /** nginx only: true while Relay Edge is the selected proxy engine. */
+  inactive?: boolean
 }
 export interface RelayCommit { sha: string; short: string; author: string; date?: string; subject: string; url?: string }
 /** Relay's own update state (part of GET /api/engines/updates). */
@@ -486,6 +500,8 @@ export interface EngineUpdates {
   relay?: RelayUpdateInfo
   nginx: EngineUpdateInfo
   haproxy: EngineUpdateInfo
+  /** Selected proxy engine (Relay Edge upgrades together with Relay). */
+  proxyEngine?: ProxyEngineName
   autoCheck: boolean
   checkedAt?: string
   nextCheckAt?: string
@@ -513,8 +529,8 @@ export interface UpgradeJob {
   finishedAt?: string
 }
 
-/** POST /api/preview/* (engine: nginx host/stream; lb: haproxy backend/frontend) */
-export interface ConfigPreview { config: string; valid: boolean; output: string }
+/** POST /api/preview/* (proxy: host/stream on the active proxy engine; lb: haproxy backend/frontend) */
+export interface ConfigPreview { config: string; valid: boolean; output: string; engine?: EngineKind }
 
 /** GET /api/health (slice observe) → Record<target, HealthStatus>; target = host:<id> | stream:<id> */
 export type HealthState = 'healthy' | 'degraded' | 'down' | 'disabled' | 'unknown'

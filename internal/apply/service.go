@@ -25,6 +25,7 @@ import (
 	"github.com/instantoffr/relay/internal/events"
 	"github.com/instantoffr/relay/internal/model"
 	"github.com/instantoffr/relay/internal/render"
+	"github.com/instantoffr/relay/internal/render/edge"
 	"github.com/instantoffr/relay/internal/render/haproxy"
 	"github.com/instantoffr/relay/internal/render/nginx"
 	"github.com/instantoffr/relay/internal/store"
@@ -37,13 +38,14 @@ type Service struct {
 	applyMu sync.Mutex
 
 	mu           sync.Mutex
-	modules      map[string]bool
-	modulePaths  map[string]string
+	modules      map[string]map[string]bool   // per proxy engine (nginx, edge)
+	modulePaths  map[string]map[string]string // per proxy engine
 	lastPending  int
 	liveID       int64
 	liveSnap     *model.Snapshot
 	observed     map[string]engineObs
 	healthWindow time.Duration
+	switchTo     string // proxy engine an apply is switching to
 }
 
 type engineObs struct {
@@ -56,73 +58,88 @@ func New(app *core.App) *Service {
 	} else if addr := strings.TrimSpace(os.Getenv("RELAY_STUB_STATUS_ADDR")); addr != "" {
 		nginx.StubStatusAddr = addr
 	}
+	if port := strings.TrimSpace(os.Getenv(agent.EdgeStatusPortEnv)); port != "" {
+		edge.StatusAddr = "127.0.0.1:" + port
+	}
 	log := app.Log
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{app: app, log: log.With("svc", "engine"), lastPending: -1, observed: map[string]engineObs{}, healthWindow: 10 * time.Second}
+	return &Service{app: app, log: log.With("svc", "engine"), lastPending: -1, observed: map[string]engineObs{}, healthWindow: 10 * time.Second,
+		modules: map[string]map[string]bool{}, modulePaths: map[string]map[string]string{}}
 }
 
-const (
-	modulesKV     = "engine.nginx.modules"
-	modulePathsKV = "engine.nginx.modulePaths"
-)
+// modulesKV / modulePathsKV store the modules last reported by a proxy
+// engine agent ("engine.nginx.modules", "engine.edge.modules").
+func modulesKV(engine string) string     { return "engine." + engine + ".modules" }
+func modulePathsKV(engine string) string { return "engine." + engine + ".modulePaths" }
 
-// defaultModules are assumed before the nginx agent was ever reached (they
-// match the official nginx image, where all of them are compiled in).
+// defaultModules are assumed before the proxy engine agent was ever reached
+// (they match the official nginx image, where all of them are compiled in,
+// and Relay Edge).
 var defaultModules = map[string]bool{"stream": true, "http_v3": true, "http_v2": true, "auth_request": true, "stub_status": true}
 
 func (s *Service) Start(ctx context.Context) error {
-	if b, err := s.app.Store.GetKV(ctx, modulesKV); err == nil {
-		var mods []string
-		if json.Unmarshal(b, &mods) == nil && len(mods) > 0 {
-			var paths map[string]string
-			if pb, err := s.app.Store.GetKV(ctx, modulePathsKV); err == nil {
-				json.Unmarshal(pb, &paths)
+	for _, engine := range []string{agent.EngineNginx, agent.EngineEdge} {
+		if b, err := s.app.Store.GetKV(ctx, modulesKV(engine)); err == nil {
+			var mods []string
+			if json.Unmarshal(b, &mods) == nil && len(mods) > 0 {
+				var paths map[string]string
+				if pb, err := s.app.Store.GetKV(ctx, modulePathsKV(engine)); err == nil {
+					json.Unmarshal(pb, &paths)
+				}
+				s.setModules(ctx, engine, mods, paths, false)
 			}
-			s.setModules(ctx, mods, paths, false)
 		}
 	}
+	s.app.SyncProxyEngineFile(ctx)
 	go s.watchConfig(ctx)
 	go s.reconcileLoop(ctx)
 	return nil
 }
 
-func (s *Service) setModules(ctx context.Context, mods []string, paths map[string]string, persist bool) {
+func (s *Service) setModules(ctx context.Context, engine string, mods []string, paths map[string]string, persist bool) {
 	m := map[string]bool{}
 	for _, x := range mods {
 		m[x] = true
 	}
 	s.mu.Lock()
-	changed := len(m) != len(s.modules)
+	cur, curPaths := s.modules[engine], s.modulePaths[engine]
+	changed := len(m) != len(cur)
 	for k := range m {
-		if !s.modules[k] {
+		if !cur[k] {
 			changed = true
 		}
 	}
-	if len(paths) != len(s.modulePaths) {
+	if len(paths) != len(curPaths) {
 		changed = true
 	}
 	for k, v := range paths {
-		if s.modulePaths[k] != v {
+		if curPaths[k] != v {
 			changed = true
 		}
 	}
-	s.modules = m
-	s.modulePaths = paths
+	s.modules[engine] = m
+	s.modulePaths[engine] = paths
 	s.mu.Unlock()
 	if changed && persist {
 		pb, _ := json.Marshal(paths)
-		s.app.Store.PutKV(context.WithoutCancel(ctx), modulePathsKV, pb)
+		s.app.Store.PutKV(context.WithoutCancel(ctx), modulePathsKV(engine), pb)
 		sorted := append([]string(nil), mods...)
 		sort.Strings(sorted)
 		b, _ := json.Marshal(sorted)
-		s.app.Store.PutKV(context.WithoutCancel(ctx), modulesKV, b)
+		s.app.Store.PutKV(context.WithoutCancel(ctx), modulesKV(engine), b)
 	}
 }
 
-// env returns the render environment as seen from the engine containers.
+// env returns the render environment of the active proxy engine as seen
+// from the engine containers.
 func (s *Service) env(ctx context.Context) render.Env {
+	return s.envFor(ctx, s.app.ProxyEngine(ctx))
+}
+
+// envFor returns the render environment for a proxy engine (its modules).
+func (s *Service) envFor(ctx context.Context, engine string) render.Env {
 	cfg := s.app.Config
 	env := render.DefaultEnv(cfg.DataDir, cfg.RunDir, cfg.LogDir)
 	if gen, err := store.LoadSettings[model.GeneralSettings](ctx, s.app.Store, model.SettingsGeneral); err == nil && gen.AdminPort > 0 {
@@ -133,8 +150,8 @@ func (s *Service) env(ctx context.Context) render.Env {
 		env.GeoIPCountry = geo
 	}
 	s.mu.Lock()
-	mods := s.modules
-	paths := s.modulePaths
+	mods := s.modules[engine]
+	paths := s.modulePaths[engine]
 	s.mu.Unlock()
 	if len(mods) == 0 {
 		mods = defaultModules
@@ -208,20 +225,26 @@ func fileExists(p string) bool {
 }
 
 type rendered struct {
-	nginx       agent.Files
+	proxyEngine string      // nginx | edge
+	proxy       agent.Files // the proxy engine's files
 	haproxy     agent.Files
-	nginxHash   string
+	proxyHash   string
 	haproxyHash string
 	haproxyRun  bool
 }
 
 func (s *Service) renderAll(ctx context.Context, snap *model.Snapshot) (*rendered, error) {
-	env := s.env(ctx)
+	engine := snapshotEngine(snap)
+	env := s.envFor(ctx, engine)
 	if err := ensureDefaultCert(env); err != nil {
 		s.log.Warn("default certificate", "err", err)
 	}
 	rs := s.renderSnapshot(snap, env)
-	files, err := nginx.Render(rs, env)
+	pr, err := rendererFor(engine)
+	if err != nil {
+		return nil, err
+	}
+	files, err := pr.render(rs, env)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +260,7 @@ func (s *Service) renderAll(ctx context.Context, snap *model.Snapshot) (*rendere
 		cfg = "# HAProxy is stopped: no load-balancer backends are configured.\n"
 	}
 	hfiles := agent.Files{"haproxy.cfg": cfg}
-	return &rendered{nginx: files, haproxy: hfiles, nginxHash: agent.HashFiles(files), haproxyHash: agent.HashFiles(hfiles), haproxyRun: run}, nil
+	return &rendered{proxyEngine: engine, proxy: files, haproxy: hfiles, proxyHash: agent.HashFiles(files), haproxyHash: agent.HashFiles(hfiles), haproxyRun: run}, nil
 }
 
 // ---------------------------------------------------------------- pending
@@ -315,8 +338,12 @@ func (s *Service) publishPending(ctx context.Context, force bool) {
 func (s *Service) Status(ctx context.Context) (*core.EnginesStatus, error) {
 	var out core.EnginesStatus
 	var wg sync.WaitGroup
-	get := func(c *agent.Client, dst *core.EngineState) {
+	get := func(engine string, c *agent.Client, dst *core.EngineState) {
 		defer wg.Done()
+		if c == nil {
+			*dst = core.EngineState{Status: agent.Status{Engine: engine, Modules: []string{}}, Error: "agent client not configured"}
+			return
+		}
 		cctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 		defer cancel()
 		st, err := c.Status(cctx)
@@ -329,13 +356,18 @@ func (s *Service) Status(ctx context.Context) (*core.EnginesStatus, error) {
 		}
 		*dst = core.EngineState{Status: *st, Reachable: true}
 	}
-	wg.Add(2)
-	go get(s.app.Nginx, &out.Nginx)
-	go get(s.app.HAProxy, &out.HAProxy)
+	wg.Add(3)
+	go get(agent.EngineNginx, s.app.Nginx, &out.Nginx)
+	go get(agent.EngineHAProxy, s.app.HAProxy, &out.HAProxy)
+	go get(agent.EngineEdge, s.app.Edge, &out.Edge)
 	wg.Wait()
 	if out.Nginx.Reachable && len(out.Nginx.Modules) > 0 {
-		s.setModules(ctx, out.Nginx.Modules, out.Nginx.DynamicModules, true)
+		s.setModules(ctx, agent.EngineNginx, out.Nginx.Modules, out.Nginx.DynamicModules, true)
 	}
+	if out.Edge.Reachable && len(out.Edge.Modules) > 0 {
+		s.setModules(ctx, agent.EngineEdge, out.Edge.Modules, out.Edge.DynamicModules, true)
+	}
+	out.Proxy = s.app.ProxyEngine(ctx)
 	return &out, nil
 }
 
@@ -413,28 +445,39 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 	changesJSON, _ := json.Marshal(items)
 	row := &store.VersionRow{ID: id, CreatedAt: time.Now().UTC(), Actor: actor.Label(), Summary: summary, Status: "draft", Snapshot: string(snapJSON), Changes: string(changesJSON)}
 
+	// The proxy engine of the new version; switching engines stops the old
+	// one and starts the new one instead of reloading.
+	engine := snapshotEngine(snap)
+	prevEngine := agent.EngineNginx
+	if liveRow != nil {
+		prevEngine = rowEngine(liveRow)
+	}
+	switching := prevEngine != engine
+	row.ProxyEngine = engine
+	pc := s.app.Client(engine)
+
 	// Render.
 	progress("render", fmt.Sprintf("Applying v%d… · rendering config", id), 5)
 	r, err := s.renderAll(ctx, snap)
 	if err != nil {
 		row.NginxFiles, row.HAProxyCfg = "{}", ""
-		return s.failBeforeSwap(ctx, row, "nginx", "render", err.Error(), "Config could not be rendered")
+		return s.failBeforeSwap(ctx, row, engine, "render", err.Error(), "Config could not be rendered")
 	}
-	nf, _ := json.Marshal(r.nginx)
+	nf, _ := json.Marshal(r.proxy)
 	row.NginxFiles, row.HAProxyCfg = string(nf), r.haproxy["haproxy.cfg"]
-	row.NginxHash, row.HAProxyHash, row.HAProxyRunning = r.nginxHash, r.haproxyHash, r.haproxyRun
+	row.NginxHash, row.HAProxyHash, row.HAProxyRunning = r.proxyHash, r.haproxyHash, r.haproxyRun
 
 	// Validate.
-	progress("validate", fmt.Sprintf("Applying v%d… · validating · nginx -t", id), 20)
+	progress("validate", fmt.Sprintf("Applying v%d… · validating · %s", id, checkName(engine)), 20)
 	vctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	nv, err := s.app.Nginx.Validate(vctx, r.nginx)
+	nv, err := pc.Validate(vctx, r.proxy)
 	cancel()
 	if err != nil {
-		return nil, s.unavailable("nginx", err)
+		return nil, s.unavailable(engine, err)
 	}
 	row.ValidateMs = nv.DurationMs
 	if !nv.OK {
-		return s.failBeforeSwap(ctx, row, "nginx", "validate", nv.Output, "nginx -t failed")
+		return s.failBeforeSwap(ctx, row, engine, "validate", nv.Output, checkName(engine)+" failed")
 	}
 	warnings := countWarnings(nv.Output)
 	output := nv.Output
@@ -457,8 +500,19 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 	}
 	row.Output = output
 
-	// Learn which changed hosts are healthy before the swap.
+	// Learn which changed hosts (every routable host when switching engines)
+	// are healthy before the swap.
 	targets := s.probeTargets(snap, liveSnap, items)
+	if switching {
+		targets = switchTargets(snap)
+	}
+	var liveFiles agent.Files
+	liveHash := ""
+	if switching && liveRow != nil {
+		if liveFiles, liveHash, err = s.liveProxyFiles(ctx, liveRow.ID); err != nil {
+			return nil, err
+		}
+	}
 	healthyBefore := map[string]bool{}
 	if liveRow != nil && len(targets) > 0 {
 		progress("validate", fmt.Sprintf("Applying v%d… · validated · probing %d host(s)", id, len(targets)), 35)
@@ -473,7 +527,7 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 
 	// Swap + reload: HAProxy first so new localhost frontends exist before
 	// nginx routes to them.
-	haproxyChanged := false
+	sw := &proxySwap{engine: engine, files: r.proxy, hash: r.proxyHash}
 	if haproxyReachable && (hst.ConfigHash != r.haproxyHash || hst.Running != r.haproxyRun) {
 		verb := "reloading haproxy"
 		if !r.haproxyRun {
@@ -484,30 +538,57 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 		progress("reload", fmt.Sprintf("Applying v%d… · validated · %s", id, verb), 45)
 		resp, err := s.app.HAProxy.Apply(ctx, agent.ApplyRequest{Files: r.haproxy, Hash: r.haproxyHash, Stop: !r.haproxyRun})
 		if err != nil {
-			return s.failAfterSwap(ctx, row, liveID, "haproxy", "swap", err.Error(), false, false)
+			return s.failAfterSwap(ctx, row, liveID, "haproxy", "swap", err.Error(), &proxySwap{})
 		}
 		row.ReloadMs += resp.ReloadMs
 		if !resp.OK {
-			return s.failAfterSwap(ctx, row, liveID, "haproxy", resp.Stage, resp.Output, false, false)
+			return s.failAfterSwap(ctx, row, liveID, "haproxy", resp.Stage, resp.Output, &proxySwap{})
 		}
-		haproxyChanged = true
+		sw.haproxy = true
 	} else if !haproxyReachable && r.haproxyRun {
-		return s.failAfterSwap(ctx, row, liveID, "haproxy", "swap", agentError(herr), false, false)
+		return s.failAfterSwap(ctx, row, liveID, "haproxy", "swap", agentError(herr), &proxySwap{})
 	}
 
-	progress("reload", fmt.Sprintf("Applying v%d… · validated · reloading nginx", id), 55)
-	resp, err := s.app.Nginx.Apply(ctx, agent.ApplyRequest{Files: r.nginx, Hash: r.nginxHash})
+	if switching {
+		s.setSwitching(engine)
+		defer s.setSwitching("")
+		sw.from = prevEngine
+		progress("reload", fmt.Sprintf("Applying v%d… · validated · stopping %s", id, engineLabel(prevEngine)), 50)
+		stop := agent.ApplyRequest{Stop: true}
+		if liveFiles != nil {
+			stop.Files, stop.Hash = liveFiles, liveHash
+		}
+		sw.oldStop = true
+		sresp, err := s.app.Client(prevEngine).Apply(ctx, stop)
+		var ua agent.ErrUnavailable
+		switch {
+		case errors.As(err, &ua):
+			// An unreachable agent can't be holding the ports (nor restarted).
+			s.log.Warn("previous proxy engine unreachable, not stopped", "engine", prevEngine, "err", err)
+			sw.oldStop = false
+		case err != nil:
+			return s.failAfterSwap(ctx, row, liveID, prevEngine, "stop", err.Error(), sw)
+		case !sresp.OK:
+			return s.failAfterSwap(ctx, row, liveID, prevEngine, "stop", sresp.Output, sw)
+		}
+		progress("reload", fmt.Sprintf("Applying v%d… · validated · starting %s", id, engineLabel(engine)), 55)
+		sw.started = true
+	} else {
+		progress("reload", fmt.Sprintf("Applying v%d… · validated · reloading %s", id, engineLabel(engine)), 55)
+	}
+	resp, err := pc.Apply(ctx, agent.ApplyRequest{Files: r.proxy, Hash: r.proxyHash})
 	if err != nil {
-		return s.failAfterSwap(ctx, row, liveID, "nginx", "swap", err.Error(), false, haproxyChanged)
+		return s.failAfterSwap(ctx, row, liveID, engine, "swap", err.Error(), sw)
 	}
 	row.ReloadMs += resp.ReloadMs
 	if !resp.OK {
-		return s.failAfterSwap(ctx, row, liveID, "nginx", resp.Stage, resp.Output, false, haproxyChanged)
+		return s.failAfterSwap(ctx, row, liveID, engine, resp.Stage, resp.Output, sw)
 	}
+	sw.swapped = true
 
 	// Health check.
-	if failure := s.healthCheck(ctx, id, snap, targets, healthyBefore, progress); failure != "" {
-		return s.failAfterSwap(ctx, row, liveID, "nginx", "health", failure, true, haproxyChanged)
+	if failure := s.healthCheck(ctx, id, engine, snap, targets, healthyBefore, progress); failure != "" {
+		return s.failAfterSwap(ctx, row, liveID, engine, "health", failure, sw)
 	}
 
 	// Success.
@@ -520,11 +601,27 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 	row.Status = "live"
 	s.mu.Lock()
 	s.liveID, s.liveSnap = id, snap
+	if switching {
+		// Don't report the old engine stopping or the new one starting as outages.
+		delete(s.observed, prevEngine)
+		delete(s.observed, engine)
+	}
 	s.mu.Unlock()
+	s.app.SetProxyEngine(engine)
 	vid := id
 	s.app.Audit(ctx, core.AuditEntry{Action: "config.apply", Target: fmt.Sprintf("v%d", id), Detail: summary, Result: "applied", Version: &vid})
-	s.app.Activity(ctx, "reload", "info", fmt.Sprintf("Config reloaded · %d warning%s", warnings, plural(warnings)), fmt.Sprintf("v%d", id),
-		fmt.Sprintf("nginx -s reload · %d ms", resp.ReloadMs))
+	reloadDetail := fmt.Sprintf("nginx -s reload · %d ms", resp.ReloadMs)
+	switch {
+	case switching:
+		reloadDetail = fmt.Sprintf("Switched from %s to %s · %d ms", engineLabel(prevEngine), engineLabel(engine), resp.ReloadMs)
+	case engine == agent.EngineEdge:
+		reloadDetail = fmt.Sprintf("Relay Edge reload · %d ms", resp.ReloadMs)
+	}
+	s.app.Activity(ctx, "reload", "info", fmt.Sprintf("Config reloaded · %d warning%s", warnings, plural(warnings)), fmt.Sprintf("v%d", id), reloadDetail)
+	if switching {
+		s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": prevEngine, "running": false, "reachable": true})
+		s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": engine, "running": resp.Running, "reachable": true})
+	}
 	progress("done", fmt.Sprintf("v%d is live", id), 100)
 	v := toVersion(row)
 	s.app.Bus.Publish(events.ApplyFinished, map[string]any{"version": id, "status": "live", "error": ""})
@@ -560,8 +657,12 @@ func joinOutput(parts ...string) string {
 }
 
 func (s *Service) unavailable(engine string, err error) error {
+	name := engine
+	if engine == agent.EngineEdge {
+		name = engineLabel(engine)
+	}
 	return &ApplyError{Status: http.StatusServiceUnavailable, Code: "engine_unavailable",
-		Message: fmt.Sprintf("The %s engine is unreachable (%s). Is the relay-%s container running?", engine, agentError(err), engine)}
+		Message: fmt.Sprintf("The %s engine is unreachable (%s). Is the relay-%s container running?", name, agentError(err), engine)}
 }
 
 // failBeforeSwap records a failed version (nothing was changed on the engines).
@@ -581,19 +682,36 @@ func (s *Service) failBeforeSwap(ctx context.Context, row *store.VersionRow, eng
 
 // failAfterSwap rolls the engines back to the live version and records the
 // version as rolled back. The database keeps the edit as a draft.
-func (s *Service) failAfterSwap(ctx context.Context, row *store.VersionRow, liveID int64, engine, stage, output string, nginxSwapped, haproxySwapped bool) (*core.Version, error) {
+func (s *Service) failAfterSwap(ctx context.Context, row *store.VersionRow, liveID int64, engine, stage, output string, sw *proxySwap) (*core.Version, error) {
 	output = strings.TrimSpace(output)
 	rbctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
 	defer cancel()
 	var rbErrs []string
-	if nginxSwapped {
-		if resp, err := s.app.Nginx.Rollback(rbctx); err != nil {
-			rbErrs = append(rbErrs, "nginx: "+err.Error())
+	switch {
+	case sw.from == "" && sw.swapped:
+		if resp, err := s.app.Client(sw.engine).Rollback(rbctx); err != nil {
+			rbErrs = append(rbErrs, sw.engine+": "+err.Error())
 		} else if !resp.OK {
-			rbErrs = append(rbErrs, "nginx: "+resp.Output)
+			rbErrs = append(rbErrs, sw.engine+": "+resp.Output)
+		}
+	case sw.from != "":
+		// Engine switch: stop the new engine again, then restart the old one.
+		if sw.started {
+			if resp, err := s.app.Client(sw.engine).Apply(rbctx, agent.ApplyRequest{Files: sw.files, Hash: sw.hash, Stop: true}); err != nil {
+				rbErrs = append(rbErrs, sw.engine+": "+err.Error())
+			} else if !resp.OK {
+				rbErrs = append(rbErrs, sw.engine+": "+resp.Output)
+			}
+		}
+		if sw.oldStop {
+			if resp, err := s.app.Client(sw.from).Start(rbctx); err != nil {
+				rbErrs = append(rbErrs, sw.from+": "+err.Error())
+			} else if !resp.OK {
+				rbErrs = append(rbErrs, sw.from+": "+resp.Output)
+			}
 		}
 	}
-	if haproxySwapped {
+	if sw.haproxy {
 		if resp, err := s.app.HAProxy.Rollback(rbctx); err != nil {
 			rbErrs = append(rbErrs, "haproxy: "+err.Error())
 		} else if !resp.OK {
@@ -601,7 +719,7 @@ func (s *Service) failAfterSwap(ctx context.Context, row *store.VersionRow, live
 		}
 	}
 	row.FailedEngine, row.FailedStage, row.Output = engine, stage, output
-	engineName := map[string]string{"nginx": "nginx", "haproxy": "HAProxy"}[engine]
+	engineName := engineLabel(engine)
 	restored := "The previous configuration is live again"
 	if liveID > 0 {
 		restored = fmt.Sprintf("v%d is live again", liveID)
@@ -826,8 +944,9 @@ func (s *Service) probe(ctx context.Context, snap *model.Snapshot, env render.En
 }
 
 // healthCheck probes previously healthy hosts once per second. It returns a
-// failure description when a host failed for the whole window or nginx died.
-func (s *Service) healthCheck(ctx context.Context, id int64, snap *model.Snapshot, targets []string, healthyBefore map[string]bool, progress progressFn) string {
+// failure description when a host failed for the whole window or the proxy
+// engine died.
+func (s *Service) healthCheck(ctx context.Context, id int64, engine string, snap *model.Snapshot, targets []string, healthyBefore map[string]bool, progress progressFn) string {
 	watch := []string{}
 	for _, t := range targets {
 		if healthyBefore[t] {
@@ -848,10 +967,10 @@ func (s *Service) healthCheck(ctx context.Context, id int64, snap *model.Snapsho
 		}
 		progress("health", fmt.Sprintf("Applying v%d… · validated · reloaded · health check %d/%d s", id, i, int(s.healthWindow/time.Second)), 60+int(float64(i)/float64(secs)*38))
 		sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		st, err := s.app.Nginx.Status(sctx)
+		st, err := s.app.Client(engine).Status(sctx)
 		cancel()
 		if err == nil && !st.Running {
-			reason := "nginx exited after reload"
+			reason := engineLabel(engine) + " exited after reload"
 			if st.ExitError != "" {
 				reason += " (" + st.ExitError + ")"
 			}
@@ -965,6 +1084,7 @@ func (s *Service) reconcile(ctx context.Context) {
 	st, _ := s.Status(ctx)
 	s.observe(ctx, "nginx", st.Nginx)
 	s.observe(ctx, "haproxy", st.HAProxy)
+	s.observe(ctx, "edge", st.Edge)
 
 	if !s.applyMu.TryLock() {
 		return
@@ -978,11 +1098,16 @@ func (s *Service) reconcile(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	if st.Nginx.Reachable && live.NginxHash != "" && st.Nginx.ConfigHash != live.NginxHash {
+	engine := rowEngine(live)
+	pst, other, ost := st.Nginx, agent.EngineEdge, st.Edge
+	if engine == agent.EngineEdge {
+		pst, other, ost = st.Edge, agent.EngineNginx, st.Nginx
+	}
+	if pst.Reachable && live.NginxHash != "" && pst.ConfigHash != live.NginxHash {
 		var files agent.Files
 		if json.Unmarshal([]byte(live.NginxFiles), &files) == nil && len(files) > 0 {
-			s.log.Info("nginx is not running the live version, restoring", "version", live.ID, "agent", st.Nginx.ConfigHash)
-			resp, err := s.app.Nginx.Apply(ctx, agent.ApplyRequest{Files: files, Hash: live.NginxHash})
+			s.log.Info(engine+" is not running the live version, restoring", "version", live.ID, "agent", pst.ConfigHash)
+			resp, err := s.app.Client(engine).Apply(ctx, agent.ApplyRequest{Files: files, Hash: live.NginxHash})
 			if err != nil || !resp.OK {
 				msg := ""
 				if err != nil {
@@ -990,11 +1115,24 @@ func (s *Service) reconcile(ctx context.Context) {
 				} else {
 					msg = firstErrorLine(resp.Output)
 				}
-				s.log.Warn("restore live nginx config", "err", msg)
+				s.log.Warn("restore live "+engine+" config", "err", msg)
 			} else {
-				s.app.Activity(ctx, "engine.restored", "info", fmt.Sprintf("Restored v%d on nginx", live.ID), "nginx", "engine restarted with a different config")
-				s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": "nginx", "running": resp.Running, "reachable": true})
+				s.app.Activity(ctx, "engine.restored", "info", fmt.Sprintf("Restored v%d on %s", live.ID, engineLabel(engine)), engine, "engine restarted with a different config")
+				s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": engine, "running": resp.Running, "reachable": true})
 			}
+		}
+	}
+	// Only the selected proxy engine may hold the ports.
+	if ost.Reachable && ost.Running {
+		s.log.Info("stopping the proxy engine that isn't selected", "engine", other, "selected", engine)
+		resp, err := s.app.Client(other).Apply(ctx, agent.ApplyRequest{Stop: true})
+		switch {
+		case err != nil:
+			s.log.Warn("stop "+other, "err", err)
+		case !resp.OK:
+			s.log.Warn("stop "+other, "err", firstErrorLine(resp.Output))
+		default:
+			s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": other, "running": false, "reachable": true})
 		}
 	}
 	if st.HAProxy.Reachable && live.HAProxyHash != "" && st.HAProxy.ConfigHash != live.HAProxyHash && (live.HAProxyRunning || st.HAProxy.ConfigHash != "") {
@@ -1021,20 +1159,23 @@ func (s *Service) observe(ctx context.Context, engine string, st core.EngineStat
 		return
 	}
 	s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": engine, "running": st.Running, "reachable": st.Reachable})
-	if !seen || engine != "nginx" {
+	// Outage alerts only for the active proxy engine, and not while an apply
+	// is switching engines.
+	if !seen || !agent.IsProxyEngine(engine) || engine != s.app.ProxyEngine(ctx) || s.switching() != "" {
 		return
 	}
+	label := engineLabel(engine)
 	switch {
 	case prev.running && st.Reachable && !st.Running:
 		detail := st.ExitError
 		if detail == "" {
-			detail = "the nginx process exited"
+			detail = "the " + label + " process exited"
 		}
-		s.app.Activity(ctx, "engine.down", "error", "nginx is not running", "nginx", detail)
+		s.app.Activity(ctx, "engine.down", "error", label+" is not running", engine, detail)
 		if s.app.Notify != nil {
-			s.app.Notify.Notify(ctx, core.Notification{Event: model.EventReloadFailed, Level: "error", Title: "nginx is not running", Message: detail, URL: "/"})
+			s.app.Notify.Notify(ctx, core.Notification{Event: model.EventReloadFailed, Level: "error", Title: label + " is not running", Message: detail, URL: "/"})
 		}
 	case !prev.running && st.Running && prev.reachable:
-		s.app.Activity(ctx, "engine.up", "ok", "nginx is running again", "nginx", "")
+		s.app.Activity(ctx, "engine.up", "ok", label+" is running again", engine, "")
 	}
 }

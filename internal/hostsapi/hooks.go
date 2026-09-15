@@ -110,7 +110,21 @@ func beforeSaveHost(ctx context.Context, app *core.App, prev, next *model.ProxyH
 	if err != nil {
 		return err
 	}
-	return prepareHost(rf, prev, next)
+	if err := prepareHost(rf, prev, next); err != nil {
+		return err
+	}
+	if next.CustomNginx != "" {
+		gen, err := store.LoadSettings[model.GeneralSettings](ctx, app.Store, model.SettingsGeneral)
+		if err != nil {
+			return err
+		}
+		if gen.ProxyEngine == "edge" {
+			e := model.Errs{}
+			e.Add("customNginx", "Relay Edge is the proxy engine and can't run custom nginx snippets — remove the snippet or switch to nginx in Settings → General")
+			return e.Err()
+		}
+	}
+	return nil
 }
 
 func beforeDeleteHost(ctx context.Context, app *core.App, cur *model.ProxyHost) error {

@@ -10,8 +10,14 @@ new releases and can upgrade either engine from the UI:
 ```
 relay           relay:latest            copies /usr/local/bin/relay → relay-bin volume (/opt/relay/bin/relay)
 relay-nginx     nginx:1.30.4-alpine     entrypoint: wait for /opt/relay/bin/relay, exec `relay agent --engine nginx`
+relay-edge      alpine:3.22             same, `relay agent --engine edge` (Relay Edge is part of the relay binary)
 relay-haproxy   haproxy:3.4.4-alpine    same, `relay agent --engine haproxy`, user root
 ```
+
+Relay Edge has no image to upgrade: it is updated together with Relay. While
+Relay Edge is the selected proxy engine the nginx card is marked inactive
+(`inactive: true` in `GET /api/engines/updates`); nginx can still be upgraded,
+but its container stays stopped and no health check waits for it.
 
 - The relay binary is static, so the agent runs unchanged on any official
   image. The agent is PID 1 and supervises nginx/HAProxy exactly as before.

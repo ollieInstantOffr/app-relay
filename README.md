@@ -1,7 +1,7 @@
 # Relay
 
-Relay is a self-hosted manager for an **nginx reverse proxy** and an **HAProxy
-load balancer**. It gives you a web UI and an MCP server so AI assistants can
+Relay is a self-hosted manager for a **reverse proxy** (nginx, or Relay Edge,
+Relay's own built-in proxy engine) and an **HAProxy load balancer**. It gives you a web UI and an MCP server so AI assistants can
 manage it too. Proxy hosts, TLS certificates (Let's Encrypt HTTP-01 / DNS-01),
 access lists, TCP/UDP streams, load-balancer backends and frontends: each edit
 becomes a pending change. Applying it creates a validated, versioned config that
@@ -16,16 +16,22 @@ make up    # = RELAY_VERSION=$(sh scripts/version.sh) RELAY_COMMIT=$(git rev-par
 Open `http://<host>:8181`. A first-run wizard creates the admin account,
 checks your network and optionally sets up an admin UI domain.
 
-The stack is three containers, all on host networking:
+The stack is four containers, all on host networking:
 
 | Container | Role |
 |---|---|
 | `relay` | Go app: REST API, web UI, MCP endpoint (`/mcp`), SQLite at `/data/relay.db`, ACME, Docker discovery |
-| `relay-nginx` | nginx supervised by `relay agent --engine nginx` (ports 80/443 + streams) |
+| `relay-nginx` | nginx supervised by `relay agent --engine nginx` (ports 80/443 + streams when nginx is the proxy engine) |
+| `relay-edge` | Relay Edge supervised by `relay agent --engine edge` (ports 80/443 + streams when Relay Edge is the proxy engine) |
 | `relay-haproxy` | HAProxy supervised by `relay agent --engine haproxy` (starts with the first backend) |
 
+Pick the proxy engine in **Settings → General** (`nginx` by default). Only the
+selected engine runs; switching is a pending change that is applied with
+validation, a health check of every host and automatic rollback. Relay Edge
+can't run custom nginx snippets. See `docs/EDGE.md`.
+
 Volumes: `relay-data` (database, certificates, backups), `relay-run` (agent
-control sockets), `relay-logs` (nginx access and error logs). The Docker socket
+control sockets), `relay-logs` (proxy engine access and error logs). The Docker socket
 is mounted read-only into `relay` for container discovery.
 
 To reset a password from the host:
@@ -56,7 +62,8 @@ make test
 ```
 
 - `internal/model`: configuration entities; `internal/store`: SQLite
-- `internal/render/{nginx,haproxy}`: config renderers; `internal/agent`: engine control protocol
+- `internal/render/{nginx,edge,haproxy}`: config renderers; `internal/agent`: engine control protocol
+- `internal/edge`: Relay Edge, the built-in reverse proxy (`relay edge run`)
 - `internal/apply`: pending changes, versions, validation, reload, auto-rollback
 - `web/`: React + TypeScript UI (built into `internal/webui/dist`, embedded in the binary)
 - `design/`: the Claude Design mockups this UI implements

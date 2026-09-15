@@ -51,7 +51,8 @@ func (h *handlers) env(ctx context.Context) render.Env {
 	env := render.DefaultEnv(cfg.DataDir, cfg.RunDir, cfg.LogDir)
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if st, err := h.app.Nginx.Status(cctx); err == nil {
+	pc, _ := h.app.Proxy(ctx)
+	if st, err := pc.Status(cctx); err == nil {
 		for _, m := range st.Modules {
 			env.Modules[m] = true
 		}

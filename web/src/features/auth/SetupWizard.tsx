@@ -395,7 +395,9 @@ function DoneStep({ result }: { result: FinishResult | null }) {
 
   const facts: string[] = []
   if (engines) {
-    facts.push(!engines.nginx.reachable ? 'nginx agent not reachable' : engines.nginx.running ? 'nginx running' : 'nginx not running')
+    const proxy = engines.proxy === 'edge' ? engines.edge : engines.nginx
+    const label = engines.proxy === 'edge' ? 'Relay Edge' : 'nginx'
+    if (proxy) facts.push(!proxy.reachable ? `${label} agent not reachable` : proxy.running ? `${label} running` : `${label} not running`)
   }
   if (user) {
     facts.push(`admin ${user.username}`)

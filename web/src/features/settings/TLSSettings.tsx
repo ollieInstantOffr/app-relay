@@ -144,7 +144,7 @@ export default function TLSSettings() {
                   {c.toUpperCase()}
                 </button>
               ))}
-              <Tooltip content="Unavailable while nginx owns port 443">
+              <Tooltip content="Unavailable while the reverse proxy owns port 443">
                 <button type="button" disabled style={{ flex: 1, width: '100%' }}>TLS-ALPN</button>
               </Tooltip>
             </div>

@@ -213,11 +213,9 @@ func hostLabel(h *model.ProxyHost) string {
 
 // blocklist returns the valid global deny entries, sorted and deduplicated.
 func (r *renderer) blocklist() []string {
-	entries := append([]model.BlockEntry(nil), r.snap.Blocklist.Entries...)
-	sort.SliceStable(entries, func(i, j int) bool { return entries[i].CIDR < entries[j].CIDR })
 	out := []string{}
 	seen := map[string]bool{}
-	for _, e := range entries {
+	for _, e := range r.snap.Blocklist.Entries {
 		cidr := strings.TrimSpace(e.CIDR)
 		if !validCIDR(cidr) || seen[cidr] {
 			continue
@@ -225,6 +223,8 @@ func (r *renderer) blocklist() []string {
 		seen[cidr] = true
 		out = append(out, cidr)
 	}
+	// nginx's geo block is a set; sorting after trimming keeps the output stable.
+	sort.Strings(out)
 	return out
 }
 

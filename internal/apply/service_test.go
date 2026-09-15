@@ -36,8 +36,19 @@ type fakeAgent struct {
 	validateOut string
 	applies     int
 	rollbacks   int
+	starts      int
+	stops       int    // Apply requests with Stop
+	applyFail   string // stage of a failed (non-stop) apply ("" = succeed)
+	lastApply   agent.ApplyRequest
+	calls       *[]string // shared call log ("edge:apply", "nginx:stop" …)
 	onApply     func()
 	onRollback  func()
+}
+
+func (f *fakeAgent) log(call string) {
+	if f.calls != nil {
+		*f.calls = append(*f.calls, f.engine+":"+call)
+	}
 }
 
 func (f *fakeAgent) serve(t *testing.T, sock string) {
@@ -58,10 +69,28 @@ func (f *fakeAgent) serve(t *testing.T, sock string) {
 		json.NewDecoder(r.Body).Decode(&req)
 		f.mu.Lock()
 		f.applies++
+		f.lastApply = req
+		prev := f.hash
+		if req.Stop {
+			f.stops++
+			f.log("stop")
+		} else {
+			f.log("apply")
+		}
+		if !req.Stop && f.applyFail != "" {
+			f.mu.Unlock()
+			json.NewEncoder(w).Encode(agent.ApplyResponse{OK: false, Stage: f.applyFail, Output: "[emerg] listen tcp :80: bind: address already in use", PreviousHash: prev, Running: f.running})
+			return
+		}
+		if req.Stop && len(req.Files) == 0 && req.Hash == "" {
+			f.running = false
+			f.mu.Unlock()
+			json.NewEncoder(w).Encode(agent.ApplyResponse{OK: true, Stage: "stop", PreviousHash: prev})
+			return
+		}
 		if f.hash != "" {
 			f.history = append(f.history, f.hash)
 		}
-		prev := f.hash
 		f.hash = req.Hash
 		f.running = !req.Stop
 		hook := f.onApply
@@ -70,6 +99,14 @@ func (f *fakeAgent) serve(t *testing.T, sock string) {
 			hook()
 		}
 		json.NewEncoder(w).Encode(agent.ApplyResponse{OK: true, Stage: "reload", ReloadMs: 7, PreviousHash: prev, Running: !req.Stop})
+	})
+	mux.HandleFunc("POST /v1/start", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.starts++
+		f.log("start")
+		f.running = true
+		f.mu.Unlock()
+		json.NewEncoder(w).Encode(agent.ActionResponse{OK: true})
 	})
 	mux.HandleFunc("POST /v1/rollback", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -99,6 +136,8 @@ type testEnv struct {
 	app      *core.App
 	nginx    *fakeAgent
 	haproxy  *fakeAgent
+	edge     *fakeAgent
+	calls    []string
 	upstream *atomic.Int32
 	ctx      context.Context
 }
@@ -122,8 +161,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	e := &testEnv{app: app, ctx: core.WithActor(context.Background(), core.Actor{Type: core.ActorUser, Name: "admin", Role: core.RoleAdmin})}
 	e.nginx = &fakeAgent{engine: "nginx", validateOK: true, running: true, hash: agent.BootstrapHash}
 	e.haproxy = &fakeAgent{engine: "haproxy", validateOK: true}
+	e.edge = &fakeAgent{engine: "edge", validateOK: true, hash: agent.BootstrapHash, calls: &e.calls}
+	e.nginx.calls = &e.calls
 	e.nginx.serve(t, agent.SocketPath(runDir, "nginx"))
 	e.haproxy.serve(t, agent.SocketPath(runDir, "haproxy"))
+	e.edge.serve(t, agent.SocketPath(runDir, "edge"))
 
 	// The "nginx" the health check talks to.
 	e.upstream = &atomic.Int32{}

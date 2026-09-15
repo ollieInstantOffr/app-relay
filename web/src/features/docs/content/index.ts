@@ -2,6 +2,7 @@ import type { DocSection } from '../types'
 import { startSections } from './start'
 import { setupSections } from './setup'
 import { proxySections } from './proxy'
+import { edgeSections } from './edge'
 import { tlsSections } from './tls'
 import { lbSections } from './lb'
 import { dockerSections } from './docker'
@@ -17,6 +18,7 @@ export const DOC_SECTIONS: DocSection[] = [
   ...setupSections,
   ...restStart,
   ...proxySections,
+  ...edgeSections,
   ...tlsSections,
   ...lbSections,
   ...dockerSections,

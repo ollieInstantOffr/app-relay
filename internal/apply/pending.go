@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/instantoffr/relay/internal/agent"
 	"github.com/instantoffr/relay/internal/core"
 	"github.com/instantoffr/relay/internal/model"
 	"github.com/instantoffr/relay/internal/store"
@@ -98,10 +99,11 @@ func projections(s *model.Snapshot) map[string]entityState {
 		add(model.KindFrontend, f.ID, f.Name, f)
 	}
 	add("settings", model.SettingsGeneral, settingsLabels[model.SettingsGeneral], struct {
-		HTTPPort  int  `json:"httpPort"`
-		HTTPSPort int  `json:"httpsPort"`
-		HTTP3     bool `json:"http3"`
-	}{s.General.HTTPPort, s.General.HTTPSPort, s.General.HTTP3})
+		HTTPPort    int    `json:"httpPort"`
+		HTTPSPort   int    `json:"httpsPort"`
+		HTTP3       bool   `json:"http3"`
+		ProxyEngine string `json:"proxyEngine"`
+	}{s.General.HTTPPort, s.General.HTTPSPort, s.General.HTTP3, agent.NormalizeProxyEngine(s.General.ProxyEngine)})
 	add("settings", model.SettingsTLS, settingsLabels[model.SettingsTLS], struct {
 		CipherProfile string             `json:"cipherProfile"`
 		HSTS          model.HSTSSettings `json:"hsts"`
@@ -171,6 +173,11 @@ func describeItem(it core.PendingItem, cur, live *model.Snapshot) string {
 		model.KindCertificate: "certificate", model.KindBackend: "backend", model.KindFrontend: "frontend",
 	}[it.Kind]
 	if it.Kind == "settings" {
+		if it.ID == model.SettingsGeneral {
+			if d := describeEngineSwitch(cur, live); d != "" {
+				return d
+			}
+		}
 		return it.Name + " changed"
 	}
 	switch it.Action {
@@ -233,6 +240,23 @@ func describeItem(it core.PendingItem, cur, live *model.Snapshot) string {
 		return "certificate " + it.Name + " updated"
 	}
 	return noun + " " + it.Name + " edited"
+}
+
+// describeEngineSwitch labels a proxy engine switch ("" when the engine is
+// unchanged).
+func describeEngineSwitch(cur, live *model.Snapshot) string {
+	if live == nil {
+		live = defaultSnapshot()
+	}
+	from, to := snapshotEngine(live), snapshotEngine(cur)
+	if from == to {
+		return ""
+	}
+	c, l := cur.General, live.General
+	if c.HTTPPort == l.HTTPPort && c.HTTPSPort == l.HTTPSPort && c.HTTP3 == l.HTTP3 {
+		return fmt.Sprintf("Proxy engine: %s → %s", engineLabel(from), engineLabel(to))
+	}
+	return fmt.Sprintf("General settings changed (proxy engine: %s → %s)", engineLabel(from), engineLabel(to))
 }
 
 func countDelta(cur, live int, noun string) string {

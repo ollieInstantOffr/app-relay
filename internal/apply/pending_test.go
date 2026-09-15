@@ -109,3 +109,24 @@ func TestRedactFiles(t *testing.T) {
 		t.Fatal("input mutated or not redacted")
 	}
 }
+
+func TestPendingProxyEngineSwitch(t *testing.T) {
+	live := baseSnap()
+	live.General.ProxyEngine = "" // versions applied before Relay Edge existed
+	cur := baseSnap()
+	if got := computePending(cur, live); len(got) != 0 {
+		t.Fatalf("empty proxy engine must equal nginx: %+v", got)
+	}
+	cur.General.ProxyEngine = "edge"
+	items := computePending(cur, live)
+	if len(items) != 1 || items[0].Kind != "settings" || items[0].ID != model.SettingsGeneral {
+		t.Fatalf("items = %+v", items)
+	}
+	if s := summarize(items, cur, live); s != "Proxy engine: nginx → Relay Edge" {
+		t.Fatalf("summary = %q", s)
+	}
+	cur.General.HTTP3 = true
+	if s := summarize(items, cur, live); s != "General settings changed (proxy engine: nginx → Relay Edge)" {
+		t.Fatalf("summary = %q", s)
+	}
+}

@@ -28,9 +28,11 @@ export default function AboutSettings() {
   const installedAt = about.data?.installedAt
   const days = installedAt ? Math.max(0, Math.floor((Date.now() - new Date(installedAt).getTime()) / 86_400_000)) : undefined
 
-  const rows: { name: string; state?: EngineState }[] = [
-    { name: 'nginx', state: engines.data?.nginx },
-    { name: 'haproxy', state: engines.data?.haproxy },
+  const proxy = engines.data?.proxy === 'edge' ? 'edge' : 'nginx'
+  const rows: { name: string; label: string; state?: EngineState; proxy?: boolean }[] = [
+    { name: 'nginx', label: 'nginx', state: engines.data?.nginx, proxy: true },
+    { name: 'edge', label: 'Relay Edge', state: engines.data?.edge, proxy: true },
+    { name: 'haproxy', label: 'haproxy', state: engines.data?.haproxy },
   ]
 
   return (
@@ -52,14 +54,21 @@ export default function AboutSettings() {
       </div>
 
       <Card title="Components">
-        {rows.map(({ name, state }) => {
-          const st = engineStatus(state, engines.isLoading)
+        {rows.map(({ name, label, state, proxy: isProxy }) => {
+          const active = isProxy && !!engines.data && proxy === name
+          // The standby proxy engine is stopped on purpose; don't report that as a problem.
+          const st = isProxy && engines.data && !active && state?.reachable && !state.running
+            ? { tone: 'muted' as const, label: 'standby', detail: 'not the proxy engine · Settings → General' }
+            : engineStatus(state, engines.isLoading)
           return (
             <div key={name} className="comp-row">
-              <span>{name}</span>
+              <span className="row gap-6">
+                {label}
+                {isProxy && engines.data && (active ? <Badge tone="ok">active</Badge> : <Badge>standby</Badge>)}
+              </span>
               <span className="mono small row gap-6">
                 {state?.version || '—'}
-                {updates?.[name as 'nginx' | 'haproxy']?.updateAvailable && (
+                {name !== 'edge' && !(name === 'nginx' && updates?.nginx.inactive) && updates?.[name as 'nginx' | 'haproxy']?.updateAvailable && (
                   <Link to="/settings/engines" title={`${updates[name as 'nginx' | 'haproxy'].latest?.version} available`}>
                     <Badge tone="info">update</Badge>
                   </Link>

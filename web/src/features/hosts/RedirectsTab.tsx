@@ -313,7 +313,7 @@ function RedirectDrawer({ open, isNew, redirectId, redirects, onClose }: {
           <Field label="From path" error={errors.fromPath} hint="Leave empty to redirect every path on these domains">
             <Input mono value={draft.fromPath} placeholder="/ (whole domain)" invalid={!!errors.fromPath} onChange={(e) => update({ fromPath: e.target.value.trim() })} />
           </Field>
-          <Field label="Redirect to" error={toErr} hint="Full URL · nginx variables like $host are allowed">
+          <Field label="Redirect to" error={toErr} hint="Full URL · variables like $host are allowed">
             <Input mono value={draft.to} placeholder="https://example.com" invalid={!!toErr} onChange={(e) => update({ to: e.target.value.trim() })} />
           </Field>
           <Field label="Status code" error={errors.code} hint={CODE_HINTS[draft.code]}>

@@ -258,7 +258,7 @@ export default function FrontendDrawer({ initial, onClose }: { initial: Frontend
 
       {host && (
         <Callout tone="info">
-          Created by the Expose wizard for <span className="mono">{host.domains[0]}</span>. nginx proxies that host to {draft.bind}; changing the bind here breaks it until the host is updated.
+          Created by the Expose wizard for <span className="mono">{host.domains[0]}</span>. The reverse proxy forwards that host to {draft.bind}; changing the bind here breaks it until the host is updated.
         </Callout>
       )}
 

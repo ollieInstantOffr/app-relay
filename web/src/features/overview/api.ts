@@ -25,7 +25,9 @@ export interface Overview {
   latency: { p50Ms: number | null; p95Ms: number | null }
   bandwidthBytes: number
   unknownHostHits: number
+  /** The active proxy engine (see proxyEngine), not necessarily nginx. */
   nginx: { version: string; uptimeSec: number | null; running: boolean; reachable: boolean }
+  proxyEngine?: 'nginx' | 'edge'
   lastDataAt: string | null
 }
 

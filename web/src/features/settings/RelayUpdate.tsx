@@ -190,7 +190,7 @@ export function RelayUpdateDialog({ info, open, onClose }: { info: RelayUpdateIn
         <Checkbox
           checked={restartEngines}
           onChange={setRestartEngines}
-          label="Also restart nginx and HAProxy so they use the new agent (traffic pauses 1–3 s)"
+          label="Also restart the proxy and load balancer engines so they use the new agent (traffic pauses 1–3 s)"
         />
       </div>
       <div className="small muted" style={{ marginTop: 12, lineHeight: 1.5 }}>

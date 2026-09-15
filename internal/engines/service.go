@@ -239,7 +239,7 @@ func (s *Service) notifyNew(ctx context.Context, u *core.EngineUpdates) {
 	}
 	changed := s.notifyRelay(ctx, u.Relay, notified)
 	for _, info := range []core.EngineUpdateInfo{u.Nginx, u.HAProxy} {
-		if !info.UpdateAvailable || info.Latest == nil || notified[info.Engine] == info.Latest.Version {
+		if info.Inactive || !info.UpdateAvailable || info.Latest == nil || notified[info.Engine] == info.Latest.Version {
 			continue
 		}
 		notified[info.Engine] = info.Latest.Version
@@ -293,6 +293,10 @@ func (s *Service) Updates(ctx context.Context) (*core.EngineUpdates, error) {
 			statuses = *st
 		}
 	}
+	out.ProxyEngine = statuses.Proxy
+	if out.ProxyEngine == "" {
+		out.ProxyEngine = s.app.ProxyEngine(ctx)
+	}
 
 	containers := map[string]*engineContainer{}
 	containerErr := map[string]string{}
@@ -320,7 +324,8 @@ func (s *Service) Updates(ctx context.Context) (*core.EngineUpdates, error) {
 
 	build := func(engine string, st core.EngineState, channel, desired string) core.EngineUpdateInfo {
 		info := core.EngineUpdateInfo{Engine: engine, Channel: channel, Version: st.Version, Reachable: st.Reachable, Running: st.Running,
-			DesiredImage: desired, Channels: map[string]*core.EngineRelease{}, Modules: st.Modules, MissingModules: []string{}}
+			DesiredImage: desired, Channels: map[string]*core.EngineRelease{}, Modules: st.Modules, MissingModules: []string{},
+			Inactive: agent.IsProxyEngine(engine) && engine != out.ProxyEngine}
 		if info.Modules == nil {
 			info.Modules = []string{}
 		}
@@ -348,7 +353,7 @@ func (s *Service) Updates(ctx context.Context) (*core.EngineUpdates, error) {
 			}
 		}
 		info.ChangesURL = changesURL(engine, firstNonEmpty(versionOf(info.Latest), current))
-		if engine == "nginx" && st.Reachable && !hasModule(info.Modules, "geoip2") {
+		if engine == "nginx" && !info.Inactive && st.Reachable && !hasModule(info.Modules, "geoip2") {
 			info.MissingModules = append(info.MissingModules, "geoip2")
 		}
 		if info.Image != "" && desired != "" && info.Official && info.Image != desired {
@@ -356,6 +361,9 @@ func (s *Service) Updates(ctx context.Context) (*core.EngineUpdates, error) {
 			info.Drift = &core.EngineDrift{RunningImage: info.Image, RunningVersion: firstNonEmpty(info.ImageVersion, info.Version), DesiredImage: desired, DesiredVersion: dv.String()}
 		}
 		switch {
+		case info.Inactive && (out.DockerError != "" || containers[engine] == nil || !info.Official):
+			// Not the selected proxy engine: a missing container or image
+			// problem isn't an error.
 		case out.DockerError != "":
 			info.UpgradeBlocker = "Relay can't reach the Docker API (mount /var/run/docker.sock into the relay container)."
 		case containers[engine] == nil:
@@ -442,6 +450,12 @@ func (s *Service) UpgradeStatus() *core.UpgradeJob {
 	j := *s.job
 	j.Steps = append([]core.UpgradeStep(nil), s.job.Steps...)
 	return &j
+}
+
+// activeEngine reports whether engine must be running: HAProxy decides by
+// itself (backends), nginx only while it is the selected proxy engine.
+func (s *Service) activeProxy(ctx context.Context, engine string) bool {
+	return agent.IsProxyEngine(engine) && s.app.ProxyEngine(ctx) == engine
 }
 
 // agentClient returns the agent client for an engine.

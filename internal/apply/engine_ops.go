@@ -25,7 +25,7 @@ func (s *Service) TryLockApply() (func(), bool) {
 }
 
 // LiveRelease returns the live version's files for an engine (nil when
-// nothing was applied yet).
+// nothing was applied yet, or for the proxy engine that isn't selected).
 func (s *Service) LiveRelease(ctx context.Context, engine string) (agent.Files, string, bool, int64, error) {
 	live, err := s.app.Store.LiveVersion(ctx, true)
 	if errors.Is(err, store.ErrNotFound) {
@@ -36,6 +36,9 @@ func (s *Service) LiveRelease(ctx context.Context, engine string) (agent.Files, 
 	}
 	if engine == agent.EngineHAProxy {
 		return agent.Files{"haproxy.cfg": live.HAProxyCfg}, live.HAProxyHash, live.HAProxyRunning, live.ID, nil
+	}
+	if rowEngine(live) != engine {
+		return nil, "", false, live.ID, nil
 	}
 	var files agent.Files
 	if err := json.Unmarshal([]byte(live.NginxFiles), &files); err != nil {
@@ -51,9 +54,9 @@ func (s *Service) PushLive(ctx context.Context, engine string) error {
 	if err != nil || files == nil {
 		return err
 	}
-	c := s.app.Nginx
-	if engine == agent.EngineHAProxy {
-		c = s.app.HAProxy
+	c := s.app.Client(engine)
+	if c == nil {
+		return fmt.Errorf("unknown engine %q", engine)
 	}
 	st, err := c.Status(ctx)
 	if err != nil {
@@ -72,7 +75,7 @@ func (s *Service) PushLive(ctx context.Context, engine string) error {
 	return nil
 }
 
-// HealthyHosts probes every enabled live host through nginx and returns the
+// HealthyHosts probes every enabled live host through the proxy engine and returns the
 // ids that answer without 502/503/504.
 func (s *Service) HealthyHosts(ctx context.Context) []string {
 	_, live, err := s.liveVersion(ctx)
@@ -100,7 +103,7 @@ func (s *Service) HealthyHosts(ctx context.Context) []string {
 }
 
 // WatchHosts probes ids once per second for window; it returns a failure
-// description when a host failed every probe or nginx stopped running.
+// description when a host failed every probe or the proxy engine stopped running.
 func (s *Service) WatchHosts(ctx context.Context, ids []string, window time.Duration, tick func(sec, total int)) string {
 	_, live, err := s.liveVersion(ctx)
 	if err != nil || live == nil {
@@ -117,8 +120,9 @@ func (s *Service) WatchHosts(ctx context.Context, ids []string, window time.Dura
 		if tick != nil {
 			tick(i, secs)
 		}
-		if st, err := s.app.Nginx.Status(ctx); err == nil && !st.Running && st.Configured {
-			return "nginx stopped running (" + orText(st.ExitError, "exited") + ")"
+		pc, engine := s.app.Proxy(ctx)
+		if st, err := pc.Status(ctx); err == nil && !st.Running && st.Configured {
+			return engineLabel(engine) + " stopped running (" + orText(st.ExitError, "exited") + ")"
 		}
 		var pending []string
 		for _, id := range ids {

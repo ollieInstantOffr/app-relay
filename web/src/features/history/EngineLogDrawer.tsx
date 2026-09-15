@@ -8,10 +8,11 @@ import { engineLabel, useEngineListeners, useEngineLogs, type EngineName } from 
 
 interface ActionResponse { ok: boolean; output: string }
 
-/** Parses the port from bind errors (nginx bind(), HAProxy ALERT). */
+/** Parses the port from bind errors (nginx bind(), HAProxy ALERT, Relay Edge "listen tcp :80: bind: …"). */
 export function bindFailurePort(text: string): number | undefined {
   const m =
     text.match(/bind\(\) to \S*?:(\d{1,5}) failed/) ??
+    text.match(/listen (?:tcp|udp)[46]?\s+\S*?:(\d{1,5}): bind: address already in use/i) ??
     text.match(/cannot bind (?:socket|UDP socket)[^[]*\[[^\]]*:(\d{1,5})\]/i) ??
     text.match(/Address already in use\)?\s*\[[^\]]*:(\d{1,5})\]/)
   return m ? Number(m[1]) : undefined

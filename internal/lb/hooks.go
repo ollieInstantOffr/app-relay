@@ -459,11 +459,15 @@ func portOwner(app *core.App, snap *model.Snapshot, selfID, addr string, port in
 		}
 	}
 	g := snap.General
+	proxy := "nginx"
+	if app != nil {
+		proxy = core.ProxyEngineLabel(app.ProxyEngine(context.Background()))
+	}
 	if g.HTTPPort == port {
-		return "nginx (HTTP)"
+		return proxy + " (HTTP)"
 	}
 	if g.HTTPSPort == port {
-		return "nginx (HTTPS)"
+		return proxy + " (HTTPS)"
 	}
 	if g.AdminPort == port {
 		return "the Relay admin UI"

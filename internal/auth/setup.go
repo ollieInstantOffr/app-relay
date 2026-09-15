@@ -225,9 +225,11 @@ func (s *Service) checkPorts(ctx context.Context, g model.GeneralSettings) setup
 	label := fmt.Sprintf("Ports %d & %d", g.HTTPPort, g.HTTPSPort)
 	owners := map[int]string{}
 	agentOK := false
-	if s.app.Nginx != nil {
+	pc, engine := s.app.Proxy(ctx)
+	name := core.ProxyEngineLabel(engine)
+	if pc != nil {
 		lctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		res, err := s.app.Nginx.Listeners(lctx)
+		res, err := pc.Listeners(lctx)
 		cancel()
 		if err == nil && res != nil {
 			agentOK = true
@@ -263,7 +265,7 @@ func (s *Service) checkPorts(ctx context.Context, g model.GeneralSettings) setup
 		}
 		if len(unknown) > 0 && len(owners) == 0 {
 			return setupCheck{ID: "ports", Status: "unknown", Title: "Couldn't check " + strings.ToLower(label[:1]) + label[1:],
-				Detail: "The nginx agent isn't reachable and Relay can't probe " + strings.Join(unknown, ", ")}
+				Detail: "The " + name + " agent isn't reachable and Relay can't probe " + strings.Join(unknown, ", ")}
 		}
 	}
 	var busy []string
@@ -273,7 +275,7 @@ func (s *Service) checkPorts(ctx context.Context, g model.GeneralSettings) setup
 		if !ok {
 			continue
 		}
-		if strings.Contains(strings.ToLower(owner), "nginx") {
+		if ownedByProxy(owner) {
 			nginxOwned++
 			continue
 		}
@@ -282,14 +284,21 @@ func (s *Service) checkPorts(ctx context.Context, g model.GeneralSettings) setup
 	switch {
 	case len(busy) > 0:
 		return setupCheck{ID: "ports", Status: "fail", Title: "In use: port " + strings.Join(busy, ", "),
-			Detail: "nginx can't bind while another process holds it — stop that process or change the ports in Settings → General"}
+			Detail: name + " can't bind while another process holds it — stop that process or change the ports in Settings → General"}
 	case nginxOwned == len(ports):
-		return setupCheck{ID: "ports", Status: "ok", Title: label + " are served by nginx", Detail: "nginx is already listening on both"}
+		return setupCheck{ID: "ports", Status: "ok", Title: label + " are served by " + name, Detail: name + " is already listening on both"}
 	case !agentOK:
-		return setupCheck{ID: "ports", Status: "ok", Title: label + " are free", Detail: "nginx will bind both · nginx agent not reachable yet"}
+		return setupCheck{ID: "ports", Status: "ok", Title: label + " are free", Detail: name + " will bind both · " + name + " agent not reachable yet"}
 	default:
-		return setupCheck{ID: "ports", Status: "ok", Title: label + " are free", Detail: "nginx will bind both"}
+		return setupCheck{ID: "ports", Status: "ok", Title: label + " are free", Detail: name + " will bind both"}
 	}
+}
+
+// ownedByProxy reports whether a listening process is one of Relay's proxy
+// engines: nginx, or Relay Edge (the relay binary running `relay edge run`).
+func ownedByProxy(process string) bool {
+	p := strings.ToLower(strings.TrimSpace(process))
+	return strings.Contains(p, "nginx") || p == "relay" || strings.HasSuffix(p, "/relay")
 }
 
 var virtualIfacePrefixes = []string{"docker", "br-", "veth", "virbr", "cni", "flannel", "cali", "vxlan", "tun", "tap", "wg",

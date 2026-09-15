@@ -408,9 +408,9 @@ func (h *handlers) uploadCert(w http.ResponseWriter, r *http.Request) {
 		}
 		h.app.Audit(ctx, core.AuditEntry{Action: "certificate.upload", Target: updated.Name, Detail: "replaced", Result: "saved"})
 		h.app.Changed(ctx, model.KindCertificate, id, updated.Name, core.ActionUpdated)
-		if h.svc.certInLiveConfig(ctx, id) && h.app.Nginx != nil {
+		if pc, _ := h.app.Proxy(ctx); h.svc.certInLiveConfig(ctx, id) && pc != nil {
 			rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			_, _ = h.app.Nginx.Reload(rctx)
+			_, _ = pc.Reload(rctx)
 			cancel()
 		}
 		h.svc.publish(id, updated.Status)

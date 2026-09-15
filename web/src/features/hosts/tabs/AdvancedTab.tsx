@@ -1,7 +1,8 @@
 // Owner: slice hosts. Host drawer · Advanced tab (design 18b).
 import { useState, type ReactNode } from 'react'
-import { Badge, ChipsInput, Field, Input, Select, Textarea, Toggle, ToggleCard } from '../../../components/ui'
-import { useEntities } from '../../../lib/queries'
+import { Link } from 'react-router-dom'
+import { Badge, Button, Callout, ChipsInput, Field, Input, Select, Textarea, Toggle, ToggleCard } from '../../../components/ui'
+import { useEntities, useSettings } from '../../../lib/queries'
 import { ConfigPreviewPanel } from '../ConfigPreview'
 import type { HostFormCtx } from '../HostDrawer'
 import { formatSize, parseSize, urlError, type SizeUnit } from '../lib'
@@ -77,6 +78,8 @@ function NumInput({ value, onChange, suffix, placeholder, invalid, min = 0 }: {
 export function AdvancedTab({ ctx }: { ctx: HostFormCtx }) {
   const { draft, update, errors, readOnly, preview } = ctx
   const lists = useEntities('access-lists').data ?? []
+  // Selected engine (Settings → General), not the live one: saving is validated against it.
+  const edge = useSettings('general').data?.proxyEngine === 'edge'
   const fa = draft.forwardAuth
   const rl = draft.rateLimit
   const gb = draft.geoBlock
@@ -170,7 +173,7 @@ export function AdvancedTab({ ctx }: { ctx: HostFormCtx }) {
 
       <Section
         title="Geo-block"
-        desc="Allow only selected countries · needs the GeoIP country database"
+        desc={edge ? 'Allow only selected countries · not enforced by Relay Edge: rules are saved but skipped' : 'Allow only selected countries · needs the GeoIP country database'}
         checked={gb.enabled}
         disabled={readOnly}
         onToggle={(enabled) => update({ geoBlock: { ...gb, enabled } })}
@@ -191,7 +194,7 @@ export function AdvancedTab({ ctx }: { ctx: HostFormCtx }) {
       <div className="hosts-section">
         <ToggleCard title="Hide from search engines" description="X-Robots-Tag: noindex" checked={draft.noIndex} disabled={readOnly} onChange={(noIndex) => update({ noIndex })} />
         <div className="grid-2">
-          <Field label="Max upload size" error={errors.maxBodySize} hint={size.unit === '' ? 'nginx default · 1 MB' : size.unit === '0' ? 'No limit on request bodies' : undefined}>
+          <Field label="Max upload size" error={errors.maxBodySize} hint={size.unit === '' ? 'Default · 1 MB' : size.unit === '0' ? 'No limit on request bodies' : undefined}>
             <div className="hosts-size">
               <Input
                 mono
@@ -230,18 +233,47 @@ export function AdvancedTab({ ctx }: { ctx: HostFormCtx }) {
         </div>
       </div>
 
-      <Section title="Custom nginx snippet" badge={<Badge>advanced</Badge>} desc="Escape hatch · inserted into the server block · validated on save">
-        <Field error={errors.customNginx} hint="Checked for balanced braces on save · nginx -t validates it before every reload">
-          <Textarea
-            mono
-            rows={6}
-            spellCheck={false}
-            value={draft.customNginx}
-            invalid={!!errors.customNginx}
-            placeholder={'add_header X-Robots-Tag "noindex" always;\nproxy_hide_header X-Powered-By;'}
-            onChange={(e) => update({ customNginx: e.target.value })}
-          />
-        </Field>
+      <Section
+        title="Custom nginx snippet"
+        badge={<Badge>{edge ? 'nginx only' : 'advanced'}</Badge>}
+        desc={edge ? 'Not available while Relay Edge is the proxy engine' : 'Escape hatch · inserted into the server block · validated on save'}
+      >
+        {edge ? (
+          <>
+            <Callout
+              tone={draft.customNginx.trim() ? 'warn' : 'info'}
+              title="Relay Edge doesn't run nginx snippets"
+              actions={
+                draft.customNginx.trim() && !readOnly ? (
+                  <Button size="sm" onClick={() => update({ customNginx: '' })}>Remove snippet</Button>
+                ) : undefined
+              }
+            >
+              {draft.customNginx.trim() ? (
+                <>This host can't be saved with its snippet. Remove it, or switch back to nginx in <Link to="/settings/general">Settings → General</Link>.</>
+              ) : (
+                <>Use the options above instead, or switch to nginx in <Link to="/settings/general">Settings → General</Link> to add raw directives.</>
+              )}
+            </Callout>
+            {draft.customNginx && (
+              <Field error={errors.customNginx} hint="Read-only while Relay Edge is the proxy engine">
+                <Textarea mono rows={4} spellCheck={false} readOnly value={draft.customNginx} invalid={!!errors.customNginx} aria-label="Custom nginx snippet" />
+              </Field>
+            )}
+          </>
+        ) : (
+          <Field error={errors.customNginx} hint="Checked for balanced braces on save · nginx -t validates it before every reload">
+            <Textarea
+              mono
+              rows={6}
+              spellCheck={false}
+              value={draft.customNginx}
+              invalid={!!errors.customNginx}
+              placeholder={'add_header X-Robots-Tag "noindex" always;\nproxy_hide_header X-Powered-By;'}
+              onChange={(e) => update({ customNginx: e.target.value })}
+            />
+          </Field>
+        )}
       </Section>
 
       <ConfigPreviewPanel state={preview} />

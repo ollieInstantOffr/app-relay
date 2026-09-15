@@ -2,13 +2,15 @@ package edge
 
 import (
 	"hash/maphash"
+	"net/netip"
 	"sync"
 	"time"
 )
 
-// rateLimiter is a sharded per-key token bucket: rate requests per second with
-// burst extra requests allowed at once. Idle keys are evicted, so memory stays
-// bounded under scans from many addresses.
+// rateLimiter is a sharded per-client token bucket equivalent to nginx
+// `limit_req rate=<r>r/s burst=<b> nodelay`: burst+1 requests may arrive at
+// once, then tokens refill at rate per second. Idle keys are evicted and each
+// shard is capped, so memory stays bounded under scans from many addresses.
 type rateLimiter struct {
 	rate   float64
 	burst  float64
@@ -18,7 +20,7 @@ type rateLimiter struct {
 
 type rateShard struct {
 	mu      sync.Mutex
-	buckets map[string]*bucket
+	buckets map[netip.Addr]*bucket
 	swept   time.Time
 }
 
@@ -26,6 +28,9 @@ type bucket struct {
 	tokens float64
 	last   time.Time
 }
+
+// maxKeysPerShard bounds a shard at ~260k tracked clients overall.
+const maxKeysPerShard = 8192
 
 func newRateLimiter(ratePerSec float64, burst int) *rateLimiter {
 	if ratePerSec <= 0 {
@@ -36,14 +41,14 @@ func newRateLimiter(ratePerSec float64, burst int) *rateLimiter {
 	}
 	l := &rateLimiter{rate: ratePerSec, burst: float64(burst), seed: maphash.MakeSeed()}
 	for i := range l.shards {
-		l.shards[i].buckets = map[string]*bucket{}
+		l.shards[i].buckets = map[netip.Addr]*bucket{}
 	}
 	return l
 }
 
 // allow consumes a token for key and reports whether the request may proceed.
-func (l *rateLimiter) allow(key string, now time.Time) bool {
-	s := &l.shards[maphash.String(l.seed, key)%uint64(len(l.shards))]
+func (l *rateLimiter) allow(key netip.Addr, now time.Time) bool {
+	s := &l.shards[maphash.Comparable(l.seed, key)%uint64(len(l.shards))]
 	capacity := l.burst + 1
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -52,6 +57,10 @@ func (l *rateLimiter) allow(key string, now time.Time) bool {
 	}
 	b := s.buckets[key]
 	if b == nil {
+		if len(s.buckets) >= maxKeysPerShard {
+			l.sweep(s, now)
+			l.shrink(s)
+		}
 		b = &bucket{tokens: capacity, last: now}
 		s.buckets[key] = b
 	}
@@ -80,6 +89,22 @@ func (l *rateLimiter) sweep(s *rateShard, now time.Time) {
 	s.swept = now
 }
 
+// shrink evicts an arbitrary eighth of a shard that is still full after a
+// sweep (a flood of distinct addresses); s.mu must be held.
+func (l *rateLimiter) shrink(s *rateShard) {
+	if len(s.buckets) < maxKeysPerShard {
+		return
+	}
+	n := len(s.buckets) / 8
+	for k := range s.buckets {
+		if n == 0 {
+			break
+		}
+		delete(s.buckets, k)
+		n--
+	}
+}
+
 // size returns the number of tracked keys (for tests and metrics).
 func (l *rateLimiter) size() int {
 	n := 0
@@ -89,4 +114,19 @@ func (l *rateLimiter) size() int {
 		l.shards[i].mu.Unlock()
 	}
 	return n
+}
+
+// hostLimiter adds the exempt rules of a host's rate limit.
+type hostLimiter struct {
+	l             *rateLimiter
+	exempt        *prefixMap[bool]
+	exemptDefault bool
+}
+
+func (h *hostLimiter) allow(addr netip.Addr, now time.Time) bool {
+	exempt, ok := h.exempt.lookup(addr)
+	if !ok {
+		exempt = h.exemptDefault
+	}
+	return exempt || h.l.allow(addr, now)
 }

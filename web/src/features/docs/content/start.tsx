@@ -7,8 +7,8 @@ function Introduction() {
     <>
       <H2>What Relay does</H2>
       <P>
-        Relay is one place to run the front door of your servers. It configures <strong>nginx</strong> as a reverse proxy
-        (domains, HTTPS, access control) and <strong>HAProxy</strong> as a load balancer, then validates and reloads them
+        Relay is one place to run the front door of your servers. It configures a reverse proxy, <strong>nginx</strong> or Relay’s own{' '}
+        <See id="relay-edge">Relay Edge</See> (domains, HTTPS, access control), and <strong>HAProxy</strong> as a load balancer, then validates and reloads them
         for you. You never edit a config file by hand, and a bad change rolls back automatically.
       </P>
       <Defs
@@ -25,31 +25,32 @@ function Introduction() {
       />
 
       <H2>How traffic flows</H2>
-      <P>A visitor’s request reaches nginx on port 80/443. nginx terminates TLS, checks access rules and forwards it to your app.</P>
+      <P>A visitor’s request reaches the reverse proxy (nginx or Relay Edge) on port 80/443. It terminates TLS, checks access rules and forwards it to your app.</P>
       <Flow
         steps={[
           { label: 'Browser', sub: 'https://app.example.com' },
-          { label: 'nginx', sub: ':443 · TLS + access' },
+          { label: 'Reverse proxy', sub: ':443 · TLS + access' },
           { label: 'Your app', sub: '192.168.1.20:3000' },
         ]}
       />
-      <P>For apps with several instances, nginx hands the request to HAProxy, which picks a healthy server:</P>
+      <P>For apps with several instances, the reverse proxy hands the request to HAProxy, which picks a healthy server:</P>
       <Flow
         steps={[
           { label: 'Browser' },
-          { label: 'nginx', sub: ':443' },
+          { label: 'Reverse proxy', sub: ':443' },
           { label: 'HAProxy', sub: '127.0.0.1:10080' },
           { label: 'api-1 · api-2 · api-3', sub: 'round robin' },
         ]}
       />
 
-      <H2>The three containers</H2>
+      <H2>The containers</H2>
       <Table
         head={['Container', 'What it does']}
         mono={[0]}
         rows={[
           ['relay', 'This web UI, the REST API, the MCP server, the database, certificates and Docker discovery (port 8181).'],
-          ['relay-nginx', 'The official nginx image, supervised by a small Relay agent. Owns ports 80 and 443.'],
+          ['relay-nginx', 'The official nginx image, supervised by a small Relay agent. Owns ports 80 and 443 while nginx is the proxy engine (the default).'],
+          ['relay-edge', 'Relay Edge, run by the same agent. On standby unless it is chosen in Settings → General; only one proxy engine owns ports 80 and 443.'],
           ['relay-haproxy', 'The official HAProxy image, supervised the same way. Starts once you create a backend.'],
         ]}
       />
@@ -91,11 +92,11 @@ function Applying() {
       <H2>Saving is not the same as going live</H2>
       <P>
         Every edit (a new host, a changed certificate, a deleted access list) is saved immediately as a <strong>pending change</strong>.
-        Nothing reaches nginx or HAProxy yet. A dark bar appears at the bottom of the screen:
+        Nothing reaches the reverse proxy or HAProxy yet. A dark bar appears at the bottom of the screen:
       </P>
       <Example title="The pending bar" code={`3 pending changes   app.example.com · api backend · LAN only      [Review diff] [Discard] [Apply & reload]  ⌘⏎`} />
       <List>
-        <li><strong>Review diff</strong> opens the exact nginx/HAProxy config lines that will change.</li>
+        <li><strong>Review diff</strong> opens the exact proxy and HAProxy config lines that will change.</li>
         <li><strong>Discard</strong> throws every pending change away and returns to the live configuration.</li>
         <li><strong>Apply &amp; reload</strong> makes all pending changes live in one go.</li>
       </List>
@@ -104,8 +105,8 @@ function Applying() {
       <H2>What happens when you apply</H2>
       <Flow
         steps={[
-          { label: 'Render', sub: 'nginx + haproxy.cfg' },
-          { label: 'Validate', sub: 'nginx -t · haproxy -c' },
+          { label: 'Render', sub: 'proxy + haproxy.cfg' },
+          { label: 'Validate', sub: 'nginx -t or relay edge check · haproxy -c' },
           { label: 'Swap', sub: 'atomic' },
           { label: 'Reload', sub: 'no dropped connections' },
           { label: 'Health check', sub: '10 s' },
@@ -113,8 +114,8 @@ function Applying() {
         ]}
       />
       <Steps>
-        <Step title="Render">Relay generates the complete nginx and HAProxy configuration from your hosts, backends and settings.</Step>
-        <Step title="Validate">The files are tested inside the engine containers with <C>nginx -t</C> and <C>haproxy -c</C>. A syntax error stops here and nothing changes.</Step>
+        <Step title="Render">Relay generates the complete reverse proxy (nginx or Relay Edge) and HAProxy configuration from your hosts, backends and settings.</Step>
+        <Step title="Validate">The files are tested inside the engine containers with <C>nginx -t</C> (or <C>relay edge check</C> for Relay Edge) and <C>haproxy -c</C>. A syntax error stops here and nothing changes.</Step>
         <Step title="Swap and reload">The new release replaces the old one atomically and the engines reload gracefully.</Step>
         <Step title="Health check">For 10 seconds Relay watches the hosts you changed.</Step>
         <Step title="Done">The result becomes a new numbered version under <UI>Config history</UI>.</Step>
@@ -205,7 +206,7 @@ apply          → Apply pending changes`} />
           ['healthy', 'The upstream answers normally.'],
           ['degraded', 'It answers, but slowly or with some errors (or some load balancer servers are down).'],
           ['down', 'Connection refused, timeouts or 502/503/504 responses.'],
-          ['disabled', 'Switched off in Relay; nginx doesn’t serve it.'],
+          ['disabled', 'Switched off in Relay; the proxy doesn’t serve it.'],
           ['unknown', 'Not checked yet, for example right after creating it.'],
         ]}
       />
@@ -221,7 +222,7 @@ export const startSections: DocSection[] = [
     title: 'Welcome to Relay',
     icon: 'overview',
     summary: 'What Relay is, how requests flow through it, and the fastest way to put your first app online.',
-    keywords: 'intro overview start quickstart what is nginx haproxy containers architecture',
+    keywords: 'intro overview start quickstart what is nginx relay edge haproxy containers architecture',
     Body: Introduction,
   },
   {
@@ -230,7 +231,7 @@ export const startSections: DocSection[] = [
     title: 'Pending changes & applying',
     icon: 'bolt',
     summary: 'Edits are drafts until you apply them. Relay validates, reloads and rolls back automatically if something breaks.',
-    keywords: 'apply reload pending discard diff rollback validate nginx -t haproxy -c version draft',
+    keywords: 'apply reload pending discard diff rollback validate nginx -t relay edge check haproxy -c version draft',
     app: [{ to: '/history?pending=1', label: 'Review pending changes' }],
     Body: Applying,
   },

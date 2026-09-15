@@ -16,7 +16,7 @@ export interface PortEntry {
   port: number
   proto: 'tcp' | 'udp'
   address: string
-  owner: 'nginx' | 'haproxy' | 'relay' | 'other'
+  owner: 'nginx' | 'edge' | 'haproxy' | 'relay' | 'other'
   kind: 'http' | 'https' | 'stream' | 'frontend' | 'admin' | 'stats' | ''
   name: string
   id?: string

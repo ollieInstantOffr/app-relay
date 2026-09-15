@@ -55,7 +55,7 @@ export function useRelayUpdateJob() {
 
 /** True when Relay or an engine has an update or a drift worth a badge. */
 export function hasEngineNotice(u: EngineUpdates | undefined): boolean {
-  return !!u && (!!u.relay?.updateAvailable || [u.nginx, u.haproxy].some((e) => e.updateAvailable || !!e.drift))
+  return !!u && (!!u.relay?.updateAvailable || [u.nginx, u.haproxy].some((e) => !e.inactive && (e.updateAvailable || !!e.drift)))
 }
 
 export function currentVersion(e: EngineUpdateInfo): string {

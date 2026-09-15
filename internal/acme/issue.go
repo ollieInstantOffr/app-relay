@@ -27,6 +27,7 @@ import (
 	"github.com/go-acme/lego/v4/registration"
 	"golang.org/x/net/publicsuffix"
 
+	"github.com/instantoffr/relay/internal/core"
 	"github.com/instantoffr/relay/internal/model"
 	"github.com/instantoffr/relay/internal/store"
 )
@@ -261,19 +262,21 @@ func (s *Service) obtain(ctx context.Context, cert *model.Certificate, srv acmeS
 	return out, nil
 }
 
-// httpPreflight checks nginx is serving :80 before starting an HTTP-01 order.
+// httpPreflight checks the proxy engine is serving :80 before starting an HTTP-01 order.
 func (s *Service) httpPreflight(ctx context.Context) error {
-	if s.app.Nginx == nil {
+	pc, engine := s.app.Proxy(ctx)
+	if pc == nil {
 		return nil
 	}
+	name := core.ProxyEngineLabel(engine)
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	st, err := s.app.Nginx.Status(cctx)
+	st, err := pc.Status(cctx)
 	if err != nil {
-		return errors.New("nginx isn't reachable, so the ACME server can't fetch the challenge from port 80")
+		return errors.New(name + " isn't reachable, so the ACME server can't fetch the challenge from port 80")
 	}
 	if !st.Running {
-		return errors.New("nginx is not running, so the ACME server can't fetch the challenge from port 80")
+		return errors.New(name + " is not running, so the ACME server can't fetch the challenge from port 80")
 	}
 	return nil
 }

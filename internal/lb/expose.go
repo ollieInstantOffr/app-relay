@@ -16,6 +16,7 @@ import (
 	"github.com/instantoffr/relay/internal/core"
 	"github.com/instantoffr/relay/internal/httpx"
 	"github.com/instantoffr/relay/internal/model"
+	"github.com/instantoffr/relay/internal/render/edge"
 	"github.com/instantoffr/relay/internal/render/haproxy"
 	"github.com/instantoffr/relay/internal/render/nginx"
 	"github.com/instantoffr/relay/internal/store"
@@ -78,7 +79,11 @@ func (h *handlers) usedPorts(ctx context.Context) map[int]bool {
 	used := map[int]bool{}
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	for _, c := range []*agent.Client{h.app.HAProxy, h.app.Nginx} {
+	pc, _ := h.app.Proxy(ctx)
+	for _, c := range []*agent.Client{h.app.HAProxy, pc} {
+		if c == nil {
+			continue
+		}
 		if res, err := c.Listeners(cctx); err == nil {
 			for _, l := range res.Listeners {
 				if l.Proto == "tcp" || l.Proto == "" {
@@ -345,6 +350,9 @@ func (h *handlers) expose(w http.ResponseWriter, r *http.Request) {
 }
 
 type exposePreview struct {
+	// Nginx* describe the active proxy engine's files (see Engine); the field
+	// names are kept for compatibility.
+	Engine        string `json:"engine"` // nginx | edge
 	Nginx         string `json:"nginx"`
 	NginxValid    *bool  `json:"nginxValid"`
 	NginxOutput   string `json:"nginxOutput"`
@@ -400,9 +408,16 @@ func (h *handlers) exposePreview(w http.ResponseWriter, r *http.Request) {
 		out.HAProxyOutput = v.Output
 	}
 
-	// nginx: files that the new host adds or changes
-	before, err1 := nginx.Render(p.snap, env)
-	after, err2 := nginx.Render(&next, env)
+	// proxy engine: files that the new host adds or changes
+	pc, engine := h.app.Proxy(ctx)
+	renderProxy := nginx.Render
+	name := "nginx"
+	if engine == agent.EngineEdge {
+		renderProxy, name = edge.Render, "Relay Edge"
+	}
+	out.Engine = engine
+	before, err1 := renderProxy(p.snap, env)
+	after, err2 := renderProxy(&next, env)
 	switch {
 	case err2 != nil:
 		f := false
@@ -414,16 +429,16 @@ func (h *handlers) exposePreview(w http.ResponseWriter, r *http.Request) {
 	}
 	if err2 == nil && len(after) > 0 {
 		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		res, err := h.app.Nginx.Validate(cctx, after)
+		res, err := pc.Validate(cctx, after)
 		cancel()
 		if err == nil {
 			out.NginxValid, out.NginxOutput = &res.OK, strings.TrimSpace(res.Output)
 		} else {
 			var ua agent.ErrUnavailable
 			if errors.As(err, &ua) {
-				out.NginxOutput = "nginx agent not reachable — not validated"
+				out.NginxOutput = name + " agent not reachable — not validated"
 			} else {
-				out.NginxOutput = "nginx validation unavailable: " + err.Error()
+				out.NginxOutput = name + " validation unavailable: " + err.Error()
 			}
 		}
 	}

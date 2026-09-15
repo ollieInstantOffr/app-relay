@@ -10,7 +10,10 @@ import {
 } from '../../components/ui'
 import { fieldErrors, pendingToast, toastUnlessFields } from '../certificates/common'
 import type { PortEntry } from './StreamsPage'
+import { previewCheck, previewTitle } from '../hosts/ConfigPreview'
 import '../certificates/certs.css'
+
+const ownerLabel: Record<PortEntry['owner'], string> = { nginx: 'nginx', edge: 'Relay Edge', haproxy: 'HAProxy', relay: 'Relay', other: 'another process' }
 
 interface PortCheck { free: boolean; conflicts: PortEntry[]; messages: string[]; ports: number; listenersKnown: boolean }
 
@@ -66,7 +69,7 @@ export default function StreamDrawer({ open, onClose, stream, ports }: {
     for (const p of ports ?? []) {
       if (!seen.has(p.address)) {
         seen.add(p.address)
-        opts.push({ value: p.address, label: `${p.address} · in use by ${p.owner === 'other' ? p.name || 'a process' : p.owner}` })
+        opts.push({ value: p.address, label: `${p.address} · in use by ${p.owner === 'other' ? p.name || 'a process' : ownerLabel[p.owner]}` })
       }
     }
     if (draft.listenAddress && !seen.has(draft.listenAddress)) opts.push({ value: draft.listenAddress, label: draft.listenAddress })
@@ -85,8 +88,8 @@ export default function StreamDrawer({ open, onClose, stream, ports }: {
 
   const previewKey = useDebounced(draft, 600)
   const preview = useQuery({
-    queryKey: ['preview', 'nginx', 'stream', previewKey],
-    queryFn: () => api.post<ConfigPreview>('/api/preview/nginx/stream', { stream: { ...previewKey, id: previewKey.id || 'new' } }),
+    queryKey: ['preview', 'proxy', 'stream', previewKey],
+    queryFn: () => api.post<ConfigPreview>('/api/preview/proxy/stream', { stream: { ...previewKey, id: previewKey.id || 'new' } }),
     enabled: open && !!previewKey.listenPorts && (!!previewKey.forwardHost || !!previewKey.backendId) && !!previewKey.name,
     retry: false,
   })
@@ -151,7 +154,9 @@ export default function StreamDrawer({ open, onClose, stream, ports }: {
       footer={
         <>
           {preview.data ? (
-            preview.data.valid ? <Status tone="ok">Config valid</Status> : <Status tone="danger">Config invalid</Status>
+            preview.data.valid
+              ? <Status tone="ok">Config valid <span className="faint mono">· {previewCheck(preview.data.engine)}</span></Status>
+              : <Status tone="danger">Config invalid <span className="faint mono">· {previewCheck(preview.data.engine)}</span></Status>
           ) : preview.isFetching ? (
             <span className="row small muted"><Spinner /> Validating…</span>
           ) : null}
@@ -235,7 +240,12 @@ export default function StreamDrawer({ open, onClose, stream, ports }: {
         <Callout tone="warn">Binding to all interfaces exposes this port to the internet if your router forwards it. Streams bypass access lists.</Callout>
       )}
 
-      {preview.data && <CodeBlock code={preview.data.config} maxHeight={200} />}
+      {preview.data && (
+        <div className="col gap-6">
+          <div className="micro muted">{previewTitle(preview.data.engine)}</div>
+          <CodeBlock code={preview.data.config} maxHeight={200} />
+        </div>
+      )}
       {preview.data && !preview.data.valid && preview.data.output && <Callout tone="danger"><span className="mono">{preview.data.output}</span></Callout>}
     </Drawer>
   )

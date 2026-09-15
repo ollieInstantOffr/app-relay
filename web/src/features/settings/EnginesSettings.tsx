@@ -1,7 +1,9 @@
 // Settings → Updates (slice engine): Relay self-update from its git checkout,
-// version check + in-UI upgrade of the official nginx / HAProxy images.
+// version check + in-UI upgrade of the official nginx / HAProxy images. Relay Edge
+// is part of the relay binary and upgrades with Relay.
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { Badge, Button, Callout, Card, Dot, Icon, Segmented, Select, SectionHeader, Skeleton, ToggleRow, useToast } from '../../components/ui'
 import { api } from '../../lib/api'
 import { useRole, useSaveSettings, useSettings } from '../../lib/queries'
@@ -46,7 +48,7 @@ export default function EnginesSettings() {
       else {
         const avail = [
           ...(next.relay?.updateAvailable ? [`Relay ${next.relay.remoteVersion || shortSha(next.relay.remoteHead) || 'upgrade'}`] : []),
-          ...[next.nginx, next.haproxy].filter((e) => e.updateAvailable).map((e) => `${engineTitle[e.engine]} ${e.latest?.version}`),
+          ...[next.nginx, next.haproxy].filter((e) => e.updateAvailable && !e.inactive).map((e) => `${engineTitle[e.engine]} ${e.latest?.version}`),
         ]
         if (next.relay?.checkError) toast.show({ kind: 'warning', title: "Couldn't check for Relay updates", message: next.relay.checkError })
         toast.success(avail.length ? `${avail.length} update${avail.length > 1 ? 's' : ''} available` : 'Everything is up to date', avail.join(' · ') || undefined)
@@ -71,7 +73,7 @@ export default function EnginesSettings() {
   const header = (
     <SectionHeader
       title="Updates"
-      description="Update Relay from its GitHub repository, and upgrade nginx and HAProxy to new official Docker images."
+      description="Update Relay (including Relay Edge) from its GitHub repository, and upgrade nginx and HAProxy to new official Docker images."
       actions={
         isAdmin ? (
           <Button icon="reload" loading={checking} onClick={check}>
@@ -119,10 +121,18 @@ export default function EnginesSettings() {
 
       {showRelayJob && relayJob && <RelayUpdateProgress job={relayJob} onDismiss={() => setDismissedRelayJob(relayJob.id)} />}
       {u.relay && <RelayCard info={u.relay} isAdmin={isAdmin} busy={busy} onUpdate={() => setRelayConfirm(true)} />}
+      {u.proxyEngine === 'edge' && (
+        <div className="small faint row gap-6">
+          <Icon name="info" size={12} />
+          Relay Edge is the proxy engine. It ships with Relay and updates with it; restart the engines when updating to run the new version right away.
+        </div>
+      )}
 
       {showJob && job && <UpgradeProgress job={job} onDismiss={() => setDismissedJob(job.id)} />}
 
-      {(['nginx', 'haproxy'] as EngineName[]).map((e) => (
+      {(['nginx', 'haproxy'] as EngineName[]).map((e) => u[e].inactive ? (
+        <InactiveEngineCard key={e} info={u[e]} running={currentVersion(u[e])} />
+      ) : (
         <EngineCard
           key={e}
           info={u[e]}
@@ -161,6 +171,30 @@ export default function EnginesSettings() {
       {confirm && <UpgradeDialog info={confirm.info} version={confirm.version} open onClose={() => setConfirm(null)} />}
       {relayConfirm && u.relay && <RelayUpdateDialog info={u.relay} open onClose={() => setRelayConfirm(false)} />}
     </>
+  )
+}
+
+/** nginx while Relay Edge is the proxy engine: kept installed, not upgraded or checked for problems. */
+function InactiveEngineCard({ info, running }: { info: EngineUpdateInfo; running: string }) {
+  return (
+    <Card
+      className="eng-card inactive"
+      title={
+        <span className="row gap-8">
+          <Dot tone="muted" />
+          <span className="eng-name">{engineTitle[info.engine]}</span>
+        </span>
+      }
+      sub={info.container ? <span className="mono">{info.container}</span> : undefined}
+      actions={<Badge>Not in use</Badge>}
+    >
+      <div className="eng-callout" style={{ opacity: 0.75 }}>
+        <div className="small muted">
+          Not in use — Relay Edge is the proxy engine. {running ? <>Installed: <span className="mono">{running}</span>{info.image ? <> · <span className="mono">{info.image}</span></> : null}. </> : null}
+          Upgrades are available again after switching back to nginx in <Link to="/settings/general">Settings → General</Link>.
+        </div>
+      </div>
+    </Card>
   )
 }
 

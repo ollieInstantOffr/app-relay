@@ -74,6 +74,8 @@ export interface ExposeRequest {
   applyNow: boolean
 }
 export interface ExposePreview {
+  /** nginx* fields describe the active proxy engine's files (see engine). */
+  engine?: 'nginx' | 'edge'
   nginx: string
   nginxValid: boolean | null
   nginxOutput: string

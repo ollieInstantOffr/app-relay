@@ -35,14 +35,29 @@ This file is the contract between the parts that build it. Keep it current.
     The agent waits (max 15 s) for one of the two lines.
   - Start: logs `[notice] started hash=<release dir name>` once listening.
   - Stop: `SIGTERM`/`SIGQUIT` → stop accepting, drain up to 20 s, exit 0.
+  - Detect (agent status): version = the relay version, modules `stream`,
+    `http_v2`, `http_v3`, `auth_request` (+ `ipv6` when the host has IPv6).
+- `httpPort` / `httpsPort` of 0 means that listener is not opened.
 - Bootstrap config (before the first apply): HTTP port
-  `$RELAY_BOOTSTRAP_HTTP_PORT` (80), default action `close`, ACME webroot
-  `/data/acme`, status on `127.0.0.1:$RELAY_EDGE_STATUS_PORT` (18081).
+  `$RELAY_BOOTSTRAP_HTTP_PORT` (80), HTTPS port 443 without hosts (the
+  placeholder `/data/certs/_default` is referenced only when its files exist),
+  default action `close`, ACME webroot `/data/acme`, log dir `/var/log/relay`,
+  status on `127.0.0.1:$RELAY_EDGE_STATUS_PORT` (18081).
 - Only the selected proxy engine may bind the ports. The relay app writes the
   selected engine to `/run/relay/proxy-engine` (`nginx` or `edge`; missing =
   `nginx`). On a fresh config root an agent whose engine is not selected
   writes its bootstrap release but does not start it. After that, the
-  `stopped` marker set by `Apply{Stop:true}` governs.
+  `stopped` marker set by `Apply{Stop:true}` governs (`/v1/start` and any
+  non-stop apply clear it). `Apply{Stop:true}` without files and hash keeps
+  the current release and only stops the engine.
+- Switching engines (apply of a version whose `proxyEngine` differs from the
+  live one): validate on the new agent (503 when unreachable) → HAProxy as
+  usual → old engine `Apply{Stop:true}` with the live files → new engine
+  `Apply{files}` → health check of every enabled host with an upstream. On
+  failure the new engine gets `Apply{Stop:true}` and the old one `/v1/start`;
+  the version is `rolled_back` with `failedEngine` `edge`/`nginx`.
+- The reconcile loop restores the live release on the selected engine and
+  sends `Apply{Stop:true}` to the other proxy engine whenever it runs.
 
 ## 3. Logs (compatibility with internal/logs)
 
@@ -127,11 +142,26 @@ Not supported (rejected by validation when Relay Edge is selected):
   `edge`. Part of the snapshot and of the General pending projection, so a
   switch is a pending change applied with validation, health check and
   automatic rollback.
+  Saving `edge` is refused while any host has `customNginx` (field error on
+  `proxyEngine` listing up to 5 hosts), and a host with `customNginx` can't
+  be saved while `edge` is selected (field error on `customNginx`).
+- The active proxy engine is the live version's `proxyEngine` (General
+  settings before the first apply): `app.ProxyEngine(ctx)` / `app.Proxy(ctx)`.
 - `core.EnginesStatus` gains `edge` (EngineState) and `proxy` (active engine
-  name). `/api/engines/{engine}` accepts `edge`.
-- Config versions record `proxyEngine`; the files of the active proxy engine
-  are stored where nginx files were stored (`nginx_files` column) with paths
-  prefixed `edge/` in diffs/downloads when the engine is edge.
+  name). `/api/engines/{engine}/{start|stop|reload|logs|listeners}` accept
+  `edge`. `EngineChanged` events carry `engine: nginx|haproxy|edge`.
+- Config versions record `proxyEngine` (JSON `proxyEngine`, plus `proxyHash`
+  = `nginxHash`); the files of the active proxy engine are stored where nginx
+  files were stored (`nginx_files` column, JSON `nginxFiles`) with paths
+  prefixed `edge/` in diffs and `edge/` instead of `nginx/` in downloads when
+  the engine is edge.
 - Previews: `/api/preview/proxy/host` and `/api/preview/proxy/stream`
   (`/api/preview/nginx/*` remain as aliases) return the active engine's
-  rendering plus `engine`.
+  rendering plus `engine`. `POST /api/lb/expose/preview` keeps its `nginx*`
+  fields for the active engine's files and adds `engine`.
+- `GET /api/metrics/overview`: `nginx` describes the active proxy engine,
+  `proxyEngine` names it. Error log rows from `error.log` have source `edge`
+  while Relay Edge is active. `GET /api/ports`: owner `edge` for the proxy
+  ports and streams while Relay Edge is active.
+- `GET /api/engines/updates`: `proxyEngine`, and `nginx.inactive: true` while
+  Relay Edge is selected (no container/image blockers are reported then).

@@ -25,7 +25,7 @@ type PortEntry struct {
 	Port      int    `json:"port"`
 	Proto     string `json:"proto"`   // tcp | udp
 	Address   string `json:"address"` // 0.0.0.0, 127.0.0.1 …
-	Owner     string `json:"owner"`   // nginx | haproxy | relay | other
+	Owner     string `json:"owner"`   // nginx | edge (Relay Edge) | haproxy | relay (admin UI) | other
 	Kind      string `json:"kind"`    // http | https | stream | frontend | admin | stats | ""
 	Name      string `json:"name"`
 	ID        string `json:"id,omitempty"` // stream / frontend id
@@ -138,6 +138,14 @@ func (h *handlers) configPorts(ctx context.Context) ([]PortEntry, error) {
 			out = append(out, PortEntry{Port: port, Proto: "tcp", Address: host, Owner: "haproxy", Kind: "stats", Name: "HAProxy stats", Enabled: len(frontends) > 0 || hasBackends(ctx, h.app.Store)})
 		}
 	}
+	// Proxy ports and streams belong to whichever proxy engine is active.
+	if engine := h.app.ProxyEngine(ctx); engine != "nginx" {
+		for i := range out {
+			if out[i].Owner == "nginx" {
+				out[i].Owner = engine
+			}
+		}
+	}
 	return out, nil
 }
 
@@ -149,12 +157,13 @@ func hasBackends(ctx context.Context, st *store.Store) bool {
 // withListeners marks configured entries as listening and appends host
 // sockets that no configured entry explains (owner "other").
 func (h *handlers) withListeners(ctx context.Context, entries []PortEntry) ([]PortEntry, bool) {
-	if h.app.Nginx == nil {
+	pc, _ := h.app.Proxy(ctx)
+	if pc == nil {
 		return entries, false
 	}
 	lctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	resp, err := h.app.Nginx.Listeners(lctx)
+	resp, err := pc.Listeners(lctx)
 	if err != nil || resp == nil {
 		return entries, false
 	}

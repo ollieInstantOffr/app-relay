@@ -91,7 +91,9 @@ type ValidateResponse struct {
 type ApplyRequest struct {
 	Files Files  `json:"files"`
 	Hash  string `json:"hash"`
-	// Stop the engine instead of reloading when true (e.g. haproxy with no backends).
+	// Stop the engine instead of reloading when true (e.g. haproxy with no
+	// backends, or the proxy engine that isn't selected). With no files and no
+	// hash the current release is kept and only the engine is stopped.
 	Stop bool `json:"stop"`
 }
 

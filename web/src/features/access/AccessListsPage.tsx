@@ -46,7 +46,7 @@ function TestIPDialog({ open, onClose, list, draft }: { open: boolean; onClose: 
       onClose={onClose}
       width={460}
       title={`Test an IP against ${list.name}`}
-      description={draft ? 'Uses your unsaved edits.' : 'Evaluates the rules the way nginx does: first matching rule wins, then basic auth.'}
+      description={draft ? 'Uses your unsaved edits.' : 'Evaluates the rules the way the reverse proxy does: first matching rule wins, then basic auth.'}
       footer={
         <>
           <Button onClick={onClose}>Close</Button>

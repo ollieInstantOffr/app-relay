@@ -1,10 +1,11 @@
-// Owner: slice observe — Overview dashboard (design 01, 22a empty, 22c nginx down).
+// Owner: slice observe — Overview dashboard (design 01, 22a empty, 22c proxy engine down).
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { TopBar } from '../../components/shell/TopBar'
 import { Button, Dot, EmptyState, Segmented, Skeleton, StatCard, Status, cx, healthTone } from '../../components/ui'
 import { ago, bytes, clock, compact, dateTime, duration, ms } from '../../lib/format'
-import { useContainers, useEngine, useEntities, useHealth, useRole } from '../../lib/queries'
+import { useContainers, useEntities, useHealth, useProxyEngine, useRole } from '../../lib/queries'
+import { proxyEngineLabel } from '../../lib/types'
 import type { ActivityRow, HealthState, HealthStatus, ProxyHost } from '../../lib/types'
 import DockerSuggestionsDialog from '../docker/DockerSuggestionsDialog'
 import { OVERVIEW_RANGES, useActivity, useNow, useOverview, type Overview, type OverviewRange } from './api'
@@ -61,7 +62,7 @@ export default function OverviewPage() {
   const traffic = useOverview(range)
   const hostsQ = useEntities('hosts')
   const health = useHealth().data
-  const engine = useEngine('nginx')
+  const { state: engine, label: liveLabel, loaded: enginesLoaded } = useProxyEngine()
   const ov = stats.data
 
   useEffect(() => {
@@ -78,6 +79,7 @@ export default function OverviewPage() {
       ? { ...ov.nginx, startedAt: undefined }
       : undefined
   const nginxDown = !!nginx && nginx.reachable && !nginx.running
+  const proxyLabel = enginesLoaded ? liveLabel : proxyEngineLabel[ov?.proxyEngine ?? 'nginx']
 
   const hosts = useMemo(() => hostsQ.data ?? [], [hostsQ.data])
   const rows = useMemo<HostRow[]>(
@@ -90,7 +92,7 @@ export default function OverviewPage() {
     <>
       <TopBar
         title="Overview"
-        meta={<NginxMeta nginx={nginx} />}
+        meta={<ProxyMeta label={proxyLabel} nginx={nginx} />}
         search
         actions={canWrite ? <Button variant="primary" icon="plus" onClick={() => navigate('/hosts?new=1')}>New host</Button> : undefined}
       />
@@ -116,11 +118,12 @@ export default function OverviewPage() {
   )
 }
 
-function NginxMeta({ nginx }: { nginx?: { reachable: boolean; running: boolean; version: string; startedAt?: string; uptimeSec: number | null } }) {
+/** Status of the active proxy engine (nginx or Relay Edge). */
+function ProxyMeta({ label, nginx }: { label: string; nginx?: { reachable: boolean; running: boolean; version: string; startedAt?: string; uptimeSec: number | null } }) {
   const now = useNow(60_000)
   if (!nginx) return null
-  const name = ['nginx', nginx.version].filter(Boolean).join(' ')
-  if (!nginx.reachable) return <Status tone="muted">nginx agent unreachable</Status>
+  const name = [label, nginx.version].filter(Boolean).join(' ')
+  if (!nginx.reachable) return <Status tone="muted">{label} agent unreachable</Status>
   if (!nginx.running) return <Status tone="danger">{name} · not running</Status>
   const up = nginx.startedAt ? (now - Date.parse(nginx.startedAt)) / 1000 : nginx.uptimeSec
   return <Status tone="ok">{name}{up != null && up >= 0 ? ` · uptime ${duration(up)}` : ''}</Status>

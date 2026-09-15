@@ -616,14 +616,14 @@ export interface PreviewState {
   hint?: string
 }
 
-/** Debounced POST /api/preview/nginx/host for the drawer draft. */
+/** Debounced POST /api/preview/proxy/host for the drawer draft (rendered by the active proxy engine). */
 export function useConfigPreview(host: HostDraft, enabled: boolean): PreviewState {
   const incomplete = host.domains.length === 0 || !host.upstream.host || !host.upstream.port
   const json = useMemo(() => JSON.stringify(host), [host])
   const debounced = useDebounced(json, 600)
   const q = useQuery({
     queryKey: ['hosts', 'preview', debounced],
-    queryFn: () => api.post<ConfigPreview>('/api/preview/nginx/host', { host: JSON.parse(debounced) }),
+    queryFn: () => api.post<ConfigPreview>('/api/preview/proxy/host', { host: JSON.parse(debounced) }),
     enabled: enabled && !incomplete,
     retry: false,
     staleTime: Infinity,

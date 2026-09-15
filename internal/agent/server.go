@@ -255,6 +255,14 @@ func (a *Agent) apply(req ApplyRequest) ApplyResponse {
 		a.log.Warn("apply failed", "stage", stage, "output", resp.Output)
 		return resp
 	}
+	if req.Stop && len(req.Files) == 0 && req.Hash == "" {
+		// Stop without a file set: keep the current release, stop the engine
+		// and keep it stopped across restarts (the non-selected proxy engine).
+		a.rel.setMarker(stoppedMarker, true)
+		a.sup.stop(20 * time.Second)
+		resp.OK, resp.Stage, resp.Running = true, "stop", false
+		return resp
+	}
 	if req.Files == nil {
 		req.Files = Files{}
 	}
