@@ -352,7 +352,7 @@ Exempt     LAN only    (your own network is never limited)`}
       <P>
         Allow or block visitors by country using two-letter codes (<C>NO</C>, <C>SE</C>, <C>DE</C>). Press <Kbd>⏎</Kbd> after each code.
       </P>
-      <Note>The official nginx image has no GeoIP2 module, so country rules are saved but not enforced. <UI>Settings → Engines &amp; updates</UI> shows the current status.</Note>
+      <Note>The official nginx image has no GeoIP2 module, so country rules are saved but not enforced. <UI>Settings → Updates</UI> shows the current status.</Note>
 
       <H2>Other options</H2>
       <Table

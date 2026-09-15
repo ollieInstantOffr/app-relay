@@ -2,7 +2,7 @@ package model
 
 import "strings"
 
-// Validate implements Validator for Settings → Engines & updates (engine slice).
+// Validate implements Validator for Settings → Updates (engine slice).
 func (s *EnginesSettings) Validate() error {
 	e := Errs{}
 	switch s.NginxChannel {

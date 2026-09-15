@@ -105,8 +105,13 @@ func (h *handlers) configPorts(ctx context.Context) ([]PortEntry, error) {
 		out = append(out, PortEntry{Port: g.HTTPSPort, Proto: "udp", Address: "0.0.0.0", Owner: "nginx", Kind: "https", Name: "HTTP/3 (QUIC)", Enabled: true})
 	}
 	adminAddr, adminPort := "0.0.0.0", g.AdminPort
-	if host, port, ok := splitBind(h.app.Config.Listen); ok {
-		adminAddr, adminPort = host, port
+	if host, _, ok := splitBind(h.app.Config.Listen); ok {
+		adminAddr = host
+	}
+	if h.app.AdminListener != nil {
+		if ports := h.app.AdminListener.Ports(); len(ports) > 0 {
+			adminPort = ports[0]
+		}
 	}
 	if adminPort > 0 {
 		out = append(out, PortEntry{Port: adminPort, Proto: "tcp", Address: adminAddr, Owner: "relay", Kind: "admin", Name: "Relay admin UI", Enabled: true})

@@ -21,6 +21,8 @@ services:
     build:
       context: .
       target: relay
+      args:
+        RELAY_COMMIT: ${RELAY_COMMIT:-}
     image: relay:latest
     container_name: relay
     network_mode: host

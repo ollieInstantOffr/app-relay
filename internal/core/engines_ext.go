@@ -56,6 +56,8 @@ type EngineUpdates struct {
 	DockerError string           `json:"dockerError,omitempty"`
 	// ComposeProject is the compose project Relay searches for engine containers.
 	ComposeProject string `json:"composeProject,omitempty"`
+	// Relay is the application's own update state.
+	Relay *RelayUpdateInfo `json:"relay,omitempty"`
 }
 
 const (
@@ -90,6 +92,59 @@ type UpgradeJob struct {
 	FinishedAt *time.Time    `json:"finishedAt,omitempty"`
 }
 
+// RelayCommit is one commit on the update branch that isn't installed yet.
+type RelayCommit struct {
+	SHA     string     `json:"sha"`
+	Short   string     `json:"short"`
+	Author  string     `json:"author"`
+	Date    *time.Time `json:"date,omitempty"`
+	Subject string     `json:"subject"`
+	URL     string     `json:"url,omitempty"`
+}
+
+// RelayUpdateInfo describes Relay's own source checkout and whether a newer
+// version is available on the update branch (GET /api/engines/updates → relay).
+type RelayUpdateInfo struct {
+	Version      string        `json:"version"`      // binary version
+	Commit       string        `json:"commit"`       // commit the running binary was built from ("" = unknown)
+	Branch       string        `json:"branch"`       // update branch (main)
+	Container    string        `json:"container"`    // relay container name
+	WorkingDir   string        `json:"workingDir"`   // compose project folder on the Docker host
+	Remote       string        `json:"remote"`       // origin URL
+	CheckoutHead string        `json:"checkoutHead"` // HEAD of the checkout
+	CheckoutRef  string        `json:"checkoutRef"`  // branch the checkout is on
+	RemoteHead   string        `json:"remoteHead"`   // origin/<branch>
+	Behind       int           `json:"behind"`       // commits on origin not in the checkout
+	Ahead        int           `json:"ahead"`        // local commits not on origin
+	Dirty        int           `json:"dirty"`        // modified tracked files
+	Commits      []RelayCommit `json:"commits"`
+	// RebuildNeeded: the checkout is newer than the running build.
+	RebuildNeeded   bool       `json:"rebuildNeeded"`
+	UpdateAvailable bool       `json:"updateAvailable"`
+	CanUpdate       bool       `json:"canUpdate"`
+	Blocker         string     `json:"blocker,omitempty"`
+	CheckedAt       *time.Time `json:"checkedAt,omitempty"`
+	CheckError      string     `json:"checkError,omitempty"`
+}
+
+// RelayUpdateJob is a self-update run: git pull, rebuild, restart.
+type RelayUpdateJob struct {
+	ID             string        `json:"id"`
+	From           string        `json:"from"` // commit before
+	To             string        `json:"to"`   // commit after the pull
+	Actor          string        `json:"actor"`
+	RestartEngines bool          `json:"restartEngines"`
+	Status         string        `json:"status"` // running | succeeded | failed
+	Message        string        `json:"message"`
+	Error          string        `json:"error,omitempty"`
+	Output         string        `json:"output,omitempty"` // last lines of the helper output
+	Progress       int           `json:"progress"`
+	Steps          []UpgradeStep `json:"steps"`
+	HelperID       string        `json:"helperId,omitempty"`
+	StartedAt      time.Time     `json:"startedAt"`
+	FinishedAt     *time.Time    `json:"finishedAt,omitempty"`
+}
+
 type Engines interface {
 	Service
 	// Updates returns cached version information (no network).
@@ -101,4 +156,8 @@ type Engines interface {
 	UpgradeStatus() *UpgradeJob
 	// KeepRunningImage accepts the running image as desired (resolves drift).
 	KeepRunningImage(ctx context.Context, engine string) error
+	// UpdateRelay pulls the update branch into Relay's checkout, rebuilds and
+	// restarts the stack in a helper container.
+	UpdateRelay(ctx context.Context, restartEngines bool) (*RelayUpdateJob, error)
+	RelayUpdateStatus() *RelayUpdateJob
 }

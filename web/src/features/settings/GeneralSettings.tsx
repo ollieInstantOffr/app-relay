@@ -50,17 +50,69 @@ export default function GeneralSettings() {
   const port = (v: string) => (v === '' ? 0 : Math.max(0, Math.min(65535, Math.trunc(Number(v)) || 0)))
   const lanList = lists.find((l) => l.name === 'lan-only') ?? lists[0]
 
+  const applyAction = { label: 'Apply now', onClick: () => window.dispatchEvent(new CustomEvent('relay:apply')) }
+
+  // Relay opens the new admin port next to the old one. When this page was
+  // opened on the old port directly, follow it as soon as the browser can reach
+  // the new port; the old port closes by itself after that.
+  const followAdminPort = async (next: General, from: number) => {
+    const target = new URL(window.location.href)
+    target.port = String(next.adminPort)
+    const id = toast.show({ kind: 'progress', title: `Moving the admin UI to port ${next.adminPort}…`, message: 'Waiting for Relay to answer on the new port', progress: 30 })
+    for (let i = 0; i < 20; i++) {
+      try {
+        await fetch(`${target.origin}/healthz`, { mode: 'no-cors', cache: 'no-store' })
+        toast.update(id, { progress: 100, message: 'Reconnecting…' })
+        window.location.href = target.toString()
+        return
+      } catch {
+        await new Promise((r) => setTimeout(r, 1000))
+      }
+    }
+    toast.dismiss(id)
+    toast.show({
+      kind: 'warning',
+      title: `Can't reach port ${next.adminPort} from this browser`,
+      message: `Relay is listening on ${next.adminPort}, but requests from here don't get through (firewall?). Port ${from} stays open until ${next.adminPort} works.`,
+      duration: 0,
+      actions: [
+        { label: 'Try again', primary: true, onClick: () => void followAdminPort(next, from) },
+        {
+          label: `Keep port ${from}`,
+          onClick: async () => {
+            try {
+              const back = await save.mutateAsync({ ...next, adminPort: from })
+              lastData.current = comparable(back)
+              setDraft(back)
+              toast.success('Admin UI stays on port ' + from)
+            } catch (err) {
+              toast.error(err, 'Couldn’t switch back')
+            }
+          },
+        },
+      ],
+    })
+  }
+
   const onSave = async () => {
     setErrors({})
+    const before = data
     try {
       const saved = await save.mutateAsync(draft)
       lastData.current = comparable(saved)
       setDraft(saved)
+      const portMoved = !!before && before.adminPort !== saved.adminPort
+      if (portMoved && window.location.port === String(before.adminPort)) {
+        void followAdminPort(saved, before.adminPort)
+        return
+      }
       toast.show({
         kind: 'success',
         title: 'Settings saved',
-        message: 'Changes that affect nginx were added to pending changes.',
-        actions: [{ label: 'Apply now', onClick: () => window.dispatchEvent(new CustomEvent('relay:apply')) }],
+        message: portMoved
+          ? `Relay now also listens on port ${saved.adminPort}. Apply to point the admin domain at it — port ${before.adminPort} closes once ${saved.adminPort} is in use.`
+          : 'Changes that affect nginx were added to pending changes.',
+        actions: [applyAction],
       })
     } catch (err) {
       const f = fieldErrors(err)
@@ -138,7 +190,7 @@ export default function GeneralSettings() {
           disabled={disabled}
           onChange={(v) => set('http3', v)}
         />
-        {portRow('adminPort', 'Admin UI', 'Served through the proxy itself at the domain above')}
+        {portRow('adminPort', 'Admin UI', 'Relay listens here directly · the admin domain proxies to it · changes take effect without a restart')}
       </Card>
 
       <Card title="Defaults for new hosts">

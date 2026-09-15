@@ -3,7 +3,7 @@
 Relay runs nginx and HAProxy from the **official Docker Hub images**
 (`nginx:<version>-alpine`, `haproxy:<version>-alpine`). It checks Docker Hub for
 new releases and can upgrade either engine from the UI:
-**Settings → Engines & updates**.
+**Settings → Updates**.
 
 ## How the containers are wired
 

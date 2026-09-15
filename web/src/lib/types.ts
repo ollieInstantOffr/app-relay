@@ -405,7 +405,7 @@ export interface EngineState {
 }
 export interface EnginesStatus { nginx: EngineState; haproxy: EngineState }
 
-/** Settings → Engines & updates (slice engine). GET/PUT /api/settings/engines */
+/** Settings → Updates (slice engine). GET/PUT /api/settings/engines */
 export interface EnginesSettings {
   nginxChannel: 'stable' | 'mainline'
   haproxyChannel: 'lts' | 'latest'
@@ -438,7 +438,47 @@ export interface EngineUpdateInfo {
   modules: string[]
   missingModules: string[]
 }
+export interface RelayCommit { sha: string; short: string; author: string; date?: string; subject: string; url?: string }
+/** Relay's own update state (part of GET /api/engines/updates). */
+export interface RelayUpdateInfo {
+  version: string
+  commit: string
+  branch: string
+  container: string
+  workingDir: string
+  remote: string
+  checkoutHead: string
+  checkoutRef: string
+  remoteHead: string
+  behind: number
+  ahead: number
+  dirty: number
+  commits: RelayCommit[]
+  rebuildNeeded: boolean
+  updateAvailable: boolean
+  canUpdate: boolean
+  blocker?: string
+  checkedAt?: string
+  checkError?: string
+}
+/** GET /api/engines/relay/update-status → {job}; bus topic relay.update */
+export interface RelayUpdateJob {
+  id: string
+  from: string
+  to: string
+  actor: string
+  restartEngines: boolean
+  status: 'running' | 'succeeded' | 'failed'
+  message: string
+  error?: string
+  output?: string
+  progress: number
+  steps: UpgradeStep[]
+  startedAt: string
+  finishedAt?: string
+}
 export interface EngineUpdates {
+  relay?: RelayUpdateInfo
   nginx: EngineUpdateInfo
   haproxy: EngineUpdateInfo
   autoCheck: boolean

@@ -124,6 +124,10 @@ func (s *Service) generalBeforeSave(r *http.Request, prev, next any) error {
 	}
 	if n.AdminPort == n.HTTPPort || n.AdminPort == n.HTTPSPort {
 		e.Add("adminPort", "The admin UI port can't be one of the proxy ports")
+	} else if n.AdminPort != p.AdminPort && validPort(n.AdminPort) && s.app.AdminListener != nil {
+		if err := s.app.AdminListener.CheckPort(n.AdminPort); err != nil {
+			e.Add("adminPort", "%s", err.Error())
+		}
 	}
 	if n.LANCIDR != "" {
 		if pfx, err := netip.ParsePrefix(n.LANCIDR); err != nil {
@@ -158,6 +162,14 @@ func (s *Service) generalAfterSave(r *http.Request, prev, next any) {
 	if _, err := s.syncAdminHost(r, *n, s.security(ctx)); err != nil {
 		s.app.Log.Warn("auth: sync admin UI host", "err", err)
 		s.app.Activity(ctx, "auth.admin_host", "warn", "Admin UI host not updated", n.AdminDomain, err.Error())
+	}
+	// Move the admin UI listener. The old port stays open until the new one
+	// has been reached, so this can't lock anyone out.
+	if p, ok := prev.(*model.GeneralSettings); ok && p.AdminPort != n.AdminPort && n.AdminPort > 0 && s.app.AdminListener != nil {
+		if err := s.app.AdminListener.SwitchPort(ctx, n.AdminPort); err != nil {
+			s.app.Log.Warn("auth: switch admin UI port", "port", n.AdminPort, "err", err)
+			s.app.Activity(ctx, "admin.listen", "warn", "Admin UI port not changed", n.AdminDomain, err.Error())
+		}
 	}
 }
 

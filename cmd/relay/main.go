@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/instantoffr/relay/internal/acme"
+	"github.com/instantoffr/relay/internal/adminlisten"
 	"github.com/instantoffr/relay/internal/agent"
 	"github.com/instantoffr/relay/internal/api"
 	"github.com/instantoffr/relay/internal/apply"
@@ -41,6 +42,9 @@ import (
 )
 
 var version = "0.1.0"
+
+// commit is the git commit of the build (-X main.commit=…, set by the in-app updater).
+var commit = ""
 
 func main() {
 	level := slog.LevelInfo
@@ -87,7 +91,13 @@ func main() {
 		fs.Parse(args)
 		err = mcp.RunStdio(ctx, mcp.StdioOptions{URL: *url, Token: *token})
 	case "version", "--version", "-v":
-		fmt.Println("relay", version)
+		if commit != "" {
+			fmt.Println("relay", version, commit)
+		} else {
+			fmt.Println("relay", version)
+		}
+	case "healthcheck":
+		err = healthcheck(ctx)
 	default:
 		err = fmt.Errorf("unknown command %q", cmd)
 	}
@@ -104,8 +114,30 @@ func envOr(k, def string) string {
 	return def
 }
 
+// healthcheck probes /healthz on the admin address the running server
+// recorded (the port can change at runtime), falling back to RELAY_LISTEN.
+func healthcheck(ctx context.Context) error {
+	addr := adminlisten.ReadAddr(envOr("RELAY_RUN_DIR", "/run/relay"), envOr("RELAY_LISTEN", ":8181"))
+	cctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(cctx, http.MethodGet, "http://"+addr+"/healthz", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("healthz on %s: %s", addr, resp.Status)
+	}
+	return nil
+}
+
 func serve(ctx context.Context, log *slog.Logger) error {
 	cfg := core.ConfigFromEnv(version)
+	cfg.Commit = commit
 	engines.InstallAgentBinary(log) // publish the agent binary for the engine containers
 	for _, d := range []string{cfg.DataDir, filepath.Join(cfg.DataDir, "certs"), filepath.Join(cfg.DataDir, "acme"), filepath.Join(cfg.DataDir, "backups"), cfg.RunDir, cfg.LogDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -138,17 +170,17 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		}
 	}
 
-	srv := &http.Server{
-		Addr:              cfg.Listen,
-		Handler:           api.New(app, webui.FS()).Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
+	// The admin UI port comes from Settings → General and can change at
+	// runtime; RELAY_LISTEN supplies the bind host and the initial port.
+	admin := adminlisten.New(app, api.New(app, webui.FS()).Handler())
+	app.AdminListener = admin
+	if err := admin.Start(ctx); err != nil {
+		return err
 	}
-	go func() {
-		<-ctx.Done()
-		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		srv.Shutdown(shutdown)
-	}()
-	log.Info("relay listening", "addr", cfg.Listen, "version", version)
-	return srv.ListenAndServe()
+	log.Info("relay listening", "ports", admin.Ports(), "version", version)
+	<-ctx.Done()
+	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	admin.Shutdown(shutdown)
+	return nil
 }

@@ -154,7 +154,7 @@ export default function HAProxySettings() {
           <div className="v">
             {engine?.version ? `${engine.version}${isLTS(engine.version) ? ' · LTS' : ''}` : '—'}
             {haproxyUpdate?.updateAvailable && haproxyUpdate.latest && (
-              <Link to="/settings/engines" className="badge info" style={{ fontFamily: 'var(--font-sans)' }} title="Upgrade from Settings → Engines & updates">
+              <Link to="/settings/engines" className="badge info" style={{ fontFamily: 'var(--font-sans)' }} title="Upgrade from Settings → Updates">
                 {haproxyUpdate.latest.version} available
               </Link>
             )}

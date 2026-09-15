@@ -25,6 +25,7 @@ export const Topics = {
   ActivityAppended: 'activity.appended',
   EngineUpgrade: 'engine.upgrade',
   EngineUpdates: 'engine.updates',
+  RelayUpdate: 'relay.update',
 } as const
 
 function invalidateFor(qc: QueryClient, ev: BusEvent) {

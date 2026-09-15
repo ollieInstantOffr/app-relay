@@ -286,9 +286,58 @@ function NpmImport() {
 function Engines() {
   return (
     <>
-      <H2>Staying up to date</H2>
+      <H2>Update Relay itself</H2>
       <P>
-        nginx and HAProxy run from the official Docker Hub images. <UI>Settings → Engines &amp; updates</UI> shows the running version of each, checks Docker Hub for new releases,
+        Relay updates itself from its GitHub repository. <UI>Settings → Updates</UI> shows the commit Relay runs, the newest commit on <C>main</C> and the commits
+        you don’t have yet, with links to GitHub.
+      </P>
+      <Flow
+        steps={[
+          { label: 'Fetch', sub: 'git fetch' },
+          { label: 'Pull', sub: 'fast-forward' },
+          { label: 'Build', sub: 'docker compose build' },
+          { label: 'Restart', sub: 'docker compose up -d' },
+          { label: 'Health check', sub: 'rollback if unhealthy' },
+        ]}
+      />
+      <Steps>
+        <Step title="Check for updates">
+          Relay checks automatically at the interval below, or when you click <UI>Check now</UI>. It runs <C>git fetch</C> in the folder you started Relay from and lists the new commits.
+          You also get an <C>engine_update_available</C> notification for each new version.
+        </Step>
+        <Step title="Update">
+          Click <UI>Update to abc1234</UI> on the Relay card. Optionally tick <UI>Also restart nginx and HAProxy</UI> so the engines pick up the new agent (a 1–3 second pause in traffic).
+        </Step>
+        <Step title="Watch it run">
+          The progress panel shows pull, build and restart. <UI>Show build output</UI> streams the docker build log. Building takes a few minutes the first time and is much faster afterwards thanks to the build cache.
+        </Step>
+        <Step title="Done">The admin UI disconnects for a few seconds while Relay restarts, then the page reloads on the new version by itself.</Step>
+      </Steps>
+
+      <H3>Requirements</H3>
+      <List>
+        <li>Relay was started with <C>docker compose</C> from a <C>git clone</C> of the repository (the normal install).</li>
+        <li>The checkout is on <C>main</C> with no local commits. Local edits to tracked files make the update stop if git can’t fast-forward over them.</li>
+        <li>The Docker socket is mounted into the <C>relay</C> container (the default compose file does this).</li>
+        <li>The Docker host can reach the git remote. Public <C>https://</C> remotes work out of the box; SSH remotes and private repositories need credentials the updater doesn’t have.</li>
+      </List>
+
+      <H3>What keeps it safe</H3>
+      <List>
+        <li>A backup is created before anything changes.</li>
+        <li>git only fast-forwards and runs as the owner of the folder, so your checkout is never rewritten or left owned by root.</li>
+        <li>If the build fails, Relay keeps running the current version.</li>
+        <li>If the new version doesn’t become healthy after the restart, the previous image is restored automatically.</li>
+        <li>nginx and HAProxy keep serving traffic throughout (unless you choose to restart them).</li>
+        <li>The work runs in a short-lived helper container (<C>docker:29.8.0-cli</C>) that survives Relay’s own restart; the restarted Relay reports the result.</li>
+      </List>
+      <Note title="Prefer the shell?">
+        The manual way still works: <C>git pull &amp;&amp; docker compose up -d --build</C> in the Relay folder. Set <C>RELAY_UPDATE_BRANCH</C> on the <C>relay</C> service to follow another branch.
+      </Note>
+
+      <H2>nginx and HAProxy</H2>
+      <P>
+        nginx and HAProxy run from the official Docker Hub images. <UI>Settings → Updates</UI> shows the running version of each, checks Docker Hub for new releases,
         and upgrades the containers in place with automatic rollback.
       </P>
 
@@ -384,11 +433,11 @@ export const opsSections: DocSection[] = [
   {
     id: 'engines',
     group: 'Operations',
-    title: 'Engine updates',
+    title: 'Updates',
     icon: 'reload',
-    summary: 'Check for new nginx and HAProxy releases and upgrade them from the UI with automatic rollback.',
-    keywords: 'upgrade update nginx haproxy version docker hub stable mainline lts pin image env drift',
-    app: [{ to: '/settings/engines', label: 'Engines & updates' }],
+    summary: 'Update Relay from GitHub in one click, and upgrade nginx and HAProxy to new releases with automatic rollback.',
+    keywords: 'upgrade update self update relay git pull github rebuild main branch nginx haproxy version docker hub stable mainline lts pin image env drift',
+    app: [{ to: '/settings/engines', label: 'Open updates' }],
     Body: Engines,
   },
 ]

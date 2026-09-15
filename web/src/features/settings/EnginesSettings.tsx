@@ -1,5 +1,5 @@
-// Settings → Engines & updates (slice engine): version check + in-UI upgrade
-// of the official nginx / HAProxy images.
+// Settings → Updates (slice engine): Relay self-update from its git checkout,
+// version check + in-UI upgrade of the official nginx / HAProxy images.
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Badge, Button, Callout, Card, Dot, Icon, Segmented, Select, SectionHeader, Skeleton, ToggleRow, useToast } from '../../components/ui'
@@ -8,7 +8,8 @@ import { useRole, useSaveSettings, useSettings } from '../../lib/queries'
 import { ago, date } from '../../lib/format'
 import type { EngineUpdateInfo, EngineUpdates, EnginesSettings as Settings } from '../../lib/types'
 import { UpgradeDialog, UpgradeProgress, useUpgradeToasts } from './EngineUpgrade'
-import { channelLabels, compareVersions, currentVersion, engineTitle, updatesKey, useEngineUpdates, useUpgradeJob, type EngineName } from './enginesApi'
+import { channelLabels, compareVersions, currentVersion, engineTitle, shortSha, updatesKey, useEngineUpdates, useRelayUpdateJob, useUpgradeJob, type EngineName } from './enginesApi'
+import { RelayCard, RelayUpdateDialog, RelayUpdateProgress, useRelayUpdateToasts } from './RelayUpdate'
 import './engines.css'
 
 const INTERVALS = [
@@ -29,8 +30,12 @@ export default function EnginesSettings() {
   const [checking, setChecking] = useState(false)
   const [dismissedJob, setDismissedJob] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<{ info: EngineUpdateInfo; version: string } | null>(null)
+  const [relayConfirm, setRelayConfirm] = useState(false)
+  const [dismissedRelayJob, setDismissedRelayJob] = useState<string | null>(null)
+  const relayJob = useRelayUpdateJob().data
   const u = updates.data
   useUpgradeToasts(job, u ? [u.nginx, u.haproxy] : [])
+  useRelayUpdateToasts(relayJob)
 
   const check = async () => {
     setChecking(true)
@@ -39,11 +44,12 @@ export default function EnginesSettings() {
       qc.setQueryData(updatesKey, next)
       if (next.checkError) toast.show({ kind: 'error', title: "Couldn't check for updates", message: next.checkError })
       else {
-        const avail = [next.nginx, next.haproxy].filter((e) => e.updateAvailable)
-        toast.success(
-          avail.length ? `${avail.length} update${avail.length > 1 ? 's' : ''} available` : 'Engines are up to date',
-          avail.map((e) => `${engineTitle[e.engine]} ${e.latest?.version}`).join(' · ') || undefined,
-        )
+        const avail = [
+          ...(next.relay?.updateAvailable ? [`Relay ${shortSha(next.relay.remoteHead) || 'rebuild'}`] : []),
+          ...[next.nginx, next.haproxy].filter((e) => e.updateAvailable).map((e) => `${engineTitle[e.engine]} ${e.latest?.version}`),
+        ]
+        if (next.relay?.checkError) toast.show({ kind: 'warning', title: "Couldn't check for Relay updates", message: next.relay.checkError })
+        toast.success(avail.length ? `${avail.length} update${avail.length > 1 ? 's' : ''} available` : 'Everything is up to date', avail.join(' · ') || undefined)
       }
     } catch (err) {
       toast.error(err, "Couldn't check for updates")
@@ -64,8 +70,8 @@ export default function EnginesSettings() {
 
   const header = (
     <SectionHeader
-      title="Engines & updates"
-      description="nginx and HAProxy run the official Docker images. Relay checks Docker Hub for new releases and upgrades the containers in place."
+      title="Updates"
+      description="Update Relay from its GitHub repository, and upgrade nginx and HAProxy to new official Docker images."
       actions={
         isAdmin ? (
           <Button icon="reload" loading={checking} onClick={check}>
@@ -85,8 +91,11 @@ export default function EnginesSettings() {
     )
   }
 
-  const busy = job?.status === 'running'
-  const showJob = job && (busy || (job.id !== dismissedJob && job.finishedAt && Date.now() - new Date(job.finishedAt).getTime() < 30 * 60_000))
+  const relayBusy = relayJob?.status === 'running'
+  const busy = job?.status === 'running' || relayBusy
+  const recent = (finishedAt?: string) => !!finishedAt && Date.now() - new Date(finishedAt).getTime() < 30 * 60_000
+  const showJob = job && (job.status === 'running' || (job.id !== dismissedJob && recent(job.finishedAt)))
+  const showRelayJob = relayJob && (relayBusy || (relayJob.id !== dismissedRelayJob && recent(relayJob.finishedAt)))
 
   return (
     <>
@@ -108,6 +117,9 @@ export default function EnginesSettings() {
         </Callout>
       )}
 
+      {showRelayJob && relayJob && <RelayUpdateProgress job={relayJob} onDismiss={() => setDismissedRelayJob(relayJob.id)} />}
+      {u.relay && <RelayCard info={u.relay} isAdmin={isAdmin} busy={busy} onUpdate={() => setRelayConfirm(true)} />}
+
       {showJob && job && <UpgradeProgress job={job} onDismiss={() => setDismissedJob(job.id)} />}
 
       {(['nginx', 'haproxy'] as EngineName[]).map((e) => (
@@ -125,7 +137,7 @@ export default function EnginesSettings() {
       <Card title="Update checks">
         <ToggleRow
           title="Check automatically"
-          description="Query Docker Hub for new nginx and HAProxy tags · you get one notification per new version"
+          description="Check GitHub for new Relay commits and Docker Hub for new nginx and HAProxy tags · one notification per new version"
           checked={!!settings.data?.autoCheck}
           disabled={!isAdmin || !settings.data}
           onChange={(v) => saveSettings({ autoCheck: v })}
@@ -147,6 +159,7 @@ export default function EnginesSettings() {
       </Card>
 
       {confirm && <UpgradeDialog info={confirm.info} version={confirm.version} open onClose={() => setConfirm(null)} />}
+      {relayConfirm && u.relay && <RelayUpdateDialog info={u.relay} open onClose={() => setRelayConfirm(false)} />}
     </>
   )
 }

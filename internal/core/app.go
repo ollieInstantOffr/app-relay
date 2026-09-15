@@ -27,6 +27,7 @@ type Service interface {
 
 type Config struct {
 	Version  string
+	Commit   string // git commit of the build ("" when built without RELAY_COMMIT)
 	DataDir  string // /data
 	RunDir   string // /run/relay (agent sockets)
 	LogDir   string // /var/log/relay (nginx logs)
@@ -74,6 +75,20 @@ type App struct {
 	Importer Importer
 	MCP      MCP
 	Engines  Engines // engine image version checks & upgrades (core/engines_ext.go)
+
+	AdminListener AdminListener // serves the admin UI/API; set by main
+}
+
+// AdminListener serves the admin UI/API and moves it to another port at
+// runtime (Settings → General → Admin UI port).
+type AdminListener interface {
+	// Ports returns the open admin ports, the configured one first.
+	Ports() []int
+	// CheckPort reports whether the admin UI could move to port.
+	CheckPort(port int) error
+	// SwitchPort starts serving on port; the old port closes once the new
+	// one has been reached.
+	SwitchPort(ctx context.Context, port int) error
 }
 
 func New(cfg Config, st *store.Store, bus *events.Bus, log *slog.Logger) *App {

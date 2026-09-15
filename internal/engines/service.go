@@ -38,6 +38,9 @@ type Service struct {
 	lastCheck time.Time
 	job       *core.UpgradeJob
 	checkMu   sync.Mutex
+	// Relay self-update (relay.go, relay_update.go).
+	relayInfo *core.RelayUpdateInfo
+	relayJob  *core.RelayUpdateJob
 	// interrupted: relay restarted during an upgrade; recover containers once.
 	interrupted bool
 }
@@ -87,6 +90,7 @@ func (s *Service) Start(ctx context.Context) error {
 			s.job = &j
 		}
 	}
+	s.loadRelay(ctx)
 	go s.loop(ctx)
 	return nil
 }
@@ -203,6 +207,9 @@ func (s *Service) CheckUpdates(ctx context.Context) (*core.EngineUpdates, error)
 		if b, err := json.Marshal(cache); err == nil {
 			s.app.Store.PutKV(context.WithoutCancel(ctx), kvReleases, b)
 		}
+		if j := s.RelayUpdateStatus(); j == nil || j.Status != core.UpgradeRunning {
+			s.checkRelay(ctx)
+		}
 	}
 	u, err := s.Updates(ctx)
 	if err != nil {
@@ -230,7 +237,7 @@ func (s *Service) notifyNew(ctx context.Context, u *core.EngineUpdates) {
 	if b, err := s.app.Store.GetKV(ctx, kvNotified); err == nil {
 		json.Unmarshal(b, &notified)
 	}
-	changed := false
+	changed := s.notifyRelay(ctx, u.Relay, notified)
 	for _, info := range []core.EngineUpdateInfo{u.Nginx, u.HAProxy} {
 		if !info.UpdateAvailable || info.Latest == nil || notified[info.Engine] == info.Latest.Version {
 			continue
@@ -242,7 +249,7 @@ func (s *Service) notifyNew(ctx context.Context, u *core.EngineUpdates) {
 		detail := fmt.Sprintf("Running %s · %s channel", orDash(info.Version), info.Channel)
 		s.app.Activity(ctx, "engine.update", "info", title, info.Engine, detail)
 		if s.app.Notify != nil {
-			s.app.Notify.Notify(ctx, core.Notification{Event: model.EventEngineUpdateAvailable, Level: "info", Title: title, Message: detail + ". Upgrade from Settings → Engines & updates.", URL: "/settings/engines"})
+			s.app.Notify.Notify(ctx, core.Notification{Event: model.EventEngineUpdateAvailable, Level: "info", Title: title, Message: detail + ". Upgrade from Settings → Updates.", URL: "/settings/engines"})
 		}
 	}
 	if changed {
@@ -362,6 +369,7 @@ func (s *Service) Updates(ctx context.Context) (*core.EngineUpdates, error) {
 	}
 	out.Nginx = build("nginx", statuses.Nginx, set.NginxChannel, set.NginxImage)
 	out.HAProxy = build("haproxy", statuses.HAProxy, set.HAProxyChannel, set.HAProxyImage)
+	out.Relay = s.relayInfoLive()
 	return out, nil
 }
 

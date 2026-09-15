@@ -19,7 +19,7 @@ export const SETTINGS_SECTIONS: { id: string; label: string; icon: IconName; com
   { id: 'docker', label: 'Docker discovery', icon: 'docker', component: DockerSettings },
   { id: 'tls', label: 'Default TLS', icon: 'certificates', component: TLSSettings },
   { id: 'haproxy', label: 'HAProxy engine', icon: 'load-balancer', component: HAProxySettings },
-  { id: 'engines', label: 'Engines & updates', icon: 'reload', component: EnginesSettings },
+  { id: 'engines', label: 'Updates', icon: 'reload', component: EnginesSettings },
   { id: 'mcp', label: 'MCP server', icon: 'mcp', component: MCPSettings },
   { id: 'notifications', label: 'Notifications', icon: 'bolt', component: NotificationsSettings },
   { id: 'backup', label: 'Backup & restore', icon: 'download', component: BackupSettings },

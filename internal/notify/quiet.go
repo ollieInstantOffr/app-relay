@@ -65,7 +65,7 @@ func IsCritical(event string) bool { return critical[event] }
 // Events lists every routable event in display order.
 var Events = []string{
 	model.EventUpstreamDown, model.EventCertRenewFailed, model.EventCertExpiring, model.EventReloadFailed,
-	model.EventUnknownSignIn, model.EventMCPWriteExecuted, model.EventWeeklySummary,
+	model.EventUnknownSignIn, model.EventMCPWriteExecuted, model.EventWeeklySummary, model.EventEngineUpdateAvailable,
 }
 
 func location(ctx context.Context, st *store.Store) *time.Location {

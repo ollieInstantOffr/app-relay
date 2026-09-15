@@ -2,13 +2,16 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { useBusEvent } from '../../lib/events'
-import type { EngineUpdateInfo, EngineUpdates, UpgradeJob } from '../../lib/types'
+import type { EngineUpdateInfo, EngineUpdates, RelayUpdateJob, UpgradeJob } from '../../lib/types'
 
 export type EngineName = 'nginx' | 'haproxy'
 export const engineTitle: Record<EngineName, string> = { nginx: 'nginx', haproxy: 'HAProxy' }
 
 export const updatesKey = ['engines', 'updates'] as const
 export const upgradeKey = ['engines', 'upgrade-status'] as const
+export const relayJobKey = ['engines', 'relay-update'] as const
+
+export const shortSha = (sha?: string) => (sha ? sha.slice(0, 7) : '')
 
 /** Cached version info (no Docker Hub request); refreshed by bus events. */
 export function useEngineUpdates(enabled = true) {
@@ -35,9 +38,24 @@ export function useUpgradeJob() {
   return q
 }
 
-/** True when either engine has an update or a drift worth a badge. */
+/** Current / last Relay self-update, kept live via the relay.update topic (polls while Relay restarts). */
+export function useRelayUpdateJob() {
+  const qc = useQueryClient()
+  const q = useQuery({
+    queryKey: relayJobKey,
+    queryFn: () => api.get<{ job: RelayUpdateJob | null }>('/api/engines/relay/update-status').then((r) => r.job),
+    refetchInterval: (query) => (query.state.data?.status === 'running' ? 3_000 : false),
+    refetchIntervalInBackground: true,
+  })
+  useBusEvent<RelayUpdateJob>('relay.update', (ev) => {
+    if (ev.data) qc.setQueryData(relayJobKey, ev.data)
+  })
+  return q
+}
+
+/** True when Relay or an engine has an update or a drift worth a badge. */
 export function hasEngineNotice(u: EngineUpdates | undefined): boolean {
-  return !!u && [u.nginx, u.haproxy].some((e) => e.updateAvailable || !!e.drift)
+  return !!u && (!!u.relay?.updateAvailable || [u.nginx, u.haproxy].some((e) => e.updateAvailable || !!e.drift))
 }
 
 export function currentVersion(e: EngineUpdateInfo): string {

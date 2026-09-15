@@ -8,7 +8,7 @@ function Installation() {
       <List>
         <li>A Linux machine (or a Mac with OrbStack/Docker Desktop for testing) with <strong>Docker Engine</strong> and <strong>Docker Compose v2</strong>.</li>
         <li>Ports <C>80</C> and <C>443</C> free: stop any other reverse proxy first.</li>
-        <li>Port <C>8181</C> for the admin UI (you can put the UI on a domain later).</li>
+        <li>Port <C>8181</C> for the admin UI. Change it any time under <UI>Settings → General → Admin UI</UI>; Relay switches ports without a restart and moves your browser along.</li>
         <li>For public HTTPS: domains pointing at your public IP, with ports 80 and 443 forwarded on your router.</li>
       </List>
 
@@ -56,11 +56,14 @@ cd relay`} />
       <Example lang="bash" title="Find what is using port 80" code={`sudo ss -ltnp 'sport = :80'`} />
 
       <H2>Updating Relay</H2>
+      <P>
+        The easiest way is <UI>Settings → Updates → Update</UI>: Relay pulls the newest commits, rebuilds and restarts itself. <See id="engines">How in-app updates work →</See> From a shell:
+      </P>
       <Example lang="bash" code={`git pull
 docker compose up -d --build
 # optional: restart the engines so their agents use the new binary (brief interruption)
 docker compose restart nginx haproxy`} />
-      <Note>nginx and HAProxy keep serving the last applied configuration while <C>relay</C> restarts, so updating Relay doesn’t interrupt traffic. Engine versions are upgraded separately: <See id="engines">Engine updates</See>.</Note>
+      <Note>nginx and HAProxy keep serving the last applied configuration while <C>relay</C> restarts, so updating Relay doesn’t interrupt traffic. nginx and HAProxy versions are upgraded separately on the same page.</Note>
 
       <H2>What to back up</H2>
       <P>Only the <C>relay-data</C> volume matters: database, certificates and backups. Everything else is rebuilt from it. <See id="backups">Backup &amp; restore →</See></P>

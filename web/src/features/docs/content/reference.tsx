@@ -81,7 +81,7 @@ function Reference() {
           ['80/tcp', 'nginx', 'HTTP, redirects to HTTPS, ACME HTTP-01 challenges'],
           ['443/tcp', 'nginx', 'HTTPS for proxy hosts'],
           ['443/udp', 'nginx', 'HTTP/3 (only when enabled)'],
-          ['8181/tcp', 'relay', 'Admin UI, REST API and MCP endpoint'],
+          ['8181/tcp', 'relay', 'Admin UI, REST API and MCP endpoint (change in Settings → General)'],
           ['127.0.0.1:18080', 'nginx', 'Status for Relay’s metrics'],
           ['127.0.0.1:8404', 'haproxy', 'Stats and Prometheus metrics'],
           ['127.0.0.1:10080+', 'haproxy', 'Local frontends created by Expose'],
@@ -108,13 +108,16 @@ function Reference() {
         mono={[0, 1]}
         rows={[
           ['TZ', 'all', 'Timezone.'],
-          ['RELAY_LISTEN', 'relay', 'Admin UI/API address (default :8181).'],
+          ['RELAY_LISTEN', 'relay', 'Bind address and first-start port of the admin UI (default :8181). Afterwards the port is set in Settings → General.'],
           ['RELAY_NGINX_IMAGE / RELAY_HAPROXY_IMAGE', 'compose', 'Engine image versions.'],
           ['RELAY_NGINX_STATUS_PORT', 'relay, nginx', 'Local nginx status port (default 18080).'],
           ['RELAY_BOOTSTRAP_HTTP_PORT', 'nginx', 'Port for the bootstrap config before the first apply.'],
           ['RELAY_ACME_DNS_RESOLVERS', 'relay', 'Resolvers for DNS-01 propagation checks, e.g. 10.0.0.53:53.'],
           ['RELAY_ACME_INSECURE_SKIP_VERIFY', 'relay', 'Testing only: skip TLS verification of the ACME server.'],
           ['RELAY_COMPOSE_PROJECT', 'relay', 'Set automatically; which compose project’s engines Relay manages.'],
+          ['RELAY_UPDATE_BRANCH', 'relay', 'Branch the in-app updater follows (default main).'],
+          ['RELAY_UPDATER_IMAGE', 'relay', 'Helper image for in-app updates (default docker:29.8.0-cli).'],
+          ['RELAY_COMMIT', 'compose', 'Build argument recording the commit Relay is built from; set automatically by in-app updates.'],
         ]}
       />
 
@@ -125,7 +128,8 @@ function Reference() {
         rows={[
           ['relay users reset-password <user>', 'Print a new one-time password for a user.'],
           ['relay mcp-stdio --token rl_mcp_…', 'Run the MCP server over stdio for local AI clients.'],
-          ['relay version', 'Print the version.'],
+          ['relay version', 'Print the version and build commit.'],
+          ['relay healthcheck', 'Exit 0 when the admin UI answers (used by the container healthcheck; follows the admin port).'],
           ['relay serve', 'Run the app (what the relay container does).'],
           ['relay agent --engine nginx|haproxy', 'Run an engine agent (what the engine containers do).'],
         ]}

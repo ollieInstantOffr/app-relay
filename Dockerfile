@@ -25,8 +25,10 @@ COPY cmd ./cmd
 COPY internal ./internal
 COPY --from=web /src/internal/webui/dist ./internal/webui/dist
 ARG VERSION=0.1.0
+# Set by the in-app updater (and optionally by you) so Relay knows which commit it runs.
+ARG RELAY_COMMIT=
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/relay ./cmd/relay
+    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${RELAY_COMMIT}" -o /out/relay ./cmd/relay
 
 # ---------------------------------------------------------------- relay (app)
 FROM alpine:3.22 AS relay
@@ -39,7 +41,8 @@ ENV RELAY_DATA_DIR=/data \
     RELAY_AGENT_BIN_DIR=/opt/relay/bin
 VOLUME ["/data"]
 EXPOSE 8181
+# Follows the admin UI port from Settings → General (not only RELAY_LISTEN).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD wget -q -O /dev/null "http://127.0.0.1:${RELAY_LISTEN##*:}/healthz" || exit 1
+    CMD ["relay", "healthcheck"]
 ENTRYPOINT ["relay"]
 CMD ["serve"]

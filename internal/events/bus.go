@@ -25,6 +25,7 @@ const (
 	ActivityAppended = "activity.appended"
 	EngineUpgrade    = "engine.upgrade" // Data: core.UpgradeJob (progress of an nginx/HAProxy image upgrade)
 	EngineUpdates    = "engine.updates" // Data: {nginx, haproxy} update availability changed
+	RelayUpdate      = "relay.update"   // Data: core.RelayUpdateJob (progress of a Relay self-update)
 )
 
 type Event struct {

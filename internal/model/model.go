@@ -514,7 +514,8 @@ const (
 	EventUnknownSignIn    = "unknown_sign_in"
 	EventMCPWriteExecuted = "mcp_write_executed"
 	EventWeeklySummary    = "weekly_summary"
-	// EventEngineUpdateAvailable fires once per new nginx/HAProxy release (engine slice).
+	// EventEngineUpdateAvailable fires once per new nginx/HAProxy release or new
+	// Relay version on the update branch (engine slice).
 	EventEngineUpdateAvailable = "engine_update_available"
 )
 

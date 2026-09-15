@@ -43,6 +43,8 @@ func Routes(app *core.App, r chi.Router) {
 	r.Get("/engines/updates", h.engineUpdates)
 	r.Post("/engines/updates/check", httpx.RequireAdmin(h.checkEngineUpdates))
 	r.Get("/engines/upgrade-status", h.upgradeStatus)
+	r.Post("/engines/relay/update", httpx.RequireAdmin(h.updateRelay))
+	r.Get("/engines/relay/update-status", h.relayUpdateStatus)
 	r.Post("/engines/{engine}/upgrade", httpx.RequireAdmin(h.upgradeEngine))
 	r.Post("/engines/{engine}/keep-image", httpx.RequireAdmin(h.keepEngineImage))
 	r.Post("/engines/{engine}/{action}", h.engineAction)
@@ -661,6 +663,36 @@ func (h *handlers) upgradeEngine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusAccepted, job)
+}
+
+func (h *handlers) updateRelay(w http.ResponseWriter, r *http.Request) {
+	e := h.enginesSvc(w, r)
+	if e == nil {
+		return
+	}
+	var body struct {
+		RestartEngines bool `json:"restartEngines"`
+	}
+	if r.ContentLength != 0 {
+		if err := httpx.Decode(r, &body); err != nil {
+			writeErr(w, r, err)
+			return
+		}
+	}
+	job, err := e.UpdateRelay(r.Context(), body.RestartEngines)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusAccepted, job)
+}
+
+func (h *handlers) relayUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	e := h.enginesSvc(w, r)
+	if e == nil {
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"job": e.RelayUpdateStatus()})
 }
 
 func (h *handlers) keepEngineImage(w http.ResponseWriter, r *http.Request) {
