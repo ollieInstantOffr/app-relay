@@ -103,6 +103,11 @@ export function useEngine(engine: EngineKind): EngineState | undefined {
   return useEngines().data?.[engine]
 }
 
+/** The proxy engine chosen in Settings → Proxy engine (used from the next apply). */
+export function useSelectedProxyEngine(): ProxyEngineName {
+  return useSettings('general').data?.proxyEngine === 'edge' ? 'edge' : 'nginx'
+}
+
 /** The active reverse proxy engine (nginx or Relay Edge) and its state. */
 export function useProxyEngine(): { engine: ProxyEngineName; label: string; state: EngineState | undefined; loaded: boolean } {
   const { data } = useEngines()

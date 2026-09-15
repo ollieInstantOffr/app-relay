@@ -58,12 +58,13 @@ export default function AboutSettings() {
           const active = isProxy && !!engines.data && proxy === name
           // The standby proxy engine is stopped on purpose; don't report that as a problem.
           const st = isProxy && engines.data && !active && state?.reachable && !state.running
-            ? { tone: 'muted' as const, label: 'standby', detail: 'not the proxy engine · Settings → General' }
+            ? { tone: 'muted' as const, label: 'standby', detail: 'stopped · not the proxy engine · Settings → Proxy engine' }
             : engineStatus(state, engines.isLoading)
           return (
             <div key={name} className="comp-row">
               <span className="row gap-6">
                 {label}
+                {name === 'edge' && <Badge tone="info">beta</Badge>}
                 {isProxy && engines.data && (active ? <Badge tone="ok">active</Badge> : <Badge>standby</Badge>)}
               </span>
               <span className="mono small row gap-6">

@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../../lib/api'
-import { useContainers, useEntities, useRole, useSaveEntity } from '../../lib/queries'
+import { useContainers, useEntities, useRole, useSaveEntity, useSelectedProxyEngine } from '../../lib/queries'
 import { useDockerStatus } from '../docker/ops'
 import type { ConfigPreview, Stream } from '../../lib/types'
 import {
@@ -37,6 +37,7 @@ export default function StreamDrawer({ open, onClose, stream, ports }: {
   stream?: Stream
   ports?: PortEntry[]
 }) {
+  const edge = useSelectedProxyEngine() === 'edge'
   const toast = useToast()
   const { canWrite } = useRole()
   const save = useSaveEntity('streams')
@@ -229,7 +230,7 @@ export default function StreamDrawer({ open, onClose, stream, ports }: {
       </div>
 
       <div className="grid-2">
-        <ToggleCard title="PROXY protocol" description="Pass client IP to upstream" checked={draft.proxyProtocol} onChange={(v) => set({ proxyProtocol: v })} />
+        <ToggleCard title="PROXY protocol" description={edge && draft.protocol !== 'tcp' ? 'Pass client IP to upstream · Relay Edge sends it on TCP only' : 'Pass client IP to upstream'} checked={draft.proxyProtocol} onChange={(v) => set({ proxyProtocol: v })} />
         <Field label="Idle timeout" error={errors.idleTimeout}>
           <Input mono value={draft.idleTimeout} placeholder="10m" onChange={(e) => set({ idleTimeout: e.target.value.trim() })} />
         </Field>

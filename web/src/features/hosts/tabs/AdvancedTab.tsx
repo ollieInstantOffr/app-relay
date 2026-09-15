@@ -1,7 +1,7 @@
 // Owner: slice hosts. Host drawer · Advanced tab (design 18b).
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { Badge, Button, Callout, ChipsInput, Field, Input, Select, Textarea, Toggle, ToggleCard } from '../../../components/ui'
+import { Badge, Callout, ChipsInput, Field, Input, Select, Textarea, Toggle, ToggleCard } from '../../../components/ui'
 import { useEntities, useSettings } from '../../../lib/queries'
 import { ConfigPreviewPanel } from '../ConfigPreview'
 import type { HostFormCtx } from '../HostDrawer'
@@ -78,7 +78,7 @@ function NumInput({ value, onChange, suffix, placeholder, invalid, min = 0 }: {
 export function AdvancedTab({ ctx }: { ctx: HostFormCtx }) {
   const { draft, update, errors, readOnly, preview } = ctx
   const lists = useEntities('access-lists').data ?? []
-  // Selected engine (Settings → General), not the live one: saving is validated against it.
+  // Selected engine (Settings → Proxy engine), not the live one.
   const edge = useSettings('general').data?.proxyEngine === 'edge'
   const fa = draft.forwardAuth
   const rl = draft.rateLimit
@@ -173,6 +173,7 @@ export function AdvancedTab({ ctx }: { ctx: HostFormCtx }) {
 
       <Section
         title="Geo-block"
+        badge={edge ? <Badge>not enforced</Badge> : undefined}
         desc={edge ? 'Allow only selected countries · not enforced by Relay Edge: rules are saved but skipped' : 'Allow only selected countries · needs the GeoIP country database'}
         checked={gb.enabled}
         disabled={readOnly}
@@ -236,44 +237,26 @@ export function AdvancedTab({ ctx }: { ctx: HostFormCtx }) {
       <Section
         title="Custom nginx snippet"
         badge={<Badge>{edge ? 'nginx only' : 'advanced'}</Badge>}
-        desc={edge ? 'Not available while Relay Edge is the proxy engine' : 'Escape hatch · inserted into the server block · validated on save'}
+        desc={edge ? 'Kept for nginx · skipped while Relay Edge is the proxy engine' : 'Escape hatch · inserted into the server block · validated on save'}
       >
-        {edge ? (
-          <>
-            <Callout
-              tone={draft.customNginx.trim() ? 'warn' : 'info'}
-              title="Relay Edge doesn't run nginx snippets"
-              actions={
-                draft.customNginx.trim() && !readOnly ? (
-                  <Button size="sm" onClick={() => update({ customNginx: '' })}>Remove snippet</Button>
-                ) : undefined
-              }
-            >
-              {draft.customNginx.trim() ? (
-                <>This host can't be saved with its snippet. Remove it, or switch back to nginx in <Link to="/settings/general">Settings → General</Link>.</>
-              ) : (
-                <>Use the options above instead, or switch to nginx in <Link to="/settings/general">Settings → General</Link> to add raw directives.</>
-              )}
-            </Callout>
-            {draft.customNginx && (
-              <Field error={errors.customNginx} hint="Read-only while Relay Edge is the proxy engine">
-                <Textarea mono rows={4} spellCheck={false} readOnly value={draft.customNginx} invalid={!!errors.customNginx} aria-label="Custom nginx snippet" />
-              </Field>
-            )}
-          </>
-        ) : (
-          <Field error={errors.customNginx} hint="Checked for balanced braces on save · nginx -t validates it before every reload">
-            <Textarea
-              mono
-              rows={6}
-              spellCheck={false}
-              value={draft.customNginx}
-              invalid={!!errors.customNginx}
-              placeholder={'add_header X-Robots-Tag "noindex" always;\nproxy_hide_header X-Powered-By;'}
-              onChange={(e) => update({ customNginx: e.target.value })}
-            />
-          </Field>
+        {edge && (
+          <Callout tone="info" title="Skipped while Relay Edge is the proxy engine">
+            {draft.customNginx.trim()
+              ? <>The snippet stays saved and applies again if you switch back to nginx in <Link to="/settings/proxy">Settings → Proxy engine</Link>.</>
+              : <>Snippets you add here are saved for nginx. Relay Edge doesn't run raw nginx directives; use the options above instead.</>}
+          </Callout>
         )}
+        <Field error={errors.customNginx} hint={edge ? 'Saved for nginx · not run by Relay Edge' : 'Checked for balanced braces on save · nginx -t validates it before every reload'}>
+          <Textarea
+            mono
+            rows={6}
+            spellCheck={false}
+            value={draft.customNginx}
+            invalid={!!errors.customNginx}
+            placeholder={'add_header X-Robots-Tag "noindex" always;\nproxy_hide_header X-Powered-By;'}
+            onChange={(e) => update({ customNginx: e.target.value })}
+          />
+        </Field>
       </Section>
 
       <ConfigPreviewPanel state={preview} />

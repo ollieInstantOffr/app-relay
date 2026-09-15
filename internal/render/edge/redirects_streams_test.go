@@ -133,33 +133,41 @@ func TestCustomPorts(t *testing.T) {
 
 // ---------------------------------------------------------------- unsupported features
 
-func TestCustomSnippetRejected(t *testing.T) {
+// Custom nginx snippets are kept in the snapshot but skipped by Relay Edge,
+// with a note, so switching engines never needs them removed.
+func TestCustomSnippetSkippedWithNote(t *testing.T) {
 	s := richSnapshot()
 	s.Hosts[0].CustomNginx = "proxy_hide_header X-Powered-By;"
-	s.Hosts[1].CustomNginx = "  \n"              // blank: fine
+	s.Hosts[1].CustomNginx = "  \n"              // blank: no note
 	s.Hosts[2].CustomNginx = "add_header X-A b;" // vault
 	s.Hosts = append(s.Hosts, model.ProxyHost{Meta: model.Meta{ID: "hidden"}, Enabled: true, CustomNginx: "x;", Upstream: model.Upstream{Host: "a"}})
 	s.DefaultHost = model.DefaultHostSettings{Action: "host", HostID: "hidden"}
 	files, err := Render(s, testEnv())
-	if err == nil {
-		t.Fatal("expected an error for custom nginx snippets")
+	if err != nil {
+		t.Fatalf("snippets must not fail the render: %v", err)
 	}
-	want := "edge render: host cloud.home.lan uses a custom nginx snippet, which Relay Edge can't run; " +
-		"host vault.home.lan uses a custom nginx snippet, which Relay Edge can't run; " +
-		"host hidden uses a custom nginx snippet, which Relay Edge can't run"
-	if err.Error() != want {
-		t.Errorf("error = %q\nwant    %q", err, want)
+	var cfg edgecfg.Config
+	decodeStrict(t, files[ConfigFile], &cfg)
+	var notes []string
+	for _, n := range cfg.Notes {
+		if strings.Contains(n, "custom nginx snippet") {
+			notes = append(notes, n)
+		}
 	}
-	if files[ConfigFile] == "" {
-		t.Error("files must still be returned with the error")
+	want := []string{
+		"host cloud.home.lan: custom nginx snippet kept but not run by Relay Edge (it applies again with nginx)",
+		"host vault.home.lan: custom nginx snippet kept but not run by Relay Edge (it applies again with nginx)",
+		"host hidden: custom nginx snippet kept but not run by Relay Edge (it applies again with nginx)",
 	}
+	equal(t, "snippet notes", notes, want)
 
 	// The default-served host is not reported twice.
 	s = richSnapshot()
 	s.Hosts[0].CustomNginx = "x;"
 	s.DefaultHost = model.DefaultHostSettings{Action: "host", HostID: "hostcloud"}
-	if _, err := Render(s, testEnv()); err == nil || strings.Count(err.Error(), "cloud.home.lan") != 1 {
-		t.Errorf("error = %v", err)
+	files, err = Render(s, testEnv())
+	if err != nil || strings.Count(files[ConfigFile], "custom nginx snippet") != 1 {
+		t.Errorf("default-served host: err=%v notes=%d", err, strings.Count(files[ConfigFile], "custom nginx snippet"))
 	}
 }
 
@@ -308,8 +316,8 @@ func TestRenderHostPreview(t *testing.T) {
 
 	custom := draft
 	custom.CustomNginx = "x;"
-	if _, err := RenderHost(s, &custom, testEnv()); err == nil || !strings.Contains(err.Error(), "custom nginx snippet") {
-		t.Errorf("expected custom snippet error, got %v", err)
+	if _, err := RenderHost(s, &custom, testEnv()); err != nil {
+		t.Errorf("custom snippet must not fail the preview: %v", err)
 	}
 }
 

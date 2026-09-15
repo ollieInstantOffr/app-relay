@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/instantoffr/relay/internal/model"
@@ -36,29 +35,19 @@ func TestGeneralSettingsProxyEngine(t *testing.T) {
 		t.Fatalf("edge: %v (%q)", err, edge.ProxyEngine)
 	}
 
-	// Hosts with custom nginx snippets block Relay Edge (listed, at most 5).
-	for _, d := range []string{"a.home.lan", "b.home.lan", "c.home.lan", "d.home.lan", "e.home.lan", "f.home.lan"} {
-		if err := s.app.Store.Hosts().Create(ctx, &model.ProxyHost{Domains: []string{d}, Enabled: true, CustomNginx: "add_header X-Test 1;"}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := s.app.Store.Hosts().Create(ctx, &model.ProxyHost{Domains: []string{"plain.home.lan"}, Enabled: true}); err != nil {
+	// Hosts with custom nginx snippets don't block switching in either
+	// direction: Relay Edge skips the snippets and nginx applies them again.
+	if err := s.app.Store.Hosts().Create(ctx, &model.ProxyHost{Domains: []string{"a.home.lan"}, Enabled: true, CustomNginx: "add_header X-Test 1;"}); err != nil {
 		t.Fatal(err)
 	}
 	edge.ProxyEngine = "edge"
-	err := s.generalBeforeSave(req, &prev, &edge)
-	if !errors.As(err, &ve) {
-		t.Fatalf("snippets: %v", err)
+	if err := s.generalBeforeSave(req, &prev, &edge); err != nil {
+		t.Fatalf("edge with snippets: %v", err)
 	}
-	msg := ve.Fields["proxyEngine"]
-	if !strings.HasPrefix(msg, "Relay Edge can't run custom nginx snippets: remove them from ") || !strings.HasSuffix(msg, " and 1 more") ||
-		strings.Count(msg, ".home.lan") != 5 || strings.Contains(msg, "plain.home.lan") {
-		t.Fatalf("message = %q", msg)
-	}
-	// Staying on nginx is unaffected.
-	nginx := prev
-	if err := s.generalBeforeSave(req, &prev, &nginx); err != nil {
-		t.Fatalf("nginx with snippets: %v", err)
+	back := edge
+	back.ProxyEngine = "nginx"
+	if err := s.generalBeforeSave(req, &edge, &back); err != nil {
+		t.Fatalf("back to nginx with snippets: %v", err)
 	}
 }
 

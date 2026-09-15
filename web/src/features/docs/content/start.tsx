@@ -50,7 +50,7 @@ function Introduction() {
         rows={[
           ['relay', 'This web UI, the REST API, the MCP server, the database, certificates and Docker discovery (port 8181).'],
           ['relay-nginx', 'The official nginx image, supervised by a small Relay agent. Owns ports 80 and 443 while nginx is the proxy engine (the default).'],
-          ['relay-edge', 'Relay Edge, run by the same agent. On standby unless it is chosen in Settings → General; only one proxy engine owns ports 80 and 443.'],
+          ['relay-edge', 'Relay Edge, run by the same agent. Stopped on standby unless it is chosen in Settings → Proxy engine; only one proxy engine owns ports 80 and 443.'],
           ['relay-haproxy', 'The official HAProxy image, supervised the same way. Starts once you create a backend.'],
         ]}
       />

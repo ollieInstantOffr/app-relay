@@ -177,9 +177,9 @@ func (r *renderer) enabledHosts() []*model.ProxyHost {
 	return out
 }
 
-// checkUnsupported fails the render for features Relay Edge can't run and
-// records notes for the ones that are skipped (every enabled host plus the
-// host served by the default server).
+// checkUnsupported records notes for configuration Relay Edge skips (every
+// enabled host plus the host served by the default server). Skipped settings
+// stay stored, so switching back to nginx applies them again.
 func (r *renderer) checkUnsupported(hosts []*model.ProxyHost) {
 	seen := map[*model.ProxyHost]bool{}
 	for _, h := range hosts {
@@ -195,7 +195,7 @@ func (r *renderer) checkUnsupported(hosts []*model.ProxyHost) {
 
 func (r *renderer) checkHost(h *model.ProxyHost) {
 	if strings.TrimSpace(h.CustomNginx) != "" {
-		r.fail("host %s uses a custom nginx snippet, which Relay Edge can't run", hostLabel(h))
+		r.note("host %s: custom nginx snippet kept but not run by Relay Edge (it applies again with nginx)", hostLabel(h))
 	}
 	if h.GeoBlock.Enabled && len(h.GeoBlock.AllowCountries) > 0 {
 		r.note("host %s: geo-blocking by country is not supported by Relay Edge and is skipped", hostLabel(h))

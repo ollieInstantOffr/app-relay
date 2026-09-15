@@ -124,7 +124,7 @@ export default function EnginesSettings() {
       {u.proxyEngine === 'edge' && (
         <div className="small faint row gap-6">
           <Icon name="info" size={12} />
-          Relay Edge is the proxy engine. It ships with Relay and updates with it; restart the engines when updating to run the new version right away.
+          Relay Edge (beta) is the proxy engine. It ships with Relay and updates with it; restart the engines when updating to run the new version right away.
         </div>
       )}
 
@@ -190,8 +190,8 @@ function InactiveEngineCard({ info, running }: { info: EngineUpdateInfo; running
     >
       <div className="eng-callout" style={{ opacity: 0.75 }}>
         <div className="small muted">
-          Not in use — Relay Edge is the proxy engine. {running ? <>Installed: <span className="mono">{running}</span>{info.image ? <> · <span className="mono">{info.image}</span></> : null}. </> : null}
-          Upgrades are available again after switching back to nginx in <Link to="/settings/general">Settings → General</Link>.
+          Not in use — Relay Edge (beta) is the proxy engine. Switch back to nginx in Settings → Proxy engine at any time. {running ? <>Installed: <span className="mono">{running}</span>{info.image ? <> · <span className="mono">{info.image}</span></> : null}. </> : null}
+          Upgrades are available again after switching back to nginx in <Link to="/settings/proxy">Settings → Proxy engine</Link>.
         </div>
       </div>
     </Card>

@@ -10,18 +10,20 @@ function RelayEdge() {
         It runs in the <C>relay-edge</C> container from the same binary as Relay and is managed exactly like nginx: pending changes, validation, health checks,
         config history and automatic rollback all work the same. HAProxy and the load balancer are not affected.
       </P>
+      <Warn title="Beta">
+        Relay Edge is in beta. It passes Relay’s full test suite and end-to-end traffic tests, but it hasn’t been proven in as many real-world setups as nginx.
+        nginx stays the default, and switching back takes one apply.
+      </Warn>
       <P>
-        Only one proxy engine serves traffic at a time. nginx stays the default; the other engine waits on standby, so you can switch back any time.
+        Only one proxy engine serves traffic at a time. While Relay Edge serves, nginx is stopped: it holds no ports and Relay stops it again if it ever
+        starts (for example after a container restart). Its container stays up, so switching back takes one apply, and the same goes the other way round.
       </P>
-      <GoTo to="/settings/general">Settings → General → Proxy engine</GoTo>
+      <GoTo to="/settings/proxy">Settings → Proxy engine</GoTo>
 
       <H2>Switching engines</H2>
       <Steps>
-        <Step title="Remove custom nginx snippets">
-          Relay Edge can’t run raw nginx directives. The Proxy engine card lists every host that still has a snippet on its <UI>Advanced</UI> tab.
-        </Step>
         <Step title="Pick Relay Edge and save">
-          <UI>Settings → General → Proxy engine → Relay Edge → Save changes</UI>. Nothing changes yet: the switch becomes a pending change
+          <UI>Settings → Proxy engine → Relay Edge → Switch to Relay Edge</UI>. Nothing changes yet: the switch becomes a pending change
           named <C>Proxy engine: nginx → Relay Edge</C>.
         </Step>
         <Step title="Apply">
@@ -41,7 +43,19 @@ function RelayEdge() {
         title="A successful switch in Logs → Activity"
         code={`Switched from nginx to Relay Edge · 840 ms`}
       />
-      <Tip>Switching back works the same way: choose nginx, save and apply. Snippets can be added again once nginx is live.</Tip>
+      <Tip>Switching back works the same way: choose nginx, save and apply.</Tip>
+
+      <H2>Moving between engines</H2>
+      <P>
+        There is nothing to export or import. Your proxy hosts, redirects, the default host, access lists, certificates and streams are stored once in Relay,
+        and each engine’s configuration is generated from them when you apply. Switch to Relay Edge and back as often as you like: nginx gets exactly the
+        configuration it had before, and every change you made in the meantime.
+      </P>
+      <List>
+        <li><strong>Custom nginx snippets</strong> stay saved on each host. Relay Edge skips them (the generated config notes which hosts have one) and nginx applies them again after switching back.</li>
+        <li><strong>Geo-blocking by country</strong> stays saved too; neither the official nginx image nor Relay Edge enforces it.</li>
+        <li><strong>Config history</strong> keeps versions from both engines, so you can compare or roll back across a switch.</li>
+      </List>
 
       <H2>What’s better than nginx</H2>
       <P>Relay Edge reproduces nginx’s behaviour for everything Relay configures (server selection, redirects, access lists, forward auth, rate limits, caching, gzip, streams). On top of that:</P>
@@ -61,8 +75,8 @@ function RelayEdge() {
       <H2>What isn’t supported</H2>
       <List>
         <li>
-          <strong>Custom nginx snippets.</strong> Saving Relay Edge is refused while a host has one, and the snippet field is read-only while Relay Edge is selected.
-          Use the host options instead, or stay on nginx. <See id="protection">Host options →</See>
+          <strong>Custom nginx snippets.</strong> They stay saved and apply again with nginx, but Relay Edge doesn’t run them. Use the host options instead,
+          or stay on nginx for hosts that need raw directives. <See id="protection">Host options →</See>
         </li>
         <li>
           <strong>Geo-blocking by country.</strong> Country rules are saved but skipped, just like with the official nginx image (which has no GeoIP2 module).
@@ -141,11 +155,11 @@ export const edgeSections: DocSection[] = [
   {
     id: 'relay-edge',
     group: 'Reverse proxy',
-    title: 'Relay Edge',
+    title: 'Relay Edge (beta)',
     icon: 'bolt',
-    summary: 'Relay’s own reverse proxy engine: zero-downtime reloads, upstream keep-alive and built-in metrics. How to switch, and what differs from nginx.',
+    summary: 'Relay’s own reverse proxy engine, in beta: zero-downtime reloads, upstream keep-alive and built-in metrics. How to switch back and forth, and what differs from nginx.',
     keywords: 'relay edge engine proxy engine nginx alternative switch zero downtime reload keep-alive metrics prometheus stub_status healthz 18081 post-quantum relay-edge relay edge check',
-    app: [{ to: '/settings/general', label: 'Choose proxy engine' }],
+    app: [{ to: '/settings/proxy', label: 'Choose proxy engine' }],
     Body: RelayEdge,
   },
 ]

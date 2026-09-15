@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
-import { keys, useDeleteEntity, useEntities, useRole, useSaveSettings, useSettings } from '../../lib/queries'
+import { keys, useDeleteEntity, useEntities, useRole, useSaveSettings, useSettings, useSelectedProxyEngine } from '../../lib/queries'
 import { ago } from '../../lib/format'
 import type { DNSProvider, TLSSettings as TLS } from '../../lib/types'
 import {
@@ -32,6 +32,7 @@ function maxAgeText(sec: number) {
 }
 
 export default function TLSSettings() {
+  const edge = useSelectedProxyEngine() === 'edge'
   const toast = useToast()
   const qc = useQueryClient()
   const { isAdmin, canWrite } = useRole()
@@ -203,7 +204,10 @@ export default function TLSSettings() {
         <div className="toggle-row">
           <div className="grow">
             <div className="toggle-title">Cipher profile</div>
-            <div className="toggle-desc">{cipherInfo[draft.cipherProfile]}</div>
+            <div className="toggle-desc">
+              {cipherInfo[draft.cipherProfile]}
+              {edge && draft.cipherProfile === 'old' ? ' · Relay Edge offers the CBC suites Go supports (no DHE)' : ''}
+            </div>
             {errors.cipherProfile && <div className="field-error">{errors.cipherProfile}</div>}
           </div>
           <Segmented

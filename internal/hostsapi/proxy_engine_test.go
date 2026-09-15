@@ -2,15 +2,14 @@ package hostsapi
 
 import (
 	"context"
-	"errors"
-	"strings"
 	"testing"
 
 	"github.com/instantoffr/relay/internal/model"
 	"github.com/instantoffr/relay/internal/store"
 )
 
-func TestCustomNginxRefusedWithRelayEdge(t *testing.T) {
+// Snippets are saved with either engine so switching back to nginx applies them.
+func TestCustomNginxKeptWithRelayEdge(t *testing.T) {
 	app, _ := newTestApp(t)
 	ctx := context.Background()
 	host := func(domain, snippet string) *model.ProxyHost {
@@ -26,9 +25,8 @@ func TestCustomNginxRefusedWithRelayEdge(t *testing.T) {
 	if err := app.Store.PutSettings(ctx, model.SettingsGeneral, gen); err != nil {
 		t.Fatal(err)
 	}
-	var ve *model.ValidationError
-	if err := saveHost(app, nil, host("b.home.lan", "add_header X-Test 1;")); !errors.As(err, &ve) || !strings.Contains(ve.Fields["customNginx"], "Relay Edge") {
-		t.Fatalf("edge refuses snippets: %v", err)
+	if err := saveHost(app, nil, host("b.home.lan", "add_header X-Test 1;")); err != nil {
+		t.Fatalf("edge keeps snippets: %v", err)
 	}
 	if err := saveHost(app, nil, host("c.home.lan", "  \n")); err != nil {
 		t.Fatalf("blank snippet is fine: %v", err)

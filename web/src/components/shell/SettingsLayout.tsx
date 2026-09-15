@@ -6,6 +6,7 @@ import GeneralSettings from '../../features/settings/GeneralSettings'
 import UsersSettings from '../../features/settings/UsersSettings'
 import DockerSettings from '../../features/settings/DockerSettings'
 import TLSSettings from '../../features/settings/TLSSettings'
+import ProxyEngineSettings from '../../features/settings/ProxyEngineSettings'
 import HAProxySettings from '../../features/settings/HAProxySettings'
 import EnginesSettings from '../../features/settings/EnginesSettings'
 import MCPSettings from '../../features/settings/MCPSettings'
@@ -18,6 +19,7 @@ export const SETTINGS_SECTIONS: { id: string; label: string; icon: IconName; com
   { id: 'users', label: 'Users & access', icon: 'users', component: UsersSettings },
   { id: 'docker', label: 'Docker discovery', icon: 'docker', component: DockerSettings },
   { id: 'tls', label: 'Default TLS', icon: 'certificates', component: TLSSettings },
+  { id: 'proxy', label: 'Proxy engine', icon: 'hosts', component: ProxyEngineSettings },
   { id: 'haproxy', label: 'HAProxy engine', icon: 'load-balancer', component: HAProxySettings },
   { id: 'engines', label: 'Updates', icon: 'reload', component: EnginesSettings },
   { id: 'mcp', label: 'MCP server', icon: 'mcp', component: MCPSettings },

@@ -168,6 +168,63 @@ func TestEngineSwitchToEdge(t *testing.T) {
 	}
 }
 
+// Switching nginx → Relay Edge → nginx changes no stored configuration: the
+// nginx release after switching back is identical to the one before, custom
+// snippets included.
+func TestEngineSwitchRoundTrip(t *testing.T) {
+	e := newTestEnv(t)
+	fakeEdgeRenderer(t)
+	ctx := e.ctx
+	e.createHost(t, "grafana.home.lan")
+	e.createHost(t, "cloud.home.lan")
+	hosts, err := e.app.Store.Hosts().List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range hosts {
+		if hosts[i].Domains[0] == "cloud.home.lan" {
+			hosts[i].CustomNginx = "add_header X-Round-Trip 1;"
+			if err := e.app.Store.Hosts().Update(ctx, &hosts[i]); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err := e.svc.Apply(ctx, core.ApplyOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	v1, _ := e.app.Store.LiveVersion(ctx, true)
+	if !strings.Contains(string(v1.NginxFiles), "X-Round-Trip") {
+		t.Fatal("nginx release should contain the custom snippet")
+	}
+	before, _ := e.app.Store.Hosts().List(ctx)
+
+	e.selectEngine(t, "edge")
+	v2, err := e.svc.Apply(ctx, core.ApplyOptions{})
+	if err != nil || v2.Status != "live" {
+		t.Fatalf("switch to edge: %+v %v", v2, err)
+	}
+	if row, _ := e.app.Store.GetVersion(ctx, v2.ID, false); row.ProxyEngine != "edge" {
+		t.Fatalf("v2 engine = %q", row.ProxyEngine)
+	}
+
+	e.selectEngine(t, "nginx")
+	v3, err := e.svc.Apply(ctx, core.ApplyOptions{})
+	if err != nil || v3.Status != "live" {
+		t.Fatalf("switch back to nginx: %+v %v", v3, err)
+	}
+	row3, _ := e.app.Store.GetVersion(ctx, v3.ID, true)
+	if row3.ProxyEngine != "nginx" || row3.NginxHash != v1.NginxHash || string(row3.NginxFiles) != string(v1.NginxFiles) {
+		t.Fatalf("nginx release changed after the round trip: engine=%q hash %s vs %s", row3.ProxyEngine, row3.NginxHash, v1.NginxHash)
+	}
+	after, _ := e.app.Store.Hosts().List(ctx)
+	if fmt.Sprint(after) != fmt.Sprint(before) {
+		t.Fatal("hosts changed during the round trip")
+	}
+	if p, _ := e.svc.Pending(ctx); p.Count != 0 {
+		t.Fatalf("pending after round trip = %+v", p)
+	}
+}
+
 func TestEngineSwitchRollsBack(t *testing.T) {
 	e := newTestEnv(t)
 	fakeEdgeRenderer(t)
