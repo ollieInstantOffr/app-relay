@@ -22,12 +22,15 @@ type idleConn struct {
 	timeout time.Duration
 	last    atomic.Int64
 	off     atomic.Bool // deadlines managed by the caller
+	// kicked keeps reads and writes unblocked until rearm: a Read that starts
+	// (and extends the deadline) right after kick must not undo it.
+	kicked atomic.Bool
 }
 
 var aLongTimeAgo = time.Unix(1, 0)
 
 func (c *idleConn) extend() {
-	if c.timeout <= 0 || c.off.Load() {
+	if c.timeout <= 0 || c.off.Load() || c.kicked.Load() {
 		return
 	}
 	now := time.Now()
@@ -37,6 +40,10 @@ func (c *idleConn) extend() {
 	}
 	c.last.Store(n)
 	c.Conn.SetDeadline(now.Add(c.timeout))
+	if c.kicked.Load() {
+		// kick ran concurrently: its past deadline must win.
+		c.Conn.SetDeadline(aLongTimeAgo)
+	}
 }
 
 func (c *idleConn) Read(p []byte) (int, error) {
@@ -51,12 +58,14 @@ func (c *idleConn) Write(p []byte) (int, error) {
 
 // kick unblocks pending reads and writes.
 func (c *idleConn) kick() {
+	c.kicked.Store(true)
 	c.last.Store(0)
 	c.Conn.SetDeadline(aLongTimeAgo)
 }
 
 // rearm restores the inactivity deadline after kick or connect.
 func (c *idleConn) rearm() {
+	c.kicked.Store(false)
 	c.last.Store(0)
 	c.off.Store(false)
 	if c.timeout > 0 {
