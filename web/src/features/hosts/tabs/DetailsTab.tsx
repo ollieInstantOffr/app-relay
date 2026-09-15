@@ -2,7 +2,7 @@
 import { useMemo } from 'react'
 import { Button, Callout, Dot, Field, Input, Select, Spinner, ToggleCard, cx } from '../../../components/ui'
 import { useContainers, useEntities } from '../../../lib/queries'
-import type { Container, Upstream } from '../../../lib/types'
+import type { Container, Frontend, Upstream } from '../../../lib/types'
 import { ConfigPreviewPanel } from '../ConfigPreview'
 import { DomainsInput } from '../DomainsInput'
 import type { HostFormCtx } from '../HostDrawer'
@@ -32,6 +32,19 @@ export function ProbeLine({ probe }: { probe: ReturnType<typeof useProbe> }) {
   return null
 }
 
+/** Address a proxy host uses to reach a load-balancer frontend (null = unusable bind). */
+export function frontendTarget(f: Frontend): { host: string; port: number } | null {
+  const bind = f.bind.trim()
+  const i = bind.lastIndexOf(':')
+  if (i < 0) return null
+  const port = Number(bind.slice(i + 1))
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null
+  let host = bind.slice(0, i).replace(/^\[|\]$/g, '')
+  // A wildcard bind listens on every address; Relay reaches it over loopback.
+  if (host === '' || host === '*' || host === '0.0.0.0' || host === '::') host = '127.0.0.1'
+  return { host, port }
+}
+
 /** Best port of a discovered container usable with its upstreamHost (0 = unknown). */
 const chipPort = (c: Container) => c.suggestedPort || c.candidatePorts?.[0] || 0
 
@@ -39,6 +52,7 @@ export function DetailsTab({ ctx }: { ctx: HostFormCtx }) {
   const { draft, update, errors, readOnly, preview, isNew } = ctx
   const lists = useEntities('access-lists').data ?? []
   const backends = useEntities('backends').data ?? []
+  const allFrontends = useEntities('frontends').data
   const containersQ = useContainers()
   const conflicts = useDomainChecks(draft.domains, { kind: 'host', excludeId: draft.id, enabled: !readOnly })
   const u = draft.upstream
@@ -63,6 +77,19 @@ export function DetailsTab({ ctx }: { ctx: HostFormCtx }) {
       .sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name))
       .slice(0, 8)
   }, [containersQ.data, draft.domains, draft.id])
+
+  // Enabled HTTP frontends can be proxied like any upstream (TCP frontends need a stream).
+  const frontends = useMemo(
+    () =>
+      (allFrontends ?? [])
+        .filter((f) => f.enabled && f.mode === 'http' && frontendTarget(f))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [allFrontends],
+  )
+  const viaFrontend = frontends.find((f) => {
+    const t = frontendTarget(f)
+    return t && t.host === u.host && t.port === u.port
+  })
 
   const selectedList = lists.find((l) => l.id === draft.accessListId)
   const listOptions = [
@@ -98,7 +125,16 @@ export function DetailsTab({ ctx }: { ctx: HostFormCtx }) {
             tone="info"
             actions={!readOnly ? <Button size="sm" onClick={() => setUpstream({ backendId: undefined })}>Detach</Button> : undefined}
           >
-            Routed through load-balancer backend <span className="mono">{backendName}</span> via its localhost frontend.
+            {viaFrontend ? (
+              <>
+                Routed through load-balancer frontend <span className="mono">{viaFrontend.name}</span> ({viaFrontend.bind}) and backend{' '}
+                <span className="mono">{backendName}</span>.
+              </>
+            ) : (
+              <>
+                Routed through load-balancer backend <span className="mono">{backendName}</span> via its localhost frontend.
+              </>
+            )}
           </Callout>
         )}
         <div className="hosts-upstream-grid">
@@ -168,6 +204,34 @@ export function DetailsTab({ ctx }: { ctx: HostFormCtx }) {
               )
             })}
           </div>
+        </div>
+      )}
+
+      {frontends.length > 0 && (
+        <div className="field">
+          <label className="field-label">Load balancer frontends</label>
+          <div className="row wrap gap-8">
+            {frontends.map((f) => {
+              const t = frontendTarget(f)!
+              const active = u.host === t.host && u.port === t.port
+              const backend = backends.find((b) => b.id === f.defaultBackendId)
+              const usedElsewhere = !!f.hostId && f.hostId !== draft.id
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  className={cx('hosts-container-chip', active && 'active')}
+                  title={`${f.bind}${backend ? ` → backend ${backend.name}` : ' · routes by rules'}${usedElsewhere ? ' · already exposed by another host' : ''}`}
+                  disabled={readOnly}
+                  onClick={() => setUpstream({ scheme: 'http', host: t.host, port: t.port, path: undefined, backendId: f.defaultBackendId || undefined })}
+                >
+                  <Dot tone={usedElsewhere ? 'muted' : 'ok'} />
+                  {f.name}:{t.port}
+                </button>
+              )
+            })}
+          </div>
+          <div className="field-hint">Send this host's traffic through a load balancer frontend.</div>
         </div>
       )}
 

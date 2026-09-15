@@ -215,6 +215,10 @@ function Expose() {
         </Step>
       </Steps>
       <Warn>Only HTTP backends can sit behind the reverse proxy. For TCP backends, create a <See id="frontends">frontend</See> or a <See id="streams">stream</See> that points at the backend.</Warn>
+      <Tip>
+        Already have an HTTP frontend? Open a proxy host (or create one) and pick it under <UI>Load balancer frontends</UI> on the <UI>Details</UI> tab: the host
+        then forwards to that frontend and its backend, like an exposed backend.
+      </Tip>
     </>
   )
 }
