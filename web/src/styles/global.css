@@ -538,3 +538,9 @@ input, select, textarea { font: inherit; color: inherit; }
   background: transparent; color: var(--ink-faint); cursor: pointer; display: flex; align-items: center; justify-content: center;
 }
 .search-input-clear:hover { background: var(--surface-2); color: var(--ink); }
+
+/* ---------------------------------------------------------------- graphite charts (components/charts) */
+.graphite-chart:focus-visible { box-shadow: var(--focus-ring); }
+@media (prefers-reduced-motion: reduce) {
+  .graphite-chart * { transition: none !important; animation: none !important; }
+}

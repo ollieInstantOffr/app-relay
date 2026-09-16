@@ -2,12 +2,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { TopBar } from '../../components/shell/TopBar'
+import { ClientSourcesChart, LBSessionsChart, ResponseMixChart, TopHostsChart } from '../../components/charts'
 import { Button, Dot, EmptyState, Segmented, Skeleton, StatCard, Status, cx, healthTone } from '../../components/ui'
 import { ago, bytes, clock, compact, dateTime, duration, ms } from '../../lib/format'
 import { useContainers, useEntities, useHealth, useLBEngine, useLBStats, useProxyEngine, useRole } from '../../lib/queries'
 import { proxyEngineLabel } from '../../lib/types'
 import type { ActivityRow, BackendStats, HealthState, HealthStatus, ProxyHost } from '../../lib/types'
 import DockerSuggestionsDialog from '../docker/DockerSuggestionsDialog'
+import { useLBSeries } from '../loadbalancer/lbApi'
+import { useTopology } from '../topology/api'
 import { OVERVIEW_RANGES, useActivity, useNow, useOverview, type Overview, type OverviewRange } from './api'
 import { TrafficChart } from './TrafficChart'
 import UpdateBanner from './UpdateBanner'
@@ -108,7 +111,7 @@ export default function OverviewPage() {
               <Onboarding canWrite={canWrite} onDocker={() => setDockerOpen(true)} />
               <ActivityCard />
             </div>
-            {hasBackends && <LoadBalancerCard />}
+            {hasBackends && <LoadBalancerCard range={range} />}
           </>
         ) : (
           <>
@@ -116,8 +119,9 @@ export default function OverviewPage() {
               <TrafficCard range={range} onRange={setRange} data={traffic.data} stale={traffic.isPlaceholderData} error={traffic.isError} />
               <ActivityCard />
             </div>
+            <TrafficBreakdown range={range} hosts={hosts} />
             <HostHealth rows={rows} loading={!hostsQ.data} />
-            {hasBackends && <LoadBalancerCard />}
+            {hasBackends && <LoadBalancerCard range={range} />}
           </>
         )}
       </div>
@@ -265,6 +269,107 @@ function ActivityItem({ a, now }: { a: ActivityRow; now: number }) {
   )
 }
 
+const RANGE_LABEL: Record<OverviewRange, string> = { '1h': 'last hour', '24h': 'last 24 hours', '7d': 'last 7 days' }
+const TOP_HOSTS = 6
+
+/** Axis label for a load balancer series point (unix seconds). */
+function seriesLabel(t: number, stepSeconds: number): string {
+  const d = new Date(t * 1000)
+  const hm = d.toTimeString().slice(0, 5)
+  return stepSeconds >= 3600 ? `${d.toLocaleDateString([], { weekday: 'short' })} ${hm}` : hm
+}
+
+/**
+ * Where traffic comes from, how it was answered and which hosts get it
+ * (GET /api/metrics/topology). Topology covers at most 24 h, so 7d shows the last day.
+ */
+function TrafficBreakdown({ range, hosts }: { range: OverviewRange; hosts: ProxyHost[] }) {
+  const navigate = useNavigate()
+  const flowRange = range === '1h' ? '1h' : '24h'
+  const q = useTopology(flowRange, false)
+  const t = q.data
+  const span = RANGE_LABEL[flowRange]
+
+  const top = useMemo(() => {
+    if (!t) return []
+    const byId = new Map(hosts.map((h) => [h.id, h]))
+    const ranked = Object.entries(t.hosts)
+      .filter(([id, f]) => byId.has(id) && f.requests > 0)
+      .sort((a, b) => b[1].requests - a[1].requests)
+      .slice(0, TOP_HOSTS)
+    const labels = shortLabels(ranked.map(([id]) => byId.get(id)!))
+    return ranked.map(([id, f], i) => ({ id, label: labels[i], requests: f.requests }))
+  }, [t, hosts])
+
+  if (q.isError && !t) {
+    return <div className="card ov-card"><div className="ov-note">Traffic breakdown is unavailable right now.</div></div>
+  }
+  const loading = !t
+  const total = t?.totals.requests ?? 0
+  const empty = (title: string) => (
+    <div className="col gap-8">
+      <div className="ov-card-title">{title} <span className="ov-card-sub">· {span}</span></div>
+      <div className="ov-note">No requests in the {span}.</div>
+    </div>
+  )
+  const clients = t?.clients
+  const success = t ? Math.max(0, total - t.totals.s4xx - t.totals.s5xx) : 0
+
+  return (
+    <div className={cx('ov-breakdown', q.isPlaceholderData && 'stale')}>
+      <div className="card ov-card">
+        <TopHostsChart
+          loading={loading}
+          data={top}
+          subtitle={span}
+          headline={compact(total)}
+          formatValue={compact}
+          onPointClick={(d) => {
+            const hit = top.find((r) => r.label === d.label)
+            if (hit) navigate(`/topology/hosts/${hit.id}`)
+          }}
+          emptyState={empty('Top hosts')}
+        />
+      </div>
+      <div className="card ov-card">
+        <ClientSourcesChart
+          loading={loading}
+          data={clients && clients.requests > 0
+            ? [
+                { name: 'LAN', requests: clients.lan },
+                { name: 'VPN', requests: clients.vpn },
+                { name: 'Internet', requests: clients.internet },
+                { name: 'Blocked', requests: clients.blocked },
+              ]
+            : []}
+          subtitle={span}
+          headline={clients ? compact(clients.unique) : undefined}
+          unit="unique IPs"
+          formatValue={compact}
+          emptyState={empty('Client sources')}
+        />
+      </div>
+      <div className="card ov-card">
+        <ResponseMixChart
+          loading={loading}
+          data={total > 0
+            ? [
+                { name: '2xx · 3xx', requests: success },
+                { name: '4xx', requests: t!.totals.s4xx },
+                { name: '5xx', requests: t!.totals.s5xx },
+              ]
+            : []}
+          subtitle={span}
+          headline={t?.totals.p95Ms != null ? ms(t.totals.p95Ms) : undefined}
+          unit="p95"
+          formatValue={compact}
+          emptyState={empty('Responses')}
+        />
+      </div>
+    </div>
+  )
+}
+
 const stateOrder: Record<HealthState, number> = { down: 0, degraded: 1, unknown: 2, healthy: 3, disabled: 4 }
 
 function primaryDomain(h: ProxyHost): string {
@@ -314,10 +419,12 @@ function HostHealth({ rows, loading }: { rows: HostRow[]; loading: boolean }) {
 const backendTone: Record<string, 'ok' | 'warn' | 'danger'> = { UP: 'ok', DEGRADED: 'warn', DOWN: 'danger' }
 
 /** Load balancer summary: engine, traffic and backend health (from /api/lb/stats). */
-function LoadBalancerCard() {
+function LoadBalancerCard({ range }: { range: OverviewRange }) {
   const backends = useEntities('backends').data ?? []
   const frontends = useEntities('frontends').data ?? []
   const stats = useLBStats(10_000).data
+  const series = useLBSeries(range, undefined, range === '1h' ? 15_000 : 60_000).data
+  const hasSeries = !!series && series.points.length > 1
   const { label, state } = useLBEngine()
   const now = useNow(60_000)
 
@@ -365,29 +472,43 @@ function LoadBalancerCard() {
         <Kpi label="Servers up" value={running ? `${serversUp} / ${totalServers}` : `— / ${totalServers}`} />
         <Kpi label="Frontends" value={String(enabledFrontends)} />
       </div>
-      {running && (down > 0 || degraded > 0) && (
-        <div className={cx('ov-lb-alert', down > 0 ? 'danger' : 'warn')}>
-          <Dot tone={down > 0 ? 'danger' : 'warn'} />
-          {[down > 0 ? `${down} backend${down === 1 ? '' : 's'} down` : '', degraded > 0 ? `${degraded} degraded` : ''].filter(Boolean).join(' · ')}
-        </div>
-      )}
-      <div className="ov-chips">
-        {visible.map(({ b, st }) => {
-          const up = st?.servers.filter((sv) => sv.status === 'UP' || sv.status === 'NOCHECK').length ?? 0
-          const title = st
-            ? `${b.name} · ${st.status} · ${up}/${b.servers.length} servers up · ${compact(st.sessRate)} sessions/s`
-            : `${b.name} · ${running ? 'not in the running config yet (apply)' : `${label} not running`}`
-          return (
-            <Link key={b.id} to={`/load-balancer/backends?edit=${b.id}`} className={cx('ov-chip', !st && 'dim')} title={title}>
-              <Dot tone={st ? (backendTone[st.status] ?? 'muted') : 'muted'} />
-              {b.name}
-              {st && <span className="ov-chip-meta">{up}/{b.servers.length}</span>}
-            </Link>
-          )
-        })}
-        {sorted.length > visible.length && (
-          <Link to="/load-balancer/backends" className="ov-chip more">+{sorted.length - visible.length} more</Link>
+      <div className={cx('ov-lb-body', hasSeries && 'with-chart')}>
+        {series && hasSeries && (
+          <div className="ov-lb-chart">
+            <LBSessionsChart
+              data={series.points.map((p) => ({ label: seriesLabel(p.t, series.step), sessions: p.sessRate, errors: p.errors }))}
+              subtitle={RANGE_LABEL[range]}
+              headline={false}
+              formatValue={compact}
+            />
+          </div>
         )}
+        <div className="col gap-12">
+          {running && (down > 0 || degraded > 0) && (
+            <div className={cx('ov-lb-alert', down > 0 ? 'danger' : 'warn')}>
+              <Dot tone={down > 0 ? 'danger' : 'warn'} />
+              {[down > 0 ? `${down} backend${down === 1 ? '' : 's'} down` : '', degraded > 0 ? `${degraded} degraded` : ''].filter(Boolean).join(' · ')}
+            </div>
+          )}
+          <div className="ov-chips">
+            {visible.map(({ b, st }) => {
+              const up = st?.servers.filter((sv) => sv.status === 'UP' || sv.status === 'NOCHECK').length ?? 0
+              const title = st
+                ? `${b.name} · ${st.status} · ${up}/${b.servers.length} servers up · ${compact(st.sessRate)} sessions/s`
+                : `${b.name} · ${running ? 'not in the running config yet (apply)' : `${label} not running`}`
+              return (
+                <Link key={b.id} to={`/load-balancer/backends?edit=${b.id}`} className={cx('ov-chip', !st && 'dim')} title={title}>
+                  <Dot tone={st ? (backendTone[st.status] ?? 'muted') : 'muted'} />
+                  {b.name}
+                  {st && <span className="ov-chip-meta">{up}/{b.servers.length}</span>}
+                </Link>
+              )
+            })}
+            {sorted.length > visible.length && (
+              <Link to="/load-balancer/backends" className="ov-chip more">+{sorted.length - visible.length} more</Link>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )

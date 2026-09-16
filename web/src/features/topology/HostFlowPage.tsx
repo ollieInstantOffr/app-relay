@@ -3,6 +3,7 @@ import { Fragment, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Button, Dot, EmptyState, Menu, Segmented, cx } from '../../components/ui'
 import { TopBar } from '../../components/shell/TopBar'
+import { ClientSourcesChart, ResponseMixChart } from '../../components/charts'
 import { useContainers, useEntities, useHealth, useLBEngine, useLBStats, useProxyEngine } from '../../lib/queries'
 import type { ProxyHost } from '../../lib/types'
 import { fmtCount, fmtMs, fmtPct, fmtRate, useHostFlow, type HostFlow } from './api'
@@ -96,6 +97,7 @@ export default function HostFlowPage() {
   const backend = throughLB ? backends.find((b) => b.id === backendId) : undefined
   const bs = lb?.backends.find((b) => b.id === backend?.id)
   const t = flow?.traffic
+  const span = range === '15m' ? 'last 15 min' : 'last hour'
   const tm = flow?.timing
   const proxyMs = tm?.requestMs != null && tm.upstreamMs != null ? Math.max(0, tm.requestMs - tm.upstreamMs) : null
   const upstreamTarget = `${host.upstream.host}:${host.upstream.port}`
@@ -263,6 +265,37 @@ export default function HostFlowPage() {
             <span className="n">{flow?.clients.requests ? `LAN ${pct(flow.clients.lan)} % · VPN ${pct(flow.clients.vpn)} % · Net ${pct(flow.clients.internet)} %` : 'no requests'}</span>
           </div>
         </div>
+        {flow && t && t.requests > 0 && (
+          <div className="flow-charts">
+            <div className="card flow-chart">
+              <ClientSourcesChart
+                data={[
+                  { name: 'LAN', requests: flow.clients.lan },
+                  { name: 'VPN', requests: flow.clients.vpn },
+                  { name: 'Internet', requests: flow.clients.internet },
+                  { name: 'Blocked', requests: flow.clients.blocked },
+                ]}
+                subtitle={span}
+                headline={fmtCount(flow.clients.unique)}
+                unit="unique IPs"
+                formatValue={fmtCount}
+              />
+            </div>
+            <div className="card flow-chart">
+              <ResponseMixChart
+                data={[
+                  { name: '2xx · 3xx', requests: Math.max(0, t.requests - t.s4xx - t.s5xx) },
+                  { name: '4xx', requests: t.s4xx },
+                  { name: '5xx', requests: t.s5xx },
+                ]}
+                subtitle={span}
+                headline={fmtCount(t.requests)}
+                unit="req"
+                formatValue={fmtCount}
+              />
+            </div>
+          </div>
+        )}
         <p className="flow-note">
           Timings are averages from {proxy.label}’s access log: <em>proxy</em> is the time spent in Relay outside the upstream call, <em>upstream</em> runs from connecting to the
           upstream until its response ended{throughLB ? ', including the load balancer' : ''}. Server response times come from the {lbEngine.label} stats.

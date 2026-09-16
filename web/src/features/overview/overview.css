@@ -65,3 +65,16 @@
 
 /* ---------------------------------------------------------------- update banner */
 .pending-bar.update-bar .pb-dot { background: var(--info, var(--accent, #60a5fa)); }
+
+/* ---------------------------------------------------------------- traffic breakdown (Graphite charts) */
+.ov-card-sub { font-weight: 400; font-size: 12px; color: var(--ink-faint); }
+.ov-breakdown { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: stretch; transition: opacity .15s; }
+.ov-breakdown.stale { opacity: .55; }
+.ov-lb-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
+.ov-lb-body.with-chart { grid-template-columns: minmax(0, 600px) minmax(220px, 1fr); }
+.ov-lb-body .ov-chips { flex: none; }
+@media (max-width: 1180px) {
+  .ov-lb-body.with-chart { grid-template-columns: minmax(0, 1fr); }
+  .ov-breakdown { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ov-breakdown > :first-child { grid-column: 1 / -1; }
+}
