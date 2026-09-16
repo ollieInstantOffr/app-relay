@@ -544,6 +544,8 @@ const (
 	// EventEngineUpdateAvailable fires once per new nginx/HAProxy release or new
 	// Relay version on the update branch (engine slice).
 	EventEngineUpdateAvailable = "engine_update_available"
+	// EventTunnelDown fires when a connected tunnel gateway stays unreachable.
+	EventTunnelDown = "tunnel_down"
 )
 
 type QuietHours struct {

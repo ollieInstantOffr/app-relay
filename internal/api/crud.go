@@ -57,6 +57,11 @@ func (s *Server) routesCRUD(r chi.Router) {
 		path: "/frontends", noun: "frontend", repo: (*store.Store).Frontends, hooks: &httpx.FrontendHooks, config: true,
 		name: func(v *model.Frontend) string { return v.Name },
 	})
+	// Gateways are runtime state (like DNS providers): no pending change.
+	mountCRUD(s, r, crudSpec[model.Gateway, *model.Gateway]{
+		path: "/gateways", noun: "gateway", repo: (*store.Store).Gateways, hooks: &httpx.GatewayHooks,
+		name: func(v *model.Gateway) string { return v.Name },
+	})
 }
 
 func first(ss []string) string {

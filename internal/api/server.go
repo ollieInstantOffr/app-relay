@@ -70,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 			s.routesMCPAdmin(r)
 			s.routesDNS(r)
 			s.routesGeoIP(r)
+			s.routesTunnels(r) // last: wraps the host and stream hooks
 		})
 		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "no such endpoint")

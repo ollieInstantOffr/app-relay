@@ -26,6 +26,7 @@ const (
 	EngineUpgrade    = "engine.upgrade" // Data: core.UpgradeJob (progress of an nginx/HAProxy image upgrade)
 	EngineUpdates    = "engine.updates" // Data: {nginx, haproxy} update availability changed
 	RelayUpdate      = "relay.update"   // Data: core.RelayUpdateJob (progress of a Relay self-update)
+	TunnelChanged    = "tunnel.changed" // Data: {gateway?, connected?, reason?} gateways or their connections changed
 )
 
 type Event struct {

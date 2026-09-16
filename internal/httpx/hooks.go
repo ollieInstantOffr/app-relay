@@ -29,6 +29,7 @@ var (
 	DNSProviderHooks Hooks[model.DNSProvider]
 	BackendHooks     Hooks[model.Backend]
 	FrontendHooks    Hooks[model.Frontend]
+	GatewayHooks     Hooks[model.Gateway]
 )
 
 // SettingsHook customises one settings document. Values are pointers to the
