@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/instantoffr/relay/internal/balancer/spec"
+	"github.com/instantoffr/relay/internal/sniff"
 )
 
 func TestHTTPRules(t *testing.T) {
@@ -97,7 +98,7 @@ func clientHello(t *testing.T, serverName string) []byte {
 	for {
 		n, err := c2.Read(buf)
 		data = append(data, buf[:n]...)
-		if _, done := parseClientHelloSNI(data); done || err != nil {
+		if _, done := sniff.ClientHelloSNI(data); done || err != nil {
 			return data
 		}
 	}

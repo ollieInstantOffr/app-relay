@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/instantoffr/relay/internal/balancer/spec"
+	"github.com/instantoffr/relay/internal/sniff"
 )
 
 // handleTCP serves one tcp-mode session: optional SNI inspection, rules,
@@ -99,7 +100,7 @@ func peekSNI(fc *feConn, delay time.Duration) string {
 		data, err := br.Peek(need)
 		if len(data) > 0 {
 			all, _ := br.Peek(br.Buffered())
-			if sni, done := parseClientHelloSNI(all); done {
+			if sni, done := sniff.ClientHelloSNI(all); done {
 				return sni
 			}
 			need = br.Buffered() + 1

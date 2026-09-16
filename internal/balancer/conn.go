@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/instantoffr/relay/internal/proxyproto"
 )
 
 // idleConn applies an inactivity timeout to a server connection: every read
@@ -129,7 +131,7 @@ func (s *server) dial(ctx context.Context, src, dst netip.AddrPort) (*sconn, err
 	raw.SetDeadline(deadline)
 	var c net.Conn = ic
 	if be.sendProxy {
-		if _, err := raw.Write(appendProxyV2(make([]byte, 0, 52), src, dst)); err != nil {
+		if _, err := raw.Write(proxyproto.AppendV2(make([]byte, 0, 52), src, dst)); err != nil {
 			raw.Close()
 			return nil, &connectError{err}
 		}

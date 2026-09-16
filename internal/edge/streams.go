@@ -3,12 +3,13 @@ package edge
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/instantoffr/relay/internal/proxyproto"
 )
 
 // streamRT is a compiled Stream. Listeners keep a pointer to it that reloads
@@ -32,22 +33,6 @@ func (s *streamRT) target(listenPort int) string {
 		port = s.forwardLo + (listenPort - s.listenLo)
 	}
 	return joinHostPort(s.forwardHost, port)
-}
-
-// proxyProtocolV1 returns the PROXY protocol v1 header nginx sends with
-// `proxy_protocol on` for a connection from src to dst.
-func proxyProtocolV1(src, dst net.Addr) []byte {
-	sa, sOK := src.(*net.TCPAddr)
-	da, dOK := dst.(*net.TCPAddr)
-	if !sOK || !dOK {
-		return []byte("PROXY UNKNOWN\r\n")
-	}
-	family := "TCP4"
-	sip, dip := sa.IP.To4(), da.IP.To4()
-	if sip == nil || dip == nil {
-		family, sip, dip = "TCP6", sa.IP.To16(), da.IP.To16()
-	}
-	return fmt.Appendf(nil, "PROXY %s %s %s %d %d\r\n", family, sip, dip, sa.Port, da.Port)
 }
 
 // StreamStats is reported per finished stream session (for the access log).
@@ -159,7 +144,7 @@ func (t *tcpStream) handle(client net.Conn, port int) {
 	defer upstream.Close()
 	if spec.proxyProtocol {
 		upstream.SetWriteDeadline(time.Now().Add(spec.connect))
-		if _, err := upstream.Write(proxyProtocolV1(client.RemoteAddr(), client.LocalAddr())); err != nil {
+		if _, err := upstream.Write(proxyproto.V1(client.RemoteAddr(), client.LocalAddr())); err != nil {
 			st.Err = err
 			return
 		}

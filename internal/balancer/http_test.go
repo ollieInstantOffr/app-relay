@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/instantoffr/relay/internal/balancer/spec"
+	"github.com/instantoffr/relay/internal/proxyproto"
 )
 
 func singleBackendEnv(t *testing.T, mutate func(cfg *spec.Config), servers ...spec.Server) *env {
@@ -147,7 +148,7 @@ func TestAcceptProxy(t *testing.T) {
 	if !strings.Contains(v1, "proxied /pp xff=192.0.2.10") {
 		t.Fatalf("v1: %q", v1)
 	}
-	v2 := send(appendProxyV2(nil, netip.MustParseAddrPort("[2001:db8::7]:4000"), netip.MustParseAddrPort("[2001:db8::1]:443")))
+	v2 := send(proxyproto.AppendV2(nil, netip.MustParseAddrPort("[2001:db8::7]:4000"), netip.MustParseAddrPort("[2001:db8::1]:443")))
 	if !strings.Contains(v2, "a /pp xff=2001:db8::7") {
 		t.Fatalf("v2: %q", v2)
 	}
@@ -169,7 +170,7 @@ func proxyEchoServer(t *testing.T, conns *atomic.Int64) int {
 	return tcpServer(t, func(c net.Conn) {
 		conns.Add(1)
 		br := bufio.NewReader(c)
-		h, err := readProxyHeader(br)
+		h, err := proxyproto.Read(br)
 		if err != nil {
 			return
 		}
@@ -179,7 +180,7 @@ func proxyEchoServer(t *testing.T, conns *atomic.Int64) int {
 				return
 			}
 			io.Copy(io.Discard, req.Body)
-			body := fmt.Sprintf("src=%s dst=%s local=%v", h.src, h.dst, h.local)
+			body := fmt.Sprintf("src=%s dst=%s local=%v", h.Src, h.Dst, h.Local)
 			fmt.Fprintf(c, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
 		}
 	})
@@ -224,9 +225,9 @@ func TestSendProxyV2(t *testing.T) {
 
 	// tcp mode
 	tport := tcpServer(t, func(c net.Conn) {
-		h, err := readProxyHeader(bufio.NewReader(c))
+		h, err := proxyproto.Read(bufio.NewReader(c))
 		if err == nil {
-			fmt.Fprintf(c, "src=%s\n", h.src)
+			fmt.Fprintf(c, "src=%s\n", h.Src)
 		}
 	})
 	cfg := baseConfig(t)

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/instantoffr/relay/internal/balancer/spec"
+	"github.com/instantoffr/relay/internal/proxyproto"
 )
 
 const maxHeaderBytes = 64 << 10
@@ -358,16 +359,16 @@ func (bl *boundListener) handshake(fc *feConn, fe *frontend) {
 	}
 	if fe.acceptProxy {
 		fc.Conn.SetReadDeadline(time.Now().Add(fe.clientTimeout))
-		h, err := readProxyHeader(fc.br)
+		h, err := proxyproto.Read(fc.br)
 		fc.Conn.SetReadDeadline(time.Time{})
 		if err != nil {
 			bl.srv.logConnError(fc, fe, "Received something which does not look like a PROXY protocol header")
 			fc.Close()
 			return
 		}
-		if !h.local {
-			fc.src = netip.AddrPortFrom(h.src.Addr().Unmap(), h.src.Port())
-			fc.dst = netip.AddrPortFrom(h.dst.Addr().Unmap(), h.dst.Port())
+		if !h.Local {
+			fc.src = netip.AddrPortFrom(h.Src.Addr().Unmap(), h.Src.Port())
+			fc.dst = netip.AddrPortFrom(h.Dst.Addr().Unmap(), h.Dst.Port())
 		}
 	}
 	now := time.Now()
