@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"slices"
 	"sort"
@@ -521,7 +522,8 @@ func (s *Service) Check(ctx context.Context, domains []string) ([]DomainCheck, e
 
 func (s *Service) check(ctx context.Context, set model.PublicDNSSettings, domains []string, fresh bool) []DomainCheck {
 	zones, providers := s.managed(ctx, set)
-	target, _ := s.target(ctx, set)
+	defaultTarget, _ := s.target(ctx, set)
+	tunneled := s.tunnelTargets(ctx, set)
 	out := make([]DomainCheck, 0, len(domains))
 	seen := map[string]bool{}
 	refreshed := map[string]bool{}
@@ -531,6 +533,11 @@ func (s *Service) check(ctx context.Context, set model.PublicDNSSettings, domain
 			continue
 		}
 		seen[d] = true
+		target := defaultTarget
+		if t, ok := tunneled[strings.ToLower(d)]; ok {
+			// Published through a tunnel: the record points at the gateway.
+			target = t
+		}
 		c := DomainCheck{Domain: d, Records: []Record{}, RelayRecords: []Record{}}
 		if !model.ValidDNSName(d, true) {
 			c.Status, c.Message = StatusUnmanaged, "Not a public domain name"
@@ -589,12 +596,68 @@ func (s *Service) check(ctx context.Context, set model.PublicDNSSettings, domain
 					c.Message = "A domain itself can't be a CNAME; add an A record by hand"
 				} else {
 					c.Message = "Relay doesn't know its public IP yet; set a target in Settings → Public DNS"
+					if _, ok := tunneled[strings.ToLower(d)]; ok {
+						c.Message = "The tunnel gateway hasn't reported its public IP yet"
+					}
 				}
 			} else {
 				c.Message = fmt.Sprintf("No record yet; Relay can create %s %s → %s", c.Planned.Type, d, c.Planned.Data)
 			}
 		}
 		out = append(out, c)
+	}
+	return out
+}
+
+// tunnelTargets maps the domains of hosts published through a tunnel gateway
+// to the record data that points at the gateway: its address host name for
+// CNAME records, else its first public IPv4 (or an IP address it is dialed
+// at). "" when the gateway hasn't reported an address yet.
+func (s *Service) tunnelTargets(ctx context.Context, set model.PublicDNSSettings) map[string]string {
+	out := map[string]string{}
+	hosts, err := s.app.Store.Hosts().List(ctx)
+	if err != nil {
+		return out
+	}
+	gateways, err := s.app.Store.Gateways().List(ctx)
+	if err != nil {
+		return out
+	}
+	targets := map[string]string{}
+	for _, g := range gateways {
+		host, _, err := model.SplitGatewayAddress(g.Address)
+		if err != nil {
+			continue
+		}
+		ip := net.ParseIP(host)
+		switch {
+		case set.RecordType == "CNAME" && ip == nil:
+			targets[g.ID] = strings.TrimSuffix(strings.ToLower(host), ".")
+		case ip != nil && ip.To4() != nil && set.RecordType == "A":
+			targets[g.ID] = host
+		default:
+			targets[g.ID] = ""
+			if set.RecordType == "A" {
+				for _, p := range g.PublicIPs {
+					if a := net.ParseIP(p); a != nil && a.To4() != nil {
+						targets[g.ID] = p
+						break
+					}
+				}
+			}
+		}
+	}
+	for _, h := range hosts {
+		if !h.Enabled || h.TunnelGatewayID == "" {
+			continue
+		}
+		t, ok := targets[h.TunnelGatewayID]
+		if !ok {
+			continue
+		}
+		for _, d := range h.Domains {
+			out[strings.ToLower(trimDot(d))] = t
+		}
 	}
 	return out
 }

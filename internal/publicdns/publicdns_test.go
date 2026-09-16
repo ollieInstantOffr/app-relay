@@ -391,3 +391,36 @@ func TestSettingsValidation(t *testing.T) {
 		t.Fatalf("valid settings: %v %+v", err, ok)
 	}
 }
+
+func TestSyncPointsPublishedHostsAtTheGateway(t *testing.T) {
+	f := newFixture(t)
+	g := &model.Gateway{Name: "vps", Address: "gw.example.net:7443", Enabled: true, PairState: model.GatewayPaired, PublicIPs: []string{"2001:db8::9", "198.51.100.7"}}
+	if err := f.app.Store.Gateways().Create(f.ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	hosts, _ := f.app.Store.Hosts().List(f.ctx)
+	for i := range hosts {
+		if slices.Contains(hosts[i].Domains, "test.instantoffr.com") {
+			hosts[i].TunnelGatewayID = g.ID
+			f.app.Store.Hosts().Update(f.ctx, &hosts[i])
+		}
+	}
+	results, err := f.svc.Sync(f.ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := statusOf(results, "test.instantoffr.com"); got.Status != StatusCreated {
+		t.Fatalf("test: %+v", got)
+	}
+	if recs := f.gd.find("instantoffr.com", "A", "test"); len(recs) != 1 || recs[0].Data != "198.51.100.7" {
+		t.Fatalf("record = %+v (want the gateway's IPv4)", recs)
+	}
+
+	// Without a reported address nothing is created for published hosts.
+	g.PublicIPs = nil
+	f.app.Store.Gateways().Update(f.ctx, g)
+	checks, _ := f.svc.Check(f.ctx, []string{"new.instantoffr.com"})
+	if checks[0].Planned == nil || checks[0].Planned.Data != "203.0.113.10" {
+		t.Fatalf("unpublished domain keeps the Relay target: %+v", checks[0])
+	}
+}
