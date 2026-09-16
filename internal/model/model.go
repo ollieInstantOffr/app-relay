@@ -140,6 +140,9 @@ type ProxyHost struct {
 	ProxySendTimeout int         `json:"proxySendTimeout"`
 	CustomNginx      string      `json:"customNginx"`
 
+	// TunnelGatewayID publishes the host through a tunnel gateway ("" = not published).
+	TunnelGatewayID string `json:"tunnelGatewayId,omitempty"`
+
 	Source    string `json:"source"`              // manual | docker | expose | import | mcp
 	SourceRef string `json:"sourceRef,omitempty"` // container name, backend id…
 	System    bool   `json:"system,omitempty"`    // Relay's own admin UI host
@@ -173,6 +176,8 @@ type Stream struct {
 	ProxyProtocol bool   `json:"proxyProtocol"`
 	IdleTimeout   string `json:"idleTimeout"` // nginx time, e.g. "10m"
 	Enabled       bool   `json:"enabled"`
+	// TunnelGatewayID publishes the stream's TCP ports on a tunnel gateway ("" = not published).
+	TunnelGatewayID string `json:"tunnelGatewayId,omitempty"`
 }
 
 // ---------------------------------------------------------------- access lists

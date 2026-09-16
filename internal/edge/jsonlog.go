@@ -130,5 +130,6 @@ func streamLogLine(b []byte, streamID string, st StreamStats, end time.Time) []b
 	} else {
 		b = appendField(b, "upstream_connect_time", "")
 	}
+	b = appendField(b, "tunnel", st.Tunnel)
 	return append(b, '}', '\n')
 }

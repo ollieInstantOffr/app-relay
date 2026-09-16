@@ -80,6 +80,8 @@ func (s *Server) logRequest(rs *reqState, body *countingBody) {
 	l = appendField(l, "request_id", rs.requestID)
 	l = appendField(l, "ssl_protocol", rs.sslProtocol())
 	l = appendField(l, "remote_user", rs.remoteUserName())
+	tunnel, _ := r.Context().Value(tunnelCtxKey{}).(string)
+	l = appendField(l, "tunnel", tunnel)
 	l = append(l, '}', '\n')
 	*b = l
 	sink.write(b)

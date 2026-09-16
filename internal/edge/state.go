@@ -19,6 +19,7 @@ type listenerRole struct {
 	port    int
 	portStr string
 	quic    bool
+	tunnel  bool // tunnel ingress (unix socket, PROXY protocol)
 }
 
 // reqState carries everything about one request through the pipeline and

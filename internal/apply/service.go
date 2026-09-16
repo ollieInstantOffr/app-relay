@@ -24,6 +24,7 @@ import (
 	"github.com/instantoffr/relay/internal/events"
 	"github.com/instantoffr/relay/internal/lb/lbengine"
 	"github.com/instantoffr/relay/internal/model"
+	"github.com/instantoffr/relay/internal/proxyproto"
 	"github.com/instantoffr/relay/internal/render"
 	"github.com/instantoffr/relay/internal/render/edge"
 	"github.com/instantoffr/relay/internal/render/nginx"
@@ -1037,19 +1038,53 @@ func (s *Service) probe(ctx context.Context, snap *model.Snapshot, env render.En
 		scheme, port = "https", httpsPort
 	}
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	res := probeURL(ctx, scheme+"://"+domain+"/", domain, func(ctx context.Context) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, "tcp", addr)
+	})
+	if !res.ok || !render.HostPublished(h) {
+		return res
+	}
+	// Published through a tunnel: the tunnel ingress socket must serve it too,
+	// so a change that breaks that path rolls back like any other.
+	engine := snap.General.ProxyEngine
+	if engine == "" {
+		engine = agent.EngineNginx
+	}
+	sock := env.TunnelHTTPSocket(engine)
+	if useTLS {
+		sock = env.TunnelHTTPSSocket(engine)
+	}
+	tres := probeURL(ctx, scheme+"://"+domain+"/", domain, func(ctx context.Context) (net.Conn, error) {
+		var d net.Dialer
+		c, err := d.DialContext(ctx, "unix", sock)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := c.Write(proxyproto.AppendV2Local(nil)); err != nil {
+			c.Close()
+			return nil, err
+		}
+		return c, nil
+	})
+	if !tres.ok {
+		tres.detail = "through the tunnel " + tres.detail
+	}
+	return tres
+}
+
+// probeURL requests url over connections from dial and classifies the result.
+func probeURL(ctx context.Context, url, serverName string, dial func(context.Context) (net.Conn, error)) probeResult {
 	tr := &http.Transport{
-		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, network, addr)
-		},
-		TLSClientConfig:   &tls.Config{ServerName: domain, InsecureSkipVerify: true}, //nolint:gosec // probing our own nginx
+		DialContext:       func(ctx context.Context, _, _ string) (net.Conn, error) { return dial(ctx) },
+		TLSClientConfig:   &tls.Config{ServerName: serverName, InsecureSkipVerify: true}, //nolint:gosec // probing our own proxy engine
 		DisableKeepAlives: true,
 	}
 	defer tr.CloseIdleConnections()
 	client := &http.Client{Transport: tr, Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	pctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(pctx, http.MethodGet, scheme+"://"+domain+"/", nil)
+	req, _ := http.NewRequestWithContext(pctx, http.MethodGet, url, nil)
 	req.Header.Set("User-Agent", "Relay-HealthCheck/1")
 	resp, err := client.Do(req)
 	if err != nil {

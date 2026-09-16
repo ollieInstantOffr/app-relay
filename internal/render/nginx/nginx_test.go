@@ -468,3 +468,101 @@ func TestRenderStreamVariableWithoutStreams(t *testing.T) {
 	with := renderRich(t)["nginx.conf"]
 	mustNotContain(t, "nginx.conf (streams)", with, "map $protocol $relay_stream_id")
 }
+
+func tunnelEnv() render.Env {
+	env := testEnv()
+	env.Modules["http_realip"] = true
+	env.Modules["stream_realip"] = true
+	return env
+}
+
+func tunnelSnapshot() *model.Snapshot {
+	snap := richSnapshot()
+	snap.Hosts[0].TunnelGatewayID = "gw1"   // cloud: TLS, ForceHTTPS, HTTP/3
+	snap.Hosts[1].TunnelGatewayID = "gw1"   // grafana: TLS without redirect, no HTTP/3
+	snap.Streams[0].TunnelGatewayID = "gw1" // minecraft tcp
+	snap.Streams[1].TunnelGatewayID = "gw1" // valheim udp: not carried
+	snap.Streams[2].TunnelGatewayID = "gw1" // dns both → hostname, shifted ports
+	return snap
+}
+
+func TestRenderTunnel(t *testing.T) {
+	files, err := Render(tunnelSnapshot(), tunnelEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := files["nginx.conf"]
+	mustContain(t, "nginx.conf", main,
+		"set_real_ip_from unix:;", "real_ip_header proxy_protocol;",
+		"map $proxy_protocol_tlv_0xe0 $relay_tunnel {", "map $proxy_protocol_addr $relay_forwarded_port {",
+		"map $proxy_protocol_addr $relay_alt_svc {", `'"tunnel":"$relay_tunnel"'`)
+	mustContain(t, "proxy-headers", files["snippets/proxy-headers.conf"], "X-Forwarded-Port $relay_forwarded_port;")
+
+	def := files["conf.d/10-default.conf"]
+	mustContain(t, "default", def,
+		"listen unix:/run/relay/tunnel/nginx-http.sock proxy_protocol default_server;",
+		"listen unix:/run/relay/tunnel/nginx-https.sock ssl proxy_protocol default_server;",
+		"ssl_reject_handshake on;")
+
+	cloud := files["conf.d/hosts/cloud.home.lan.conf"]
+	// The HTTPS redirect server and the TLS server both listen on the tunnel.
+	if strings.Count(cloud, "listen unix:/run/relay/tunnel/nginx-http.sock proxy_protocol;") != 1 ||
+		strings.Count(cloud, "listen unix:/run/relay/tunnel/nginx-https.sock ssl proxy_protocol;") != 1 {
+		t.Errorf("cloud tunnel listens:\n%s", cloud)
+	}
+	mustContain(t, "cloud", cloud, "add_header Alt-Svc $relay_alt_svc always;")
+
+	grafana := files["conf.d/hosts/grafana.home.lan.conf"]
+	mustContain(t, "grafana", grafana, "listen unix:/run/relay/tunnel/nginx-http.sock proxy_protocol;", "listen unix:/run/relay/tunnel/nginx-https.sock ssl proxy_protocol;")
+	mustNotContain(t, "vault (not published)", files["conf.d/hosts/vault.home.lan.conf"], "unix:")
+
+	mc := files["streams/minecraft.conf"]
+	mustContain(t, "minecraft", mc, "listen unix:/run/relay/tunnel/nginx-stream-25565.sock proxy_protocol;", "set_real_ip_from unix:;", "proxy_pass 10.0.0.50:25565;")
+	mustNotContain(t, "valheim", files["streams/valheim.conf"], "unix:")
+	dns := files["streams/dns.conf"]
+	mustContain(t, "dns", dns, "nginx-stream-5353.sock", "nginx-stream-5354.sock", "proxy_pass pihole.lan:54;")
+	if strings.Count(dns, "server {") != 4 {
+		t.Errorf("dns: expected 2 public + 2 tunnel servers:\n%s", dns)
+	}
+	mustContain(t, "stream block", main, "map $proxy_protocol_tlv_0xe0 $relay_tunnel {")
+
+	// Nothing published: no tunnel directives, but $relay_tunnel still exists for the log format.
+	plain := renderRich(t)
+	mustNotContain(t, "plain nginx.conf", plain["nginx.conf"], "real_ip_header", "unix:")
+	mustContain(t, "plain nginx.conf", plain["nginx.conf"], "map $host $relay_tunnel {", "map $protocol $relay_tunnel {")
+	mustNotContain(t, "plain default", plain["conf.d/10-default.conf"], "unix:")
+
+	// Custom HTTPS port: redirects through the tunnel go to 443.
+	s := tunnelSnapshot()
+	s.General.HTTPSPort = 8443
+	files, err = Render(s, tunnelEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, "custom port", files["nginx.conf"], "map $proxy_protocol_addr $relay_https_port {", `"" ":8443";`)
+	mustContain(t, "custom port", files["conf.d/hosts/cloud.home.lan.conf"], "return 301 https://$host$relay_https_port$request_uri;")
+
+	// The realip modules are required.
+	if _, err := Render(tunnelSnapshot(), testEnv()); err == nil || !strings.Contains(err.Error(), "realip") {
+		t.Errorf("expected missing realip module error, got %v", err)
+	}
+}
+
+// TestDumpTunnelForNginxT is TestDumpForNginxT with tunnels.
+func TestDumpTunnelForNginxT(t *testing.T) {
+	dir := os.Getenv("RELAY_NGINX_TUNNEL_RENDER_DIR")
+	if dir == "" {
+		t.Skip("RELAY_NGINX_TUNNEL_RENDER_DIR not set")
+	}
+	env := tunnelEnv()
+	env.GeoCountryFile = ""
+	files, err := Render(tunnelSnapshot(), env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for p, c := range files {
+		full := filepath.Join(dir, p)
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		os.WriteFile(full, []byte(c), 0o644)
+	}
+}

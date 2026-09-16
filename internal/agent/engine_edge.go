@@ -54,6 +54,7 @@ func (e *edgeEngine) prepare() {
 	if e.a.o.LogDir != "" {
 		os.MkdirAll(e.a.o.LogDir, 0o755)
 	}
+	prepareTunnelSockets(e.a.o.RunDir, EngineEdge)
 }
 
 func (e *edgeEngine) validate(dir string) (string, error) {
@@ -178,7 +179,7 @@ func (e *edgeEngine) detect() (string, []string, map[string]string) {
 	if version == "" {
 		version = "relay"
 	}
-	mods := []string{"stream", "http_v2", "http_v3", "auth_request"}
+	mods := []string{"stream", "http_v2", "http_v3", "auth_request", "http_realip", "stream_realip"}
 	if ipv6Available() {
 		mods = append(mods, "ipv6")
 	}

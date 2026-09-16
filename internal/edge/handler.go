@@ -62,7 +62,12 @@ func (s *Server) serve(rs *reqState) {
 	rs.splitRemote()
 	rs.host = requestHost(r.Host)
 	set := &rs.rt.https
-	if rs.role.scheme == "http" {
+	switch {
+	case rs.role.tunnel && rs.role.scheme == "http":
+		set = &rs.rt.tunnelHTTP
+	case rs.role.tunnel:
+		set = &rs.rt.tunnelHTTPS
+	case rs.role.scheme == "http":
 		set = &rs.rt.http
 	}
 	vs := set.lookup(hostKey(rs.host))
@@ -102,7 +107,7 @@ func (s *Server) serve(rs *reqState) {
 			host = vs.name
 		}
 		target := "https://" + host
-		if p := rs.rt.httpsPort; p != 443 && p != 0 {
+		if p := rs.rt.httpsPort; p != 443 && p != 0 && !rs.role.tunnel {
 			target += ":" + strconv.Itoa(p)
 		}
 		writeRedirect(w, http.StatusMovedPermanently, target+rs.requestURI())
@@ -118,7 +123,7 @@ func (s *Server) serveDefault(rs *reqState, vs *vserver) {
 		s.serveHost(rs, vs.host)
 		return
 	}
-	if s.serveACME(rs) {
+	if vs.acme && s.serveACME(rs) {
 		return
 	}
 	w := &rs.fw

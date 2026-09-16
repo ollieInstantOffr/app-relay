@@ -45,10 +45,31 @@ type Config struct {
 	// (status code → HTML). Responses from upstreams pass through.
 	ErrorPages map[string]string `json:"errorPages,omitempty"`
 
+	// Tunnel is the ingress for connections that came through a tunnel
+	// gateway (nil = none). Hosts with Tunnel and streams with TunnelSockets
+	// are served there.
+	Tunnel *TunnelIngress `json:"tunnel,omitempty"`
+
 	Default   DefaultServer   `json:"default"`
 	Hosts     []Host          `json:"hosts"`     // enabled hosts; for duplicate names the first wins
 	Redirects []RedirectGroup `json:"redirects"` // domains not served by a host
 	Streams   []Stream        `json:"streams"`
+}
+
+// TunnelIngress lists the unix sockets the tunnel engine hands connections
+// to. Every connection starts with a PROXY protocol header (v1 or v2); the
+// client address comes from it and TLV 0xE0 is the gateway id. Requests for
+// hosts that are not published through a tunnel are refused (444 / TLS
+// handshake failure). HTTP/3 is not announced there.
+type TunnelIngress struct {
+	HTTPSocket  string `json:"httpSocket,omitempty"`  // "" = no HTTP ingress
+	HTTPSSocket string `json:"httpsSocket,omitempty"` // "" = no HTTPS ingress
+}
+
+// TunnelSocket is a unix socket serving one public port of a stream.
+type TunnelSocket struct {
+	Port   int    `json:"port"`
+	Socket string `json:"socket"`
 }
 
 // CertRef points at a PEM certificate chain and key on disk.
@@ -118,6 +139,9 @@ type Host struct {
 	// PathRedirects (from redirect rules on this host's domains) win over
 	// prefix locations but not over the ACME challenge path.
 	PathRedirects []PathRedirect `json:"pathRedirects,omitempty"`
+
+	// Tunnel also serves the host on the tunnel ingress.
+	Tunnel bool `json:"tunnel,omitempty"`
 }
 
 // RateLimit is per client address: RequestsPerSecond with Burst extra requests
@@ -240,4 +264,7 @@ type Stream struct {
 	ProxyProtocol    bool   `json:"proxyProtocol,omitempty"` // send PROXY v1 (TCP)
 	IdleTimeoutMs    int    `json:"idleTimeoutMs"`           // 0 = 600000
 	ConnectTimeoutMs int    `json:"connectTimeoutMs"`        // 0 = 10000
+	// TunnelSockets serve public ports of the stream on the tunnel ingress
+	// (TCP, PROXY protocol required). Ports must lie in ListenLo..ListenHi.
+	TunnelSockets []TunnelSocket `json:"tunnelSockets,omitempty"`
 }

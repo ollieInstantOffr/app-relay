@@ -552,3 +552,42 @@ func TestHtpasswd(t *testing.T) {
 		t.Errorf("htpasswd = %q", b.String())
 	}
 }
+
+func TestRenderTunnel(t *testing.T) {
+	plain := renderRich(t)
+	if plain.Tunnel != nil {
+		t.Errorf("tunnel ingress without published hosts: %+v", plain.Tunnel)
+	}
+	snap := richSnapshot()
+	for i := range snap.Hosts {
+		if snap.Hosts[i].ID == "hostcloud" {
+			snap.Hosts[i].TunnelGatewayID = "gw1"
+		}
+	}
+	for i := range snap.Streams {
+		switch snap.Streams[i].ID {
+		case "s1", "s2", "s3":
+			snap.Streams[i].TunnelGatewayID = "gw1"
+		}
+	}
+	cfg, _ := mustRender(t, snap, testEnv())
+	equal(t, "ingress", cfg.Tunnel, &edgecfg.TunnelIngress{HTTPSocket: "/run/relay/tunnel/edge-http.sock", HTTPSSocket: "/run/relay/tunnel/edge-https.sock"})
+	if !findHost(t, cfg, "hostcloud").Tunnel || findHost(t, cfg, "hostgrafana").Tunnel {
+		t.Error("host tunnel flags")
+	}
+	socks := map[string][]edgecfg.TunnelSocket{}
+	for _, s := range cfg.Streams {
+		socks[s.ID] = s.TunnelSockets
+	}
+	equal(t, "minecraft", socks["s1"], []edgecfg.TunnelSocket{{Port: 25565, Socket: "/run/relay/tunnel/edge-stream-25565.sock"}})
+	if len(socks["s2"]) != 0 {
+		t.Errorf("udp stream got tunnel sockets: %+v", socks["s2"])
+	}
+	for id, s := range socks {
+		for _, ts := range s {
+			if ts.Port == 0 || ts.Socket == "" {
+				t.Errorf("stream %s: bad socket %+v", id, ts)
+			}
+		}
+	}
+}

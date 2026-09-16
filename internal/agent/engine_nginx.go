@@ -70,6 +70,7 @@ func (n *nginxEngine) prepare() {
 	for _, d := range []string{"/run/nginx", "/var/cache/nginx", "/var/lib/nginx/tmp", n.a.o.LogDir} {
 		os.MkdirAll(d, 0o755)
 	}
+	prepareTunnelSockets(n.a.o.RunDir, EngineNginx)
 }
 
 func (n *nginxEngine) validate(dir string) (string, error) {
@@ -259,6 +260,8 @@ func parseNginxV(out string, findSO func(string) string, ipv6 bool) (string, []s
 		{"http_v2", "--with-http_v2_module"},
 		{"auth_request", "--with-http_auth_request_module"},
 		{"stub_status", "--with-http_stub_status_module"},
+		{"http_realip", "--with-http_realip_module"},
+		{"stream_realip", "--with-stream_realip_module"},
 	} {
 		if has(m.flag) {
 			mods = append(mods, m.name)

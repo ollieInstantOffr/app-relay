@@ -690,7 +690,7 @@ func TestAccessLogFormat(t *testing.T) {
 		keys = append(keys, k.(string))
 		values[k.(string)] = s
 	}
-	wantKeys := "ts host_id host method uri protocol scheme status bytes_sent request_length request_time upstream_addr upstream_status upstream_connect_time upstream_header_time upstream_response_time remote_addr user_agent referer accept x_forwarded_for request_id ssl_protocol remote_user"
+	wantKeys := "ts host_id host method uri protocol scheme status bytes_sent request_length request_time upstream_addr upstream_status upstream_connect_time upstream_header_time upstream_response_time remote_addr user_agent referer accept x_forwarded_for request_id ssl_protocol remote_user tunnel"
 	if strings.Join(keys, " ") != wantKeys {
 		t.Fatalf("keys:\n%s\nwant:\n%s", strings.Join(keys, " "), wantKeys)
 	}

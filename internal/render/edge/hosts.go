@@ -170,6 +170,7 @@ func (r *renderer) host(h *model.ProxyHost, asDefault bool) edgecfg.Host {
 		out.Locations = append(out.Locations, r.location(h, l))
 	}
 	out.PathRedirects = r.injectRedirects(h)
+	out.Tunnel = !asDefault && render.HostPublished(h)
 	return out
 }
 

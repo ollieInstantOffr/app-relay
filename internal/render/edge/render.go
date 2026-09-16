@@ -154,8 +154,16 @@ func (r *renderer) config() *edgecfg.Config {
 		Blocklist:   r.blocklist(),
 		Hosts:       []edgecfg.Host{},
 	}
+	tunnel := false
 	for _, h := range hosts {
 		cfg.Hosts = append(cfg.Hosts, r.host(h, false))
+		tunnel = tunnel || render.HostPublished(h)
+	}
+	if tunnel {
+		cfg.Tunnel = &edgecfg.TunnelIngress{
+			HTTPSocket:  r.env.TunnelHTTPSocket(agent.EngineEdge),
+			HTTPSSocket: r.env.TunnelHTTPSSocket(agent.EngineEdge),
+		}
 	}
 	cfg.Default = r.defaultServer()
 	if r.env.GeoIPCountry != "" && len(model.GeoCountries(r.snap.Hosts)) > 0 {

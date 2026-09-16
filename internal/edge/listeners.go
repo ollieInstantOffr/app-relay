@@ -41,6 +41,16 @@ type boundListener struct {
 func (s *Server) open(spec listenSpec) (*boundListener, error) {
 	bl := &boundListener{spec: spec, done: make(chan struct{})}
 	switch spec.network {
+	case "unix":
+		ln, err := listenUnix(spec.addr)
+		if err != nil {
+			return nil, err
+		}
+		bl.ln = newProxyListener(ln, func(format string, args ...any) {
+			if s.errlog.enabled(levelInfo) {
+				s.errlog.logf(levelInfo, format, args...)
+			}
+		})
 	case "tcp":
 		ln, err := net.Listen("tcp", spec.addr)
 		if err != nil {
@@ -54,7 +64,8 @@ func (s *Server) open(spec listenSpec) (*boundListener, error) {
 		}
 		bl.pc = pc
 	}
-	role := &listenerRole{kind: spec.kind, scheme: "https", port: spec.port, portStr: strconv.Itoa(spec.port)}
+	// Tunnel listeners report the gateway's public port (80/443).
+	role := &listenerRole{kind: spec.kind, scheme: "https", port: spec.port, portStr: strconv.Itoa(spec.port), tunnel: spec.network == "unix"}
 	errLog := log.New(stdlibWriter{s.errlog}, "", 0)
 	switch spec.kind {
 	case "http", "https":
@@ -69,9 +80,12 @@ func (s *Server) open(spec listenSpec) (*boundListener, error) {
 			ErrorLog:          errLog,
 			ConnState:         s.metrics.connState,
 		}
+		if role.tunnel {
+			bl.http.ConnContext = tunnelConnContext
+		}
 		if spec.kind == "https" {
 			bl.tls = true
-			bl.http.TLSConfig = s.baseTLS()
+			bl.http.TLSConfig = s.baseTLS(role.tunnel)
 			bl.http.Protocols = new(http.Protocols)
 			bl.http.Protocols.SetHTTP1(true)
 			bl.http.Protocols.SetHTTP2(true)
@@ -80,7 +94,7 @@ func (s *Server) open(spec listenSpec) (*boundListener, error) {
 		role.quic = true
 		bl.h3 = &http3.Server{
 			Handler:        &listenerHandler{srv: s, role: role},
-			TLSConfig:      s.baseTLS(),
+			TLSConfig:      s.baseTLS(false),
 			MaxHeaderBytes: maxHeaderBytes,
 			IdleTimeout:    keepAliveTimeout,
 		}
@@ -90,7 +104,7 @@ func (s *Server) open(spec listenSpec) (*boundListener, error) {
 		bl.stream.Store(spec.stream)
 		onDone := s.logStream
 		if bl.ln != nil {
-			bl.tcp = newTCPStream(bl.ln, &bl.stream, onDone)
+			bl.tcp = newTCPStream(bl.ln, spec.port, &bl.stream, onDone)
 		} else {
 			bl.udp = newUDPStream(bl.pc, &bl.stream, onDone)
 		}
@@ -150,12 +164,31 @@ func (bl *boundListener) shutdown(ctx context.Context) {
 
 // baseTLS is the listener config; the per-server config comes from
 // GetConfigForClient.
-func (s *Server) baseTLS() *tls.Config {
+func (s *Server) baseTLS(tunnel bool) *tls.Config {
+	get := s.getConfigForClient
+	if tunnel {
+		get = s.getTunnelConfigForClient
+	}
 	return &tls.Config{
 		MinVersion:         tls.VersionTLS10,
 		NextProtos:         alpnH2,
-		GetConfigForClient: s.getConfigForClient,
+		GetConfigForClient: get,
 	}
+}
+
+var errUnpublishedName = errors.New("tls: server name is not published through a tunnel")
+
+// getTunnelConfigForClient is getConfigForClient for the tunnel ingress:
+// names that are not published fail the handshake.
+func (s *Server) getTunnelConfigForClient(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+	rt := s.table.Load()
+	if rt == nil {
+		return nil, errors.New("not serving")
+	}
+	if c := rt.tunnelHTTPS.lookup(hostKey(toLowerASCII(hello.ServerName))).tlsConf; c != nil {
+		return c, nil
+	}
+	return nil, errUnpublishedName
 }
 
 // getConfigForClient selects the HTTPS server for the SNI name exactly like

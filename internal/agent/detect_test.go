@@ -15,7 +15,7 @@ configure arguments: --prefix=/var/lib/nginx --modules-path=/usr/lib/nginx/modul
 func TestParseNginxV(t *testing.T) {
 	none := func(string) string { return "" }
 	v, mods, dyn := parseNginxV(officialNginxV, none, false)
-	if v != "1.30.4" || strings.Join(mods, ",") != "http_v3,http_v2,auth_request,stub_status,stream" || dyn != nil {
+	if v != "1.30.4" || strings.Join(mods, ",") != "http_v3,http_v2,auth_request,stub_status,stream_realip,stream" || dyn != nil {
 		t.Fatalf("official: %s %v %v", v, mods, dyn)
 	}
 

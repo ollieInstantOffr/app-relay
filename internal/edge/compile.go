@@ -68,17 +68,20 @@ func resolveRelease(path string) (release, error) {
 // runtime is one compiled, immutable configuration. The server swaps it
 // atomically; in-flight requests keep the runtime they started with.
 type runtime struct {
-	cfg        *Config
-	hash       string
-	http       serverSet
-	https      serverSet
-	blocklist  *prefixMap[struct{}]
-	geo        *geoStore // nil without geoipDatabase
-	acmeRoot   string
-	pages      map[int][]byte // custom error pages
-	httpsPort  int
-	cacheBytes int64
-	listeners  []listenSpec
+	cfg   *Config
+	hash  string
+	http  serverSet
+	https serverSet
+	// tunnelHTTP / tunnelHTTPS route the tunnel ingress: published hosts only.
+	tunnelHTTP  serverSet
+	tunnelHTTPS serverSet
+	blocklist   *prefixMap[struct{}]
+	geo         *geoStore // nil without geoipDatabase
+	acmeRoot    string
+	pages       map[int][]byte // custom error pages
+	httpsPort   int
+	cacheBytes  int64
+	listeners   []listenSpec
 
 	certs      map[string]*certEntry
 	limiters   map[string]*rateLimiter
@@ -224,12 +227,14 @@ func compile(cfg *Config, baseDir string, env compileEnv) (*runtime, error) {
 		env.geo = newGeoStore()
 	}
 	c := &compiler{cfg: cfg, baseDir: baseDir, env: env, lists: map[string]*accessRT{}, rt: &runtime{
-		cfg:        cfg,
-		limiters:   map[string]*rateLimiter{},
-		basics:     map[string]*basicAuth{},
-		transports: map[transportKey]*upstreamTransport{},
-		http:       newServerSet(),
-		https:      newServerSet(),
+		cfg:         cfg,
+		limiters:    map[string]*rateLimiter{},
+		basics:      map[string]*basicAuth{},
+		transports:  map[transportKey]*upstreamTransport{},
+		http:        newServerSet(),
+		https:       newServerSet(),
+		tunnelHTTP:  newServerSet(),
+		tunnelHTTPS: newServerSet(),
 	}}
 	c.globals()
 	c.prepareCerts()
@@ -671,10 +676,15 @@ func (c *compiler) servers() {
 		if h.NoIndex {
 			common = append(common, addHeader("X-Robots-Tag", "noindex, nofollow"))
 		}
+		var plain *vserver
 		if h.Cert != nil && h.ForceHTTPS {
-			rt.http.addAll(h.Domains, &vserver{kind: kindHTTPSRedirect, name: name, hostID: h.ID, acme: true, metrics: m})
+			plain = &vserver{kind: kindHTTPSRedirect, name: name, hostID: h.ID, acme: true, metrics: m}
 		} else {
-			rt.http.addAll(h.Domains, &vserver{kind: kindHost, name: name, hostID: h.ID, host: hr, acme: true, headers: common, metrics: m})
+			plain = &vserver{kind: kindHost, name: name, hostID: h.ID, host: hr, acme: true, headers: common, metrics: m}
+		}
+		rt.http.addAll(h.Domains, plain)
+		if h.Tunnel {
+			rt.tunnelHTTP.addAll(h.Domains, plain)
 		}
 		if h.Cert != nil {
 			profile, err := profileFor(h.CipherProfile, cfg.TLSProfile)
@@ -690,8 +700,20 @@ func (c *compiler) servers() {
 				headers = append(headers, addHeader("Alt-Svc", altSvc))
 			}
 			headers = append(headers, common...)
-			rt.https.addAll(h.Domains, &vserver{kind: kindHost, name: name, hostID: h.ID, host: hr, acme: !h.ForceHTTPS, headers: headers, metrics: m,
-				tlsConf: handshakeConfig(profile, h.HTTP2, c.certFunc(h.Cert))})
+			vs := &vserver{kind: kindHost, name: name, hostID: h.ID, host: hr, acme: !h.ForceHTTPS, headers: headers, metrics: m,
+				tlsConf: handshakeConfig(profile, h.HTTP2, c.certFunc(h.Cert))}
+			rt.https.addAll(h.Domains, vs)
+			if h.Tunnel {
+				// Gateways don't carry HTTP/3: no Alt-Svc through a tunnel.
+				tv := *vs
+				tv.headers = nil
+				for _, kv := range headers {
+					if kv.name != "Alt-Svc" {
+						tv.headers = append(tv.headers, kv)
+					}
+				}
+				rt.tunnelHTTPS.addAll(h.Domains, &tv)
+			}
 		}
 	}
 	defProfile, _ := profileFor(cfg.TLSProfile)
@@ -752,6 +774,9 @@ func (c *compiler) servers() {
 	httpsDef := *def
 	httpsDef.tlsConf = handshakeConfig(defProfile, true, c.certFunc(d.Cert))
 	rt.http.def, rt.https.def = def, &httpsDef
+	// Unpublished names through a tunnel: close (no ACME, no TLS handshake).
+	refuse := &vserver{kind: kindDefault, name: "_", action: "close", metrics: c.env.metrics.host("")}
+	rt.tunnelHTTP.def, rt.tunnelHTTPS.def = refuse, refuse
 }
 
 // ---------------------------------------------------------------- listeners
@@ -761,7 +786,7 @@ func (c *compiler) servers() {
 type listenSpec struct {
 	key     string
 	kind    string // http | https | quic | status | stream
-	network string // tcp | udp
+	network string // tcp | udp | unix (tunnel ingress, PROXY protocol)
 	addr    string
 	host    string // bind host, "" = all interfaces
 	port    int
@@ -779,6 +804,15 @@ func (c *compiler) listeners() {
 	add := func(kind, network, host string, port int, label string, st *streamRT) {
 		addr := net.JoinHostPort(host, strconv.Itoa(port))
 		specs = append(specs, listenSpec{key: kind + "|" + network + "|" + addr, kind: kind, network: network, addr: addr, host: host, port: port, stream: st, label: label})
+	}
+	var unix []listenSpec
+	if t := cfg.Tunnel; t != nil {
+		if t.HTTPSocket != "" {
+			unix = append(unix, listenSpec{key: "http|unix|" + t.HTTPSocket, kind: "http", network: "unix", addr: t.HTTPSocket, port: 80, label: "tunnel HTTP socket"})
+		}
+		if t.HTTPSSocket != "" {
+			unix = append(unix, listenSpec{key: "https|unix|" + t.HTTPSSocket, kind: "https", network: "unix", addr: t.HTTPSSocket, port: 443, label: "tunnel HTTPS socket"})
+		}
 	}
 	bind := c.env.bindHost
 	if cfg.HTTPPort > 0 {
@@ -819,6 +853,14 @@ func (c *compiler) listeners() {
 				add("stream", "udp", host, p, fmt.Sprintf("%s port %d/udp", where, p), spec)
 			}
 		}
+		for _, ts := range st.TunnelSockets {
+			if ts.Port < st.ListenLo || ts.Port > st.ListenHi || ts.Socket == "" {
+				c.fail("%s: tunnel socket for port %d is outside the listen ports", where, ts.Port)
+				continue
+			}
+			unix = append(unix, listenSpec{key: "stream|unix|" + ts.Socket, kind: "stream", network: "unix", addr: ts.Socket, port: ts.Port, stream: spec,
+				label: fmt.Sprintf("%s port %d tunnel socket", where, ts.Port)})
+		}
 	}
 	type bindKey struct {
 		network string
@@ -835,7 +877,14 @@ func (c *compiler) listeners() {
 		}
 		seen[bk] = append(seen[bk], i)
 	}
-	c.rt.listeners = specs
+	paths := map[string]string{}
+	for _, s := range unix {
+		if o, dup := paths[s.addr]; dup {
+			c.fail("%s conflicts with %s", s.label, o)
+		}
+		paths[s.addr] = s.label
+	}
+	c.rt.listeners = append(specs, unix...)
 }
 
 func (c *compiler) stream(st *Stream, where string) *streamRT {

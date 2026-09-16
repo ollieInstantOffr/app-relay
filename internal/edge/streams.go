@@ -47,6 +47,7 @@ type StreamStats struct {
 	ConnectTime time.Duration
 	Err         error
 	ListenPort  int
+	Tunnel      string // gateway id for connections that came through a tunnel
 }
 
 // status mirrors nginx's stream $status: 200 ok, 502 upstream unreachable,
@@ -65,6 +66,7 @@ type streamDone func(spec *streamRT, st StreamStats)
 
 type tcpStream struct {
 	ln     net.Listener
+	port   int
 	spec   *atomic.Pointer[streamRT]
 	onDone streamDone
 
@@ -74,12 +76,12 @@ type tcpStream struct {
 	closed bool
 }
 
-func newTCPStream(ln net.Listener, spec *atomic.Pointer[streamRT], onDone streamDone) *tcpStream {
-	return &tcpStream{ln: ln, spec: spec, onDone: onDone, conns: map[net.Conn]struct{}{}}
+func newTCPStream(ln net.Listener, port int, spec *atomic.Pointer[streamRT], onDone streamDone) *tcpStream {
+	return &tcpStream{ln: ln, port: port, spec: spec, onDone: onDone, conns: map[net.Conn]struct{}{}}
 }
 
 func (t *tcpStream) serve() {
-	port := t.ln.Addr().(*net.TCPAddr).Port
+	port := t.port
 	for {
 		c, err := t.ln.Accept()
 		if err != nil {
@@ -114,7 +116,7 @@ func (t *tcpStream) track(c net.Conn, add bool) bool {
 func (t *tcpStream) handle(client net.Conn, port int) {
 	spec := t.spec.Load()
 	start := time.Now()
-	st := StreamStats{Proto: "tcp", Client: client.RemoteAddr(), ListenPort: port}
+	st := StreamStats{Proto: "tcp", Client: client.RemoteAddr(), ListenPort: port, Tunnel: tunnelOf(client)}
 	defer func() {
 		st.Duration = time.Since(start)
 		if t.onDone != nil {

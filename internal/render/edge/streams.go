@@ -9,8 +9,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/instantoffr/relay/internal/agent"
 	edgecfg "github.com/instantoffr/relay/internal/edge"
 	"github.com/instantoffr/relay/internal/model"
+	"github.com/instantoffr/relay/internal/render"
 )
 
 const (
@@ -113,6 +115,15 @@ func (r *renderer) stream(s *model.Stream) (edgecfg.Stream, bool) {
 		st.TCP, st.UDP = true, true
 	default:
 		st.TCP = true
+	}
+	if render.StreamPublished(s) {
+		if hi-lo > 1000 {
+			r.fail("stream %s: tunnels publish at most 1000 ports per stream", s.Name)
+			return edgecfg.Stream{}, false
+		}
+		for p := lo; p <= hi; p++ {
+			st.TunnelSockets = append(st.TunnelSockets, edgecfg.TunnelSocket{Port: p, Socket: r.env.TunnelStreamSocket(agent.EngineEdge, p)})
+		}
 	}
 	return st, true
 }

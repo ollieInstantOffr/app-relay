@@ -12,6 +12,10 @@
 //	streams/<name>.conf              stream {} servers
 //	htpasswd/<accessListId>          basic-auth users (bcrypt)
 //
+// Hosts and streams published through a tunnel gateway also listen on unix
+// sockets in /run/relay/tunnel (see render.Env.TunnelDir) with the PROXY
+// protocol; only they are reachable there.
+//
 // Output is deterministic for a given snapshot and env so config hashes are stable.
 package nginx
 
@@ -126,7 +130,11 @@ type renderer struct {
 	backends  map[string]*model.Backend
 	httpPort  int
 	httpsPort int
-	errs      []string
+	// tunnelHosts / tunnelStreams: some enabled host / stream is published
+	// through a tunnel gateway.
+	tunnelHosts   bool
+	tunnelStreams bool
+	errs          []string
 }
 
 func newRenderer(snap *model.Snapshot, env render.Env) *renderer {
@@ -156,6 +164,16 @@ func newRenderer(snap *model.Snapshot, env render.Env) *renderer {
 	}
 	for i := range snap.Backends {
 		r.backends[snap.Backends[i].ID] = &snap.Backends[i]
+	}
+	for i := range snap.Hosts {
+		if h := &snap.Hosts[i]; h.Enabled && len(h.Domains) > 0 && render.HostPublished(h) {
+			r.tunnelHosts = true
+		}
+	}
+	for i := range snap.Streams {
+		if st := &snap.Streams[i]; st.Enabled && render.StreamPublished(st) {
+			r.tunnelStreams = true
+		}
 	}
 	return r
 }
@@ -194,7 +212,13 @@ func (r *renderer) all() (agent.Files, error) {
 	files := agent.Files{}
 	hosts := r.enabledHosts()
 
-	files["snippets/proxy-headers.conf"] = proxyHeadersSnippet
+	if r.tunnelHosts && !r.mod("http_realip") {
+		r.fail("publishing hosts through a tunnel needs the nginx realip module, which this nginx build does not provide")
+	}
+	if r.tunnelStreams && r.mod("stream") && !r.mod("stream_realip") {
+		r.fail("publishing streams through a tunnel needs the nginx stream realip module, which this nginx build does not provide")
+	}
+	files["snippets/proxy-headers.conf"] = r.proxyHeaders()
 	files["snippets/acme-challenge.conf"] = r.acmeSnippet()
 	files["snippets/block-exploits.conf"] = blockExploitsSnippet
 	for _, p := range []string{"modern", "intermediate", "old"} {
@@ -394,6 +418,7 @@ func (r *renderer) mainConf(streamServers bool) string {
 	w.raw(HTTPLogFormat)
 	w.l("access_log %s relay_json;", r.logPath(AccessLogFile))
 	w.l("")
+	r.tunnelHTTPMaps(w)
 	w.open("map $http_upgrade $connection_upgrade")
 	w.l("default upgrade;")
 	w.l("'' close;")
@@ -410,6 +435,16 @@ func (r *renderer) mainConf(streamServers bool) string {
 		w.open("stream")
 		w.raw(StreamLogFormat)
 		w.l("access_log %s relay_stream_json;", r.logPath(StreamAccessLogFile))
+		w.l("")
+		if r.tunnelStreams {
+			w.l("# Tunnel gateway id (PROXY protocol TLV) of connections that came through a tunnel.")
+			w.open("map $proxy_protocol_tlv_0xe0 $relay_tunnel")
+			w.l("default $proxy_protocol_tlv_0xe0;")
+		} else {
+			w.open("map $protocol $relay_tunnel")
+			w.l("default \"\";")
+		}
+		w.close()
 		if !streamServers {
 			// The log format references $relay_stream_id; stream servers declare
 			// it with `set`, so without any server it must exist another way.
@@ -437,6 +472,59 @@ func (r *renderer) logPath(name string) string {
 }
 
 // ---------------------------------------------------------------- snippets
+
+// proxyHeaders is the proxy header snippet. Through a tunnel the connection
+// arrives on a unix socket, so the public port comes from a map instead of
+// $server_port.
+func (r *renderer) proxyHeaders() string {
+	if !r.tunnelHosts {
+		return proxyHeadersSnippet
+	}
+	return strings.Replace(proxyHeadersSnippet, "X-Forwarded-Port $server_port;", "X-Forwarded-Port $relay_forwarded_port;", 1)
+}
+
+// tunnelHTTPMaps emits the http-level settings for tunnel ingress: the real
+// client address from the PROXY protocol header, the public port and
+// $relay_tunnel for the access log.
+func (r *renderer) tunnelHTTPMaps(w *writer) {
+	if !r.tunnelHosts {
+		w.open("map $host $relay_tunnel")
+		w.l("default \"\";")
+		w.close()
+		w.l("")
+		return
+	}
+	w.l("# Tunnel ingress: connections on the tunnel sockets carry the client address")
+	w.l("# in a PROXY protocol header written by Relay's tunnel engine.")
+	w.l("set_real_ip_from unix:;")
+	w.l("real_ip_header proxy_protocol;")
+	w.open("map $proxy_protocol_tlv_0xe0 $relay_tunnel")
+	w.l("default $proxy_protocol_tlv_0xe0;")
+	w.close()
+	w.open("map $scheme $relay_tunnel_port")
+	w.l("https 443;")
+	w.l("default 80;")
+	w.close()
+	w.open("map $proxy_protocol_addr $relay_forwarded_port")
+	w.l("\"\" $server_port;")
+	w.l("default $relay_tunnel_port;")
+	w.close()
+	if r.httpsPort != 443 {
+		// Redirects through a tunnel go to the gateway's port 443.
+		w.open("map $proxy_protocol_addr $relay_https_port")
+		w.l("\"\" \":%d\";", r.httpsPort)
+		w.l("default \"\";")
+		w.close()
+	}
+	if r.quicEnabled() {
+		// Gateways don't carry HTTP/3: don't advertise it through a tunnel.
+		w.open("map $proxy_protocol_addr $relay_alt_svc")
+		w.l("\"\" 'h3=\":%d\"; ma=86400';", r.httpsPort)
+		w.l("default \"\";")
+		w.close()
+	}
+	w.l("")
+}
 
 const proxyHeadersSnippet = header + `proxy_http_version 1.1;
 proxy_set_header Host $host;
@@ -742,6 +830,24 @@ func (r *renderer) listenHTTPS(w *writer, def, quic bool) {
 	}
 }
 
+// listenTunnelHTTP / listenTunnelHTTPS add the tunnel ingress sockets to a
+// published host's server.
+func (r *renderer) listenTunnelHTTP(w *writer, def bool) {
+	suffix := ""
+	if def {
+		suffix = " default_server"
+	}
+	w.l("listen unix:%s proxy_protocol%s;", r.env.TunnelHTTPSocket(agent.EngineNginx), suffix)
+}
+
+func (r *renderer) listenTunnelHTTPS(w *writer, def bool) {
+	suffix := ""
+	if def {
+		suffix = " default_server"
+	}
+	w.l("listen unix:%s ssl proxy_protocol%s;", r.env.TunnelHTTPSSocket(agent.EngineNginx), suffix)
+}
+
 func (r *renderer) tlsDirectives(w *writer, certID string, c *model.Certificate, profile string, http2 bool) {
 	if http2 {
 		w.l("http2 on;")
@@ -825,6 +931,22 @@ func (r *renderer) defaultConf() string {
 	}
 	w.close()
 
+	if r.tunnelHosts {
+		w.l("")
+		w.l("# Tunnel ingress default: requests through a tunnel for a domain that is not")
+		w.l("# published there are refused.")
+		w.open("server")
+		r.listenTunnelHTTP(w, true)
+		r.listenTunnelHTTPS(w, true)
+		w.l("server_name _;")
+		w.l("set $relay_host_id \"\";")
+		w.l("ssl_reject_handshake on;")
+		w.open("location /")
+		w.l("return 444;")
+		w.close()
+		w.close()
+	}
+
 	w.l("")
 	w.l("# Local stub_status endpoint for Relay's metrics collector.")
 	w.open("server")
@@ -867,9 +989,16 @@ func (r *renderer) hostFile(h *model.ProxyHost) string {
 	if h.CertificateID != "" && cert == nil {
 		w.l("# %s: serving HTTP only until it is valid", comment(why))
 	}
+	published := render.HostPublished(h)
+	if published {
+		w.l("# Published through tunnel gateway %s", comment(h.TunnelGatewayID))
+	}
 	if cert != nil && h.ForceHTTPS {
 		w.open("server")
 		r.listenHTTP(w, false)
+		if published {
+			r.listenTunnelHTTP(w, false)
+		}
 		w.l("server_name %s;", names)
 		w.l("set $relay_host_id %s;", q(h.ID))
 		r.blocked(w)
@@ -883,10 +1012,16 @@ func (r *renderer) hostFile(h *model.ProxyHost) string {
 	w.open("server")
 	if cert == nil || !h.ForceHTTPS {
 		r.listenHTTP(w, false)
+		if published {
+			r.listenTunnelHTTP(w, false)
+		}
 	}
 	quic := cert != nil && r.http3For(h)
 	if cert != nil {
 		r.listenHTTPS(w, false, quic)
+		if published {
+			r.listenTunnelHTTPS(w, false)
+		}
 	}
 	w.l("server_name %s;", names)
 	w.l("set $relay_host_id %s;", q(h.ID))
@@ -895,7 +1030,9 @@ func (r *renderer) hostFile(h *model.ProxyHost) string {
 		if v := r.hstsHeader(h.HSTS); v != "" {
 			w.l("add_header Strict-Transport-Security %s always;", q(v))
 		}
-		if quic {
+		if quic && published {
+			w.l("add_header Alt-Svc $relay_alt_svc always;")
+		} else if quic {
 			w.l("add_header Alt-Svc 'h3=\":%d\"; ma=86400' always;", r.httpsPort)
 		}
 	}
@@ -910,6 +1047,9 @@ func (r *renderer) hostFile(h *model.ProxyHost) string {
 func (r *renderer) httpsRedirect() string {
 	if r.httpsPort == 443 {
 		return "https://$host$request_uri"
+	}
+	if r.tunnelHosts {
+		return "https://$host$relay_https_port$request_uri"
 	}
 	return fmt.Sprintf("https://$host:%d$request_uri", r.httpsPort)
 }
@@ -1663,6 +1803,28 @@ func (r *renderer) streamFile(s *model.Stream) string {
 			listen(strconv.Itoa(p))
 			common()
 			w.l("proxy_pass %s;", hostPort(fwdHost, strconv.Itoa(flo+(p-lo))))
+			w.close()
+		}
+	}
+
+	if render.StreamPublished(s) {
+		// One server per public port: $server_port is empty on a unix socket.
+		if hi-lo > 1000 {
+			r.fail("stream %s: tunnels publish at most 1000 ports per stream", s.Name)
+			return w.String()
+		}
+		w.l("")
+		w.l("# Published through tunnel gateway %s (TCP)", comment(s.TunnelGatewayID))
+		for p := lo; p <= hi; p++ {
+			target := flo
+			if flo != fhi {
+				target = flo + (p - lo)
+			}
+			w.open("server")
+			w.l("listen unix:%s proxy_protocol;", r.env.TunnelStreamSocket(agent.EngineNginx, p))
+			w.l("set_real_ip_from unix:;")
+			common()
+			w.l("proxy_pass %s;", hostPort(fwdHost, strconv.Itoa(target)))
 			w.close()
 		}
 	}

@@ -3,7 +3,7 @@ package nginx
 // Access log contract between the nginx renderer (engine slice) and the log
 // ingester (observe slice). Every http server block must `set $relay_host_id
 // <host id>;` (empty for the default server); every stream server block must
-// `set $relay_stream_id <stream id>;`.
+// `set $relay_stream_id <stream id>;`. $relay_tunnel is defined by nginx.conf.
 
 const (
 	AccessLogFile       = "access.log"        // under Env.LogDir
@@ -36,7 +36,8 @@ const HTTPLogFormat = `log_format relay_json escape=json '{'
   '"x_forwarded_for":"$http_x_forwarded_for",'
   '"request_id":"$request_id",'
   '"ssl_protocol":"$ssl_protocol",'
-  '"remote_user":"$remote_user"'
+  '"remote_user":"$remote_user",'
+  '"tunnel":"$relay_tunnel"'
 '}';`
 
 // StreamLogFormat is emitted in the stream {} block.
@@ -51,7 +52,8 @@ const StreamLogFormat = `log_format relay_stream_json escape=json '{'
   '"bytes_sent":"$bytes_sent",'
   '"bytes_received":"$bytes_received",'
   '"session_time":"$session_time",'
-  '"upstream_connect_time":"$upstream_connect_time"'
+  '"upstream_connect_time":"$upstream_connect_time",'
+  '"tunnel":"$relay_tunnel"'
 '}';`
 
 // AccessLogRecord mirrors HTTPLogFormat. All values are strings as emitted;
@@ -81,6 +83,7 @@ type AccessLogRecord struct {
 	RequestID            string `json:"request_id"`
 	SSLProtocol          string `json:"ssl_protocol"`
 	RemoteUser           string `json:"remote_user"`
+	Tunnel               string `json:"tunnel"` // tunnel gateway id, "" for direct connections
 }
 
 type StreamLogRecord struct {
@@ -95,4 +98,5 @@ type StreamLogRecord struct {
 	BytesReceived       string `json:"bytes_received"`
 	SessionTime         string `json:"session_time"`
 	UpstreamConnectTime string `json:"upstream_connect_time"`
+	Tunnel              string `json:"tunnel"` // tunnel gateway id, "" for direct connections
 }
