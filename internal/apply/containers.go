@@ -77,6 +77,9 @@ func (s *Service) engineIdle(ctx context.Context, engine, selected string, live 
 	if agent.IsProxyEngine(engine) {
 		return engine != selected
 	}
+	if engine == agent.EngineTunnel {
+		return live == nil || !live.TunnelRunning || st.Stopped || s.stoppedEngines(ctx)[engine]
+	}
 	return live == nil || rowLBEngine(live) != engine || !live.HAProxyRunning || st.Stopped || s.stoppedEngines(ctx)[engine]
 }
 
@@ -88,7 +91,7 @@ func (s *Service) manageContainers(ctx context.Context, st *core.EnginesStatus, 
 	if ctrs == nil || st == nil || s.anySwitching() {
 		return
 	}
-	states := map[string]core.EngineState{agent.EngineNginx: st.Nginx, agent.EngineEdge: st.Edge, agent.EngineHAProxy: st.HAProxy, agent.EngineBalancer: st.Balancer}
+	states := map[string]core.EngineState{agent.EngineNginx: st.Nginx, agent.EngineEdge: st.Edge, agent.EngineHAProxy: st.HAProxy, agent.EngineBalancer: st.Balancer, agent.EngineTunnel: st.Tunnel}
 	if ps := states[selected]; !ps.Reachable && ctrs.ContainerState(ctx, selected) == "stopped" {
 		s.log.Info("the selected proxy engine's container is stopped, starting it", "engine", selected)
 		if err := ctrs.StartContainer(ctx, selected); err != nil {
@@ -96,7 +99,7 @@ func (s *Service) manageContainers(ctx context.Context, st *core.EnginesStatus, 
 		}
 	}
 	lbSelected := rowLBEngine(live)
-	for _, engine := range []string{agent.EngineNginx, agent.EngineEdge, agent.EngineHAProxy, agent.EngineBalancer} {
+	for _, engine := range []string{agent.EngineNginx, agent.EngineEdge, agent.EngineHAProxy, agent.EngineBalancer, agent.EngineTunnel} {
 		es := states[engine]
 		if engine == selected || !es.Reachable || (es.Running && !stoppedNow[engine]) || !s.engineIdle(ctx, engine, selected, live, es) {
 			continue
@@ -105,6 +108,10 @@ func (s *Service) manageContainers(ctx context.Context, st *core.EnginesStatus, 
 		switch {
 		case agent.IsProxyEngine(engine):
 			reason = engineLabel(selected) + " is the selected proxy engine"
+		case engine == agent.EngineTunnel:
+			if live != nil && !live.TunnelRunning {
+				reason = "nothing is published through a tunnel"
+			}
 		case live != nil && engine != lbSelected:
 			reason = engineLabel(lbSelected) + " is the selected load balancer engine"
 		case live != nil && !live.HAProxyRunning:
@@ -126,7 +133,7 @@ func (s *Service) annotateContainers(ctx context.Context, out *core.EnginesStatu
 	for _, e := range []struct {
 		name string
 		st   *core.EngineState
-	}{{agent.EngineNginx, &out.Nginx}, {agent.EngineEdge, &out.Edge}, {agent.EngineHAProxy, &out.HAProxy}, {agent.EngineBalancer, &out.Balancer}} {
+	}{{agent.EngineNginx, &out.Nginx}, {agent.EngineEdge, &out.Edge}, {agent.EngineHAProxy, &out.HAProxy}, {agent.EngineBalancer, &out.Balancer}, {agent.EngineTunnel, &out.Tunnel}} {
 		if e.st.Reachable {
 			continue
 		}
@@ -140,6 +147,10 @@ func (s *Service) annotateContainers(ctx context.Context, out *core.EnginesStatu
 			continue
 		}
 		live, _ := s.app.Store.LiveVersion(ctx, false)
+		if e.name == agent.EngineTunnel {
+			e.st.Standby = live == nil || !live.TunnelRunning || s.stoppedEngines(ctx)[e.name]
+			continue
+		}
 		e.st.Standby = live == nil || !live.HAProxyRunning || s.stoppedEngines(ctx)[e.name] || e.name != out.LB
 	}
 }
@@ -151,7 +162,7 @@ func (s *Service) annotateContainers(ctx context.Context, out *core.EnginesStatu
 func (s *Service) EngineAction(ctx context.Context, engine, action string) (*agent.ActionResponse, error) {
 	c := s.app.Client(engine)
 	if c == nil {
-		return nil, httpx.Errorf(http.StatusNotFound, "not_found", "unknown engine (nginx | haproxy | edge | balancer)")
+		return nil, httpx.Errorf(http.StatusNotFound, "not_found", "unknown engine (nginx | haproxy | edge | balancer | tunnel)")
 	}
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
@@ -182,7 +193,7 @@ func (s *Service) EngineAction(ctx context.Context, engine, action string) (*age
 		resp, err := c.Stop(ctx)
 		if err != nil {
 			if containerStopped() {
-				if agent.IsLBEngine(engine) {
+				if agent.IsLBEngine(engine) || engine == agent.EngineTunnel {
 					s.setStoppedEngine(ctx, engine, true)
 				}
 				return &agent.ActionResponse{OK: true, Output: "already stopped"}, nil
@@ -192,10 +203,10 @@ func (s *Service) EngineAction(ctx context.Context, engine, action string) (*age
 		if !resp.OK {
 			return resp, nil
 		}
-		if agent.IsLBEngine(engine) {
+		if agent.IsLBEngine(engine) || engine == agent.EngineTunnel {
 			s.setStoppedEngine(ctx, engine, true)
 		}
-		if ctrs != nil && (agent.IsLBEngine(engine) || engine != selected) {
+		if ctrs != nil && (agent.IsLBEngine(engine) || engine == agent.EngineTunnel || engine != selected) {
 			if err := ctrs.StopContainer(ctx, engine, "stopped by "+core.ActorFrom(ctx).Label()); err != nil {
 				s.log.Warn("stop "+engine+" container", "err", err)
 			}

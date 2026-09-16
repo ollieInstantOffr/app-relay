@@ -107,11 +107,11 @@ func edgeFiles(content string) Files {
 }
 
 func TestEngineRegistryAndPolicy(t *testing.T) {
-	if got := strings.Join(EngineNames(), ","); got != "balancer,edge,haproxy,nginx" {
+	if got := strings.Join(EngineNames(), ","); got != "balancer,edge,haproxy,nginx,tunnel" {
 		t.Fatalf("engines = %s", got)
 	}
 	a := &Agent{}
-	for name, want := range map[string][2]bool{EngineNginx: {true, true}, EngineEdge: {true, true}, EngineHAProxy: {false, false}, EngineBalancer: {false, false}} {
+	for name, want := range map[string][2]bool{EngineNginx: {true, true}, EngineEdge: {true, true}, EngineHAProxy: {false, false}, EngineBalancer: {false, false}, EngineTunnel: {false, false}} {
 		e := engineFactories[name](a)
 		if e.alwaysOn() != want[0] || e.proxy() != want[1] {
 			t.Errorf("%s: alwaysOn=%v proxy=%v", name, e.alwaysOn(), e.proxy())

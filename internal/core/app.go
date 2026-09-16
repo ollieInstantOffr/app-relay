@@ -67,6 +67,8 @@ type App struct {
 	Edge    *agent.Client // Relay Edge (the proxy engine alternative to nginx)
 	// Balancer is Relay Balancer (the load balancer alternative to HAProxy).
 	Balancer *agent.Client
+	// Tunnel is the tunnel engine (dials tunnel gateways).
+	Tunnel *agent.Client
 
 	Auth     Auth
 	Engine   Engine
@@ -124,6 +126,7 @@ func New(cfg Config, st *store.Store, bus *events.Bus, log *slog.Logger) *App {
 		HAProxy:  agent.NewClient(agent.EngineHAProxy, agent.SocketPath(cfg.RunDir, agent.EngineHAProxy)),
 		Edge:     agent.NewClient(agent.EngineEdge, agent.SocketPath(cfg.RunDir, agent.EngineEdge)),
 		Balancer: agent.NewClient(agent.EngineBalancer, agent.SocketPath(cfg.RunDir, agent.EngineBalancer)),
+		Tunnel:   agent.NewClient(agent.EngineTunnel, agent.SocketPath(cfg.RunDir, agent.EngineTunnel)),
 	}
 }
 

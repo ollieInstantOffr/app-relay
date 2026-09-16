@@ -82,6 +82,8 @@ type EnginesStatus struct {
 	Edge    EngineState `json:"edge"`
 	// Balancer is Relay Balancer (the load balancer alternative to HAProxy).
 	Balancer EngineState `json:"balancer"`
+	// Tunnel is the tunnel engine (runs while hosts or streams are published through a tunnel).
+	Tunnel EngineState `json:"tunnel"`
 	// Proxy is the active proxy engine: nginx | edge.
 	Proxy string `json:"proxy"`
 	// LB is the active load balancer engine: haproxy | balancer.

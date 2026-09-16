@@ -42,6 +42,7 @@ var engineFactories = map[string]func(a *Agent) engine{
 	EngineHAProxy:  func(a *Agent) engine { return &haproxyEngine{a: a} },
 	EngineEdge:     func(a *Agent) engine { return &edgeEngine{a: a} },
 	EngineBalancer: func(a *Agent) engine { return &balancerEngine{a: a} },
+	EngineTunnel:   func(a *Agent) engine { return &tunnelEngine{a: a} },
 }
 
 // EngineNames lists the registered engines, sorted.

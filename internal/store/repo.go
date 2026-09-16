@@ -50,6 +50,9 @@ func (s *Store) Backends() *Repo[model.Backend, *model.Backend] {
 func (s *Store) Frontends() *Repo[model.Frontend, *model.Frontend] {
 	return NewRepo[model.Frontend](s, model.KindFrontend)
 }
+func (s *Store) Gateways() *Repo[model.Gateway, *model.Gateway] {
+	return NewRepo[model.Gateway](s, model.KindGateway)
+}
 
 func (r *Repo[T, PT]) Kind() string { return r.kind }
 

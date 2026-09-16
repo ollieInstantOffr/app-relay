@@ -141,6 +141,8 @@ type proxySwap struct {
 	lbFromRun   bool // it ran the live release
 	lbOldStop   bool // the previous load balancer engine was asked to stop
 	lbStarted   bool // the new load balancer engine was asked to apply its release
+
+	tunnelChanged bool // the tunnel engine got the new release
 }
 
 func engineLabel(engine string) string { return core.ProxyEngineLabel(engine) }

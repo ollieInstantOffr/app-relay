@@ -26,6 +26,8 @@ func ProxyEngineLabel(engine string) string {
 		return "HAProxy"
 	case agent.EngineBalancer:
 		return "Relay Balancer"
+	case agent.EngineTunnel:
+		return "Tunnel engine"
 	}
 	return "nginx"
 }
@@ -83,6 +85,8 @@ func (a *App) Client(engine string) *agent.Client {
 		return a.Edge
 	case agent.EngineBalancer:
 		return a.Balancer
+	case agent.EngineTunnel:
+		return a.Tunnel
 	}
 	return nil
 }

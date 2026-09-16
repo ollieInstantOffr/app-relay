@@ -168,6 +168,7 @@ type testEnv struct {
 	haproxy  *fakeAgent
 	edge     *fakeAgent
 	balancer *fakeAgent
+	tunnel   *fakeAgent
 	calls    []string
 	upstream *atomic.Int32
 	ctx      context.Context
@@ -194,11 +195,13 @@ func newTestEnv(t *testing.T) *testEnv {
 	e.haproxy = &fakeAgent{engine: "haproxy", validateOK: true}
 	e.edge = &fakeAgent{engine: "edge", validateOK: true, hash: agent.BootstrapHash, calls: &e.calls}
 	e.balancer = &fakeAgent{engine: "balancer", validateOK: true, calls: &e.calls}
+	e.tunnel = &fakeAgent{engine: "tunnel", validateOK: true, calls: &e.calls}
 	e.nginx.calls = &e.calls
 	e.nginx.serve(t, agent.SocketPath(runDir, "nginx"))
 	e.haproxy.serve(t, agent.SocketPath(runDir, "haproxy"))
 	e.edge.serve(t, agent.SocketPath(runDir, "edge"))
 	e.balancer.serve(t, agent.SocketPath(runDir, "balancer"))
+	e.tunnel.serve(t, agent.SocketPath(runDir, "tunnel"))
 
 	// The "nginx" the health check talks to.
 	e.upstream = &atomic.Int32{}

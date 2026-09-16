@@ -430,8 +430,10 @@ func (h *handlers) client(r *http.Request) (*agent.Client, string, error) {
 		return h.app.Edge, e, nil
 	case agent.EngineBalancer:
 		return h.app.Balancer, e, nil
+	case agent.EngineTunnel:
+		return h.app.Tunnel, e, nil
 	}
-	return nil, "", httpx.Errorf(http.StatusNotFound, "not_found", "unknown engine (nginx | haproxy | edge | balancer)")
+	return nil, "", httpx.Errorf(http.StatusNotFound, "not_found", "unknown engine (nginx | haproxy | edge | balancer | tunnel)")
 }
 
 func (h *handlers) engineAction(w http.ResponseWriter, r *http.Request) {

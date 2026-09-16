@@ -517,7 +517,7 @@ func (a *Agent) routes() http.Handler {
 	mux.HandleFunc("POST "+PathRuntime, func(w http.ResponseWriter, r *http.Request) {
 		h, ok := a.eng.(runtimeEngine)
 		if !ok {
-			http.Error(w, "runtime API is only available on load balancer agents (haproxy, balancer)", http.StatusNotFound)
+			http.Error(w, "runtime API is only available on the haproxy, balancer and tunnel agents", http.StatusNotFound)
 			return
 		}
 		var req RuntimeRequest

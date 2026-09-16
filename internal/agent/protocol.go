@@ -16,6 +16,9 @@ const (
 	// EngineBalancer is Relay Balancer, the built-in load balancer (relay
 	// balancer run), selectable instead of HAProxy.
 	EngineBalancer = "balancer"
+	// EngineTunnel is the tunnel engine (relay tunnel run): it dials tunnel
+	// gateways and hands their clients to the proxy engine.
+	EngineTunnel = "tunnel"
 )
 
 // IsProxyEngine reports whether engine serves the HTTP/HTTPS ports and
@@ -50,6 +53,7 @@ func SocketPath(runDir, engine string) string { return runDir + "/" + engine + "
 // haproxy: "haproxy.cfg".
 // edge: "edge.json", "htpasswd/<id>".
 // balancer: "balancer.json".
+// tunnel: "tunnel.json".
 type Files map[string]string
 
 // Endpoints (all JSON):

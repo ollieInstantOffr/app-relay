@@ -317,7 +317,7 @@ func TestBalancerContainersAndActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.svc.reconcile(ctx)
-	if _, stops := fc.calls(); stops != "edge,balancer" {
+	if _, stops := fc.calls(); stops != "edge,balancer,tunnel" {
 		t.Fatalf("stops %q", stops)
 	}
 	st, _ := e.svc.Status(ctx)
@@ -338,7 +338,7 @@ func TestBalancerContainersAndActions(t *testing.T) {
 		t.Fatalf("starts %q", starts)
 	}
 	e.svc.reconcile(ctx)
-	if _, stops := fc.calls(); stops != "edge,balancer,haproxy" {
+	if _, stops := fc.calls(); stops != "edge,balancer,tunnel,haproxy" {
 		t.Fatalf("stops %q", stops)
 	}
 	st, _ = e.svc.Status(ctx)
@@ -353,7 +353,7 @@ func TestBalancerContainersAndActions(t *testing.T) {
 	if resp, err := e.svc.EngineAction(ctx, "balancer", "stop"); err != nil || !resp.OK {
 		t.Fatalf("stop: %+v %v", resp, err)
 	}
-	if _, stops := fc.calls(); stops != "edge,balancer,haproxy,balancer" || !e.svc.stoppedEngines(ctx)["balancer"] {
+	if _, stops := fc.calls(); stops != "edge,balancer,tunnel,haproxy,balancer" || !e.svc.stoppedEngines(ctx)["balancer"] {
 		t.Fatalf("stops %q", stops)
 	}
 	if files, _, running, _, _ := e.svc.LiveRelease(ctx, "balancer"); files == nil || running {

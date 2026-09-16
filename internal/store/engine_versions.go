@@ -39,20 +39,25 @@ type VersionRow struct {
 	FailedEngine   string
 	FailedStage    string
 	Output         string
+	// TunnelFiles / TunnelHash / TunnelRunning describe the tunnel engine's
+	// release: its files (JSON map, only with blobs), hash and whether it runs.
+	TunnelFiles   string
+	TunnelHash    string
+	TunnelRunning bool
 }
 
 const versionCols = `id, created_at, actor, summary, status, changes, error, validate_ms, reload_ms, rolled_back_to,
-	nginx_hash, haproxy_hash, haproxy_running, failed_engine, failed_stage, output, proxy_engine, lb_engine`
+	nginx_hash, haproxy_hash, haproxy_running, failed_engine, failed_stage, output, proxy_engine, lb_engine, tunnel_hash, tunnel_running`
 
 func scanVersion(sc interface{ Scan(...any) error }, blobs bool) (*VersionRow, error) {
 	var v VersionRow
 	var at string
 	var rb sql.NullInt64
-	var running int
+	var running, tunnelRunning int
 	dest := []any{&v.ID, &at, &v.Actor, &v.Summary, &v.Status, &v.Changes, &v.Error, &v.ValidateMs, &v.ReloadMs, &rb,
-		&v.NginxHash, &v.HAProxyHash, &running, &v.FailedEngine, &v.FailedStage, &v.Output, &v.ProxyEngine, &v.LBEngine}
+		&v.NginxHash, &v.HAProxyHash, &running, &v.FailedEngine, &v.FailedStage, &v.Output, &v.ProxyEngine, &v.LBEngine, &v.TunnelHash, &tunnelRunning}
 	if blobs {
-		dest = append(dest, &v.Snapshot, &v.NginxFiles, &v.HAProxyCfg)
+		dest = append(dest, &v.Snapshot, &v.NginxFiles, &v.HAProxyCfg, &v.TunnelFiles)
 	}
 	if err := sc.Scan(dest...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -62,6 +67,7 @@ func scanVersion(sc interface{ Scan(...any) error }, blobs bool) (*VersionRow, e
 	}
 	v.CreatedAt = ParseTime(at)
 	v.HAProxyRunning = running != 0
+	v.TunnelRunning = tunnelRunning != 0
 	if rb.Valid {
 		x := rb.Int64
 		v.RolledBackTo = &x
@@ -71,7 +77,7 @@ func scanVersion(sc interface{ Scan(...any) error }, blobs bool) (*VersionRow, e
 
 func versionSelect(blobs bool) string {
 	if blobs {
-		return `SELECT ` + versionCols + `, snapshot, nginx_files, haproxy_cfg FROM config_versions`
+		return `SELECT ` + versionCols + `, snapshot, nginx_files, haproxy_cfg, tunnel_files FROM config_versions`
 	}
 	return `SELECT ` + versionCols + ` FROM config_versions`
 }
@@ -93,16 +99,20 @@ func (s *Store) InsertVersion(ctx context.Context, v *VersionRow) error {
 	if v.LBEngine == "" {
 		v.LBEngine = "haproxy"
 	}
-	running := 0
+	running, tunnelRunning := 0, 0
 	if v.HAProxyRunning {
 		running = 1
 	}
+	if v.TunnelRunning {
+		tunnelRunning = 1
+	}
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO config_versions
 		(id, created_at, actor, summary, status, snapshot, nginx_files, haproxy_cfg, changes, error, validate_ms, reload_ms, rolled_back_to,
-		 nginx_hash, haproxy_hash, haproxy_running, failed_engine, failed_stage, output, proxy_engine, lb_engine)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 nginx_hash, haproxy_hash, haproxy_running, failed_engine, failed_stage, output, proxy_engine, lb_engine, tunnel_files, tunnel_hash, tunnel_running)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		v.ID, FormatTime(v.CreatedAt), v.Actor, v.Summary, v.Status, v.Snapshot, v.NginxFiles, v.HAProxyCfg, v.Changes, v.Error,
-		v.ValidateMs, v.ReloadMs, v.RolledBackTo, v.NginxHash, v.HAProxyHash, running, v.FailedEngine, v.FailedStage, v.Output, v.ProxyEngine, v.LBEngine)
+		v.ValidateMs, v.ReloadMs, v.RolledBackTo, v.NginxHash, v.HAProxyHash, running, v.FailedEngine, v.FailedStage, v.Output, v.ProxyEngine, v.LBEngine,
+		v.TunnelFiles, v.TunnelHash, tunnelRunning)
 	if err != nil && isUniqueErr(err) {
 		return ErrConflict
 	}

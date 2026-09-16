@@ -36,6 +36,16 @@ func (s *Service) LiveRelease(ctx context.Context, engine string) (agent.Files, 
 	if err != nil {
 		return nil, "", false, 0, err
 	}
+	if engine == agent.EngineTunnel {
+		if live.TunnelHash == "" {
+			return nil, "", false, live.ID, nil
+		}
+		var files agent.Files
+		if err := json.Unmarshal([]byte(live.TunnelFiles), &files); err != nil {
+			return nil, "", false, 0, fmt.Errorf("live version v%d tunnel files: %w", live.ID, err)
+		}
+		return files, live.TunnelHash, live.TunnelRunning && !s.stoppedEngines(ctx)[engine], live.ID, nil
+	}
 	if agent.IsLBEngine(engine) {
 		if rowLBEngine(live) != engine {
 			return nil, "", false, live.ID, nil

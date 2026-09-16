@@ -33,7 +33,7 @@ type cachedContainer struct {
 }
 
 func containerEngine(engine string) bool {
-	return engine == agent.EngineNginx || engine == agent.EngineEdge || engine == agent.EngineHAProxy || engine == agent.EngineBalancer
+	return engine == agent.EngineNginx || engine == agent.EngineEdge || engine == agent.EngineHAProxy || engine == agent.EngineBalancer || engine == agent.EngineTunnel
 }
 
 func containerLabel(engine string) string {
@@ -44,6 +44,8 @@ func containerLabel(engine string) string {
 		return "HAProxy"
 	case agent.EngineBalancer:
 		return "Relay Balancer"
+	case agent.EngineTunnel:
+		return "Tunnel engine"
 	}
 	return "nginx"
 }

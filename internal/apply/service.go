@@ -28,6 +28,7 @@ import (
 	"github.com/instantoffr/relay/internal/render"
 	"github.com/instantoffr/relay/internal/render/edge"
 	"github.com/instantoffr/relay/internal/render/nginx"
+	tunnelrender "github.com/instantoffr/relay/internal/render/tunnel"
 	"github.com/instantoffr/relay/internal/store"
 )
 
@@ -78,7 +79,7 @@ func modulePathsKV(engine string) string { return "engine." + engine + ".moduleP
 // defaultModules are assumed before the proxy engine agent was ever reached
 // (they match the official nginx image, where all of them are compiled in,
 // and Relay Edge).
-var defaultModules = map[string]bool{"stream": true, "http_v3": true, "http_v2": true, "auth_request": true, "stub_status": true}
+var defaultModules = map[string]bool{"stream": true, "http_v3": true, "http_v2": true, "auth_request": true, "stub_status": true, "http_realip": true, "stream_realip": true}
 
 func (s *Service) Start(ctx context.Context) error {
 	for _, engine := range []string{agent.EngineNginx, agent.EngineEdge} {
@@ -229,7 +230,10 @@ type rendered struct {
 	lb          agent.Files // the load balancer engine's release ({lbMain: …})
 	lbMain      string      // haproxy.cfg | balancer.json
 	lbHash      string
-	lbRun       bool // the load balancer engine runs (backends exist)
+	lbRun       bool        // the load balancer engine runs (backends exist)
+	tunnel      agent.Files // the tunnel engine's release
+	tunnelHash  string
+	tunnelRun   bool // the tunnel engine runs (something is published through a tunnel)
 }
 
 func (s *Service) renderAll(ctx context.Context, snap *model.Snapshot) (*rendered, error) {
@@ -257,8 +261,13 @@ func (s *Service) renderAll(ctx context.Context, snap *model.Snapshot) (*rendere
 	if err != nil {
 		return nil, fmt.Errorf("%s render: %w", lbEngine, err)
 	}
+	tfiles, err := tunnelrender.Render(rs, env)
+	if err != nil {
+		return nil, err
+	}
 	return &rendered{proxyEngine: engine, proxy: files, proxyHash: agent.HashFiles(files),
-		lbEngine: lbEngine, lb: lfiles, lbMain: lr.MainFile, lbHash: agent.HashFiles(lfiles), lbRun: lr.HasBackends(rs)}, nil
+		lbEngine: lbEngine, lb: lfiles, lbMain: lr.MainFile, lbHash: agent.HashFiles(lfiles), lbRun: lr.HasBackends(rs),
+		tunnel: tfiles, tunnelHash: agent.HashFiles(tfiles), tunnelRun: tunnelrender.Published(rs)}, nil
 }
 
 // ---------------------------------------------------------------- pending
@@ -354,11 +363,12 @@ func (s *Service) Status(ctx context.Context) (*core.EnginesStatus, error) {
 		}
 		*dst = core.EngineState{Status: *st, Reachable: true}
 	}
-	wg.Add(4)
+	wg.Add(5)
 	go get(agent.EngineNginx, s.app.Nginx, &out.Nginx)
 	go get(agent.EngineHAProxy, s.app.HAProxy, &out.HAProxy)
 	go get(agent.EngineEdge, s.app.Edge, &out.Edge)
 	go get(agent.EngineBalancer, s.app.Balancer, &out.Balancer)
+	go get(agent.EngineTunnel, s.app.Tunnel, &out.Tunnel)
 	wg.Wait()
 	if out.Nginx.Reachable && len(out.Nginx.Modules) > 0 {
 		s.setModules(ctx, agent.EngineNginx, out.Nginx.Modules, out.Nginx.DynamicModules, true)
@@ -472,12 +482,14 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 	progress("render", fmt.Sprintf("Applying v%d… · rendering config", id), 5)
 	r, err := s.renderAll(ctx, snap)
 	if err != nil {
-		row.NginxFiles, row.HAProxyCfg = "{}", ""
+		row.NginxFiles, row.HAProxyCfg, row.TunnelFiles = "{}", "", ""
 		return s.failBeforeSwap(ctx, row, engine, "render", err.Error(), "Config could not be rendered")
 	}
 	nf, _ := json.Marshal(r.proxy)
 	row.NginxFiles, row.HAProxyCfg = string(nf), r.lb[r.lbMain]
 	row.NginxHash, row.HAProxyHash, row.HAProxyRunning = r.proxyHash, r.lbHash, r.lbRun
+	tf, _ := json.Marshal(r.tunnel)
+	row.TunnelFiles, row.TunnelHash, row.TunnelRunning = string(tf), r.tunnelHash, r.tunnelRun
 
 	// A stopped engine container (the standby proxy engine, an idle load balancer)
 	// is started before it's needed.
@@ -526,6 +538,28 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 		warnings += countWarnings(hv.Output)
 		output = joinOutput(output, hv.Output)
 	}
+	tc := s.app.Tunnel
+	if r.tunnelRun {
+		if err := s.ensureEngine(ctx, agent.EngineTunnel, func() {
+			progress("validate", fmt.Sprintf("Applying v%d… · starting the tunnel engine container", id), 32)
+		}); err != nil {
+			return nil, s.unavailable(agent.EngineTunnel, err)
+		}
+		progress("validate", fmt.Sprintf("Applying v%d… · validating · tunnel check", id), 33)
+		vctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		tv, err := tc.Validate(vctx, r.tunnel)
+		cancel()
+		if err != nil {
+			return nil, s.unavailable(agent.EngineTunnel, err)
+		}
+		row.ValidateMs += tv.DurationMs
+		if !tv.OK {
+			return s.failBeforeSwap(ctx, row, agent.EngineTunnel, "validate", tv.Output, "tunnel check failed")
+		}
+		output = joinOutput(output, tv.Output)
+	}
+	tst, terr := tc.Status(ctx)
+	tunnelReachable := terr == nil
 	row.Output = output
 
 	// Learn which changed hosts (every routable host when switching engines)
@@ -689,6 +723,33 @@ func (s *Service) applyLocked(ctx context.Context, opts core.ApplyOptions, force
 	}
 	sw.swapped = true
 
+	// The tunnel engine follows the proxy engine: its targets are the proxy
+	// engine's tunnel ingress sockets.
+	switch {
+	case tunnelReachable && ((tst.ConfigHash != r.tunnelHash && (r.tunnelRun || tst.ConfigHash != "")) || tst.Running != r.tunnelRun):
+		verb := "reloading the tunnel engine"
+		if !r.tunnelRun {
+			verb = "stopping the tunnel engine"
+		} else if !tst.Running {
+			verb = "starting the tunnel engine"
+		}
+		progress("reload", fmt.Sprintf("Applying v%d… · validated · %s", id, verb), 58)
+		tresp, err := tc.Apply(ctx, agent.ApplyRequest{Files: r.tunnel, Hash: r.tunnelHash, Stop: !r.tunnelRun})
+		if err != nil {
+			return s.failAfterSwap(ctx, row, liveID, agent.EngineTunnel, "swap", err.Error(), sw)
+		}
+		row.ReloadMs += tresp.ReloadMs
+		if !tresp.OK {
+			return s.failAfterSwap(ctx, row, liveID, agent.EngineTunnel, tresp.Stage, tresp.Output, sw)
+		}
+		sw.tunnelChanged = true
+		if r.tunnelRun {
+			s.setStoppedEngine(ctx, agent.EngineTunnel, false)
+		}
+	case !tunnelReachable && r.tunnelRun:
+		return s.failAfterSwap(ctx, row, liveID, agent.EngineTunnel, "swap", agentError(terr), sw)
+	}
+
 	// Health check.
 	if failure, failed := s.healthCheck(ctx, id, engine, snap, targets, healthyBefore, lw, progress); failure != "" {
 		return s.failAfterSwap(ctx, row, liveID, failed, "health", failure, sw)
@@ -772,8 +833,11 @@ func joinOutput(parts ...string) string {
 
 func (s *Service) unavailable(engine string, err error) error {
 	name := engine
-	if engine == agent.EngineEdge || engine == agent.EngineBalancer {
+	switch engine {
+	case agent.EngineEdge, agent.EngineBalancer:
 		name = engineLabel(engine)
+	case agent.EngineTunnel:
+		name = "tunnel"
 	}
 	return &ApplyError{Status: http.StatusServiceUnavailable, Code: "engine_unavailable",
 		Message: fmt.Sprintf("The %s engine is unreachable (%s). Is the relay-%s container running?", name, agentError(err), engine)}
@@ -848,6 +912,13 @@ func (s *Service) failAfterSwap(ctx context.Context, row *store.VersionRow, live
 			rbErrs = append(rbErrs, sw.lbEngine+": "+err.Error())
 		} else if !resp.OK {
 			rbErrs = append(rbErrs, sw.lbEngine+": "+resp.Output)
+		}
+	}
+	if sw.tunnelChanged {
+		if resp, err := s.app.Tunnel.Rollback(rbctx); err != nil {
+			rbErrs = append(rbErrs, agent.EngineTunnel+": "+err.Error())
+		} else if !resp.OK {
+			rbErrs = append(rbErrs, agent.EngineTunnel+": "+resp.Output)
 		}
 	}
 	row.FailedEngine, row.FailedStage, row.Output = engine, stage, output
@@ -1045,8 +1116,9 @@ func (s *Service) probe(ctx context.Context, snap *model.Snapshot, env render.En
 	if !res.ok || !render.HostPublished(h) {
 		return res
 	}
-	// Published through a tunnel: the tunnel ingress socket must serve it too,
-	// so a change that breaks that path rolls back like any other.
+	// Published through a tunnel: once the proxy engine listens on the tunnel
+	// ingress socket it must serve the host there too, so a change that
+	// breaks that path rolls back like any other.
 	engine := snap.General.ProxyEngine
 	if engine == "" {
 		engine = agent.EngineNginx
@@ -1054,6 +1126,9 @@ func (s *Service) probe(ctx context.Context, snap *model.Snapshot, env render.En
 	sock := env.TunnelHTTPSocket(engine)
 	if useTLS {
 		sock = env.TunnelHTTPSSocket(engine)
+	}
+	if fi, err := os.Stat(sock); err != nil || fi.Mode()&os.ModeSocket == 0 {
+		return res
 	}
 	tres := probeURL(ctx, scheme+"://"+domain+"/", domain, func(ctx context.Context) (net.Conn, error) {
 		var d net.Dialer
@@ -1316,6 +1391,7 @@ func (s *Service) reconcile(ctx context.Context) {
 	s.observe(ctx, "haproxy", st.HAProxy)
 	s.observe(ctx, "edge", st.Edge)
 	s.observe(ctx, "balancer", st.Balancer)
+	s.observe(ctx, agent.EngineTunnel, st.Tunnel)
 
 	if !s.applyMu.TryLock() {
 		return
@@ -1399,6 +1475,23 @@ func (s *Service) reconcile(ctx context.Context) {
 		default:
 			stoppedNow[lbOther] = true
 			s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": lbOther, "running": false, "reachable": true})
+		}
+	}
+	// The tunnel engine runs the live release while something is published.
+	wantTunnel := live.TunnelRunning && !s.stoppedEngines(ctx)[agent.EngineTunnel]
+	if tst := st.Tunnel; tst.Reachable && live.TunnelHash != "" && tst.ConfigHash != live.TunnelHash && (wantTunnel || tst.ConfigHash != "") {
+		var files agent.Files
+		if json.Unmarshal([]byte(live.TunnelFiles), &files) == nil && len(files) > 0 {
+			s.log.Info("the tunnel engine is not running the live version, restoring", "version", live.ID)
+			resp, err := s.app.Tunnel.Apply(ctx, agent.ApplyRequest{Files: files, Hash: live.TunnelHash, Stop: !wantTunnel})
+			switch {
+			case err != nil:
+				s.log.Warn("restore live tunnel config", "err", err)
+			case !resp.OK:
+				s.log.Warn("restore live tunnel config", "err", firstErrorLine(resp.Output))
+			default:
+				s.app.Bus.Publish(events.EngineChanged, map[string]any{"engine": agent.EngineTunnel, "running": resp.Running, "reachable": true})
+			}
 		}
 	}
 	s.manageContainers(ctx, st, live, engine, stoppedNow)
