@@ -7,6 +7,8 @@
 //	relay balancer run --config FILE      run Relay Balancer, the built-in load balancer
 //	relay balancer check DIR              validate a Relay Balancer config release
 //	relay gateway run|reset|info          run a tunnel gateway on a public server
+//	relay tunnel run --config FILE        run the tunnel engine (dials gateways)
+//	relay tunnel check DIR                validate a tunnel engine config release
 //	relay users reset-password <name>     reset a user's password
 //	relay mcp-stdio --url URL --token T   MCP over stdio for local clients
 //	relay version
@@ -48,6 +50,7 @@ import (
 	"github.com/instantoffr/relay/internal/npmimport"
 	"github.com/instantoffr/relay/internal/publicdns"
 	"github.com/instantoffr/relay/internal/store"
+	"github.com/instantoffr/relay/internal/tunnel"
 	"github.com/instantoffr/relay/internal/tunnels"
 	"github.com/instantoffr/relay/internal/webui"
 )
@@ -92,6 +95,9 @@ func main() {
 	case "gateway":
 		gateway.Version = version
 		err = gateway.RunCLI(ctx, args, os.Stdout, os.Stderr)
+	case "tunnel":
+		tunnel.Version = version
+		err = tunnel.RunCLI(ctx, args, os.Stdout, os.Stderr)
 	case "users":
 		if len(args) != 2 || args[0] != "reset-password" {
 			err = errors.New("usage: relay users reset-password <username>")
