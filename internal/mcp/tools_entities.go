@@ -49,7 +49,7 @@ var entityKinds = []entityKind{
 	},
 	{
 		noun: "stream", plural: "streams", path: "/streams", title: "TCP/UDP stream",
-		fields:     `name, protocol ("tcp"|"udp"|"both"), listenAddress ("0.0.0.0", "127.0.0.1" or "::"), listenPorts ("25565" or a range "2456-2458"), forwardHost, forwardPorts ("" = same as the listen ports), backendId (instead of forwardHost: send to a TCP load balancer backend), proxyProtocol (send the PROXY header), idleTimeout (e.g. "10m"), enabled`,
+		fields:     `name, protocol ("tcp"|"udp"|"both"), listenAddress ("0.0.0.0", "127.0.0.1" or "::"), listenPorts ("25565" or a range "2456-2458"), forwardHost, forwardPorts ("" = same as the listen ports), backendId (instead of forwardHost: send to a TCP load balancer backend), proxyProtocol (send the PROXY header), idleTimeout (e.g. "10m"), enabled, tunnelGatewayId (publish the TCP ports through a tunnel gateway from list_tunnels; an empty string stops publishing)`,
 		label:      func(m map[string]any) string { return mStr(m["name"]) },
 		scopeNames: func(m map[string]any) []string { return []string{mStr(m["name"])} },
 	},

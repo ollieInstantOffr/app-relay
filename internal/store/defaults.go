@@ -118,6 +118,7 @@ var MCPTools = map[string]string{
 	"get_activity":       model.ToolRead,
 	"get_ports":          model.ToolRead,
 	"list_dns_zones":     model.ToolRead,
+	"list_tunnels":       model.ToolRead,
 	"list_dns_records":   model.ToolRead,
 	"check_dns":          model.ToolRead,
 
@@ -148,6 +149,10 @@ var MCPTools = map[string]string{
 	"block_ip":                 model.ToolConfirm,
 	"check_for_updates":        model.ToolAllow,
 	"create_dns_record":        model.ToolConfirm,
+	"create_gateway":           model.ToolConfirm,
+	"update_gateway":           model.ToolConfirm,
+	"pair_gateway":             model.ToolConfirm,
+	"delete_gateway":           model.ToolDisabled,
 	"update_dns_record":        model.ToolConfirm,
 	"sync_dns":                 model.ToolConfirm,
 	"delete_redirect":          model.ToolDisabled,

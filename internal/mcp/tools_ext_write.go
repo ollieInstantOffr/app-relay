@@ -141,8 +141,9 @@ type exposeArgs struct {
 
 func (s *Service) registerExtWriteTools() {
 	s.registerDNSTools()
+	s.registerTunnelTools()
 	addWrite(s, toolInfo{Name: "update_host_config", Title: "Change any host setting",
-		Description: "Change any setting of a proxy host (found by id or domain) with a JSON merge patch of its full configuration as returned by get_host: locations (per-path rules), forward auth / single sign-on, rate limiting, headers, timeouts, upload size, HSTS, HTTP/3, cipher profile, geo-blocking, no-index, upstream TLS verification, custom nginx snippet. Validated like the UI; saved to pending changes, not live until apply_changes. May wait for human approval."},
+		Description: "Change any setting of a proxy host (found by id or domain) with a JSON merge patch of its full configuration as returned by get_host: locations (per-path rules), forward auth / single sign-on, rate limiting, headers, timeouts, upload size, HSTS, HTTP/3, cipher profile, geo-blocking, no-index, upstream TLS verification, custom nginx snippet, tunnelGatewayId (publish through a tunnel gateway from list_tunnels; an empty string stops publishing). Validated like the UI; saved to pending changes, not live until apply_changes. May wait for human approval."},
 		nil, false, s.planUpdateHostConfig)
 	addWrite(s, toolInfo{Name: "update_settings", Title: "Change Relay settings",
 		Description: "Change a settings document (general, tls, default_host, haproxy, docker, notifications, backup, engines, blocklist, error_pages) with a JSON merge patch of what get_settings returns. Security and MCP settings, the admin UI port and the admin domain can't be changed over MCP. Settings that affect the proxy become pending changes. May wait for human approval."},
