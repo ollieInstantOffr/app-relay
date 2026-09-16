@@ -21,6 +21,7 @@ export interface VersionInfo extends Version {
   lbEngine?: LBEngineName
   haproxyHash: string
   haproxyRunning: boolean
+  tunnelRunning?: boolean
 }
 
 export interface DiffLine { type: 'add' | 'del' | 'ctx' | 'hunk'; text: string; oldNo?: number; newNo?: number }
@@ -43,8 +44,8 @@ export interface ApplyFinished { version: number; status: string; error: string;
 export interface EngineLogLine { at: string; stream: 'stdout' | 'stderr'; text: string }
 export interface EngineListener { proto: 'tcp' | 'udp'; address: string; port: number; process?: string }
 
-export type EngineName = 'nginx' | 'haproxy' | 'edge' | 'balancer'
-export const engineLabel: Record<EngineName, string> = { nginx: 'nginx', haproxy: 'HAProxy', edge: 'Relay Edge', balancer: 'Relay Balancer' }
+export type EngineName = 'nginx' | 'haproxy' | 'edge' | 'balancer' | 'tunnel'
+export const engineLabel: Record<EngineName, string> = { nginx: 'nginx', haproxy: 'HAProxy', edge: 'Relay Edge', balancer: 'Relay Balancer', tunnel: 'Tunnel engine' }
 
 export function useVersions(limit = 100) {
   return useQuery({

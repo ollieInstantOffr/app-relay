@@ -11,6 +11,7 @@ import {
 import { fieldErrors, pendingToast, toastUnlessFields } from '../certificates/common'
 import type { PortEntry } from './StreamsPage'
 import { previewCheck, previewTitle } from '../hosts/ConfigPreview'
+import { PublishField } from '../tunnels/PublishField'
 import '../certificates/certs.css'
 
 const ownerLabel: Record<PortEntry['owner'], string> = { nginx: 'nginx', edge: 'Relay Edge', haproxy: 'HAProxy', balancer: 'Relay Balancer', relay: 'Relay', other: 'another process' }
@@ -235,6 +236,14 @@ export default function StreamDrawer({ open, onClose, stream, ports }: {
           <Input mono value={draft.idleTimeout} placeholder="10m" onChange={(e) => set({ idleTimeout: e.target.value.trim() })} />
         </Field>
       </div>
+      <PublishField
+        value={draft.tunnelGatewayId}
+        onChange={(tunnelGatewayId) => set({ tunnelGatewayId })}
+        readOnly={!canWrite}
+        error={errors.tunnelGatewayId}
+        disabled={draft.protocol === 'udp'}
+        note={draft.protocol === 'udp' ? 'Tunnels carry TCP only' : draft.protocol === 'both' && draft.tunnelGatewayId ? 'Only the TCP part is published through the tunnel' : undefined}
+      />
       {editing && <ToggleCard title="Enabled" description="Disabled streams keep their config but don't bind the port" checked={draft.enabled} onChange={(v) => set({ enabled: v })} />}
 
       {wildcard && (

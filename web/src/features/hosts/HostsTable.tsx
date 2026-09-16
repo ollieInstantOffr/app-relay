@@ -121,6 +121,7 @@ export function HostsTable({
                         )}
                         {h.system && <Badge tone="dark">system</Badge>}
                         {h.maintenance?.enabled && <Badge tone="warn" title="Visitors see the maintenance page (503)">maintenance</Badge>}
+                        {h.tunnelGatewayId && <Badge title="Published through a tunnel gateway">tunnel</Badge>}
                       </div>
                     </td>
                     {show('upstream') && (

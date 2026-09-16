@@ -75,6 +75,8 @@ export interface ProxyHost extends Meta {
   source: Source
   sourceRef?: string
   system?: boolean
+  /** Published through this tunnel gateway ("" / absent = not published). */
+  tunnelGatewayId?: string
 }
 
 export interface Redirect extends Meta {
@@ -99,6 +101,8 @@ export interface Stream extends Meta {
   proxyProtocol: boolean
   idleTimeout: string
   enabled: boolean
+  /** TCP ports published through this tunnel gateway. */
+  tunnelGatewayId?: string
 }
 
 export interface IPRule { id: string; action: 'allow' | 'deny'; cidr: string; note: string }
@@ -324,7 +328,7 @@ export interface NotificationChannel {
 }
 export type NotificationEvent =
   | 'upstream_down' | 'cert_renew_failed' | 'cert_expiring' | 'reload_failed'
-  | 'unknown_sign_in' | 'mcp_write_executed' | 'weekly_summary' | 'engine_update_available' | 'backup_failed'
+  | 'unknown_sign_in' | 'mcp_write_executed' | 'weekly_summary' | 'engine_update_available' | 'backup_failed' | 'tunnel_down'
 export interface NotificationSettings {
   channels: NotificationChannel[]
   routes: Partial<Record<NotificationEvent, string[]>>
@@ -423,8 +427,67 @@ export interface EntityMap {
   'dns-providers': DNSProvider
   backends: Backend
   frontends: Frontend
+  gateways: Gateway
 }
 export type EntityKind = keyof EntityMap
+
+// ---------------------------------------------------------------- tunnels
+export type GatewayTransport = 'auto' | 'quic' | 'tcp'
+/** GET /api/gateways: a public tunnel gateway this Relay dials out to (runtime state, no pending changes). */
+export interface Gateway extends Meta {
+  name: string
+  /** host[:port] of the gateway's tunnel listener (port 7443 by default). */
+  address: string
+  transport: GatewayTransport
+  enabled: boolean
+  pairState: 'pending' | 'paired'
+  gatewayPin?: string
+  homeFingerprint?: string
+  pairedAt?: string
+  pairExpires?: string
+  publicIps: string[]
+  version?: string
+}
+export type GatewayState = 'disabled' | 'unpaired' | 'idle' | 'connecting' | 'connected' | 'disconnected' | 'incompatible'
+export interface GatewayPortError { port: number; error: string }
+/** The tunnel engine's view of one gateway. */
+export interface GatewayStatus {
+  id: string
+  state: GatewayState
+  transport?: 'quic' | 'tcp'
+  address: string
+  connectedAt?: string
+  lastError?: string
+  lastErrorAt?: string
+  reconnects: number
+  rttMs: number
+  version?: string
+  proto?: number
+  publicIps?: string[]
+  generation: number
+  ackedGeneration: number
+  portErrors?: GatewayPortError[]
+  activeStreams: number
+  streams: number
+  rejected: number
+  bytesIn: number
+  bytesOut: number
+}
+/** GET /api/tunnels */
+export interface TunnelOverview {
+  /** null while the tunnel engine isn't running. */
+  engine: { hash: string; startedAt: string; gateways: GatewayStatus[] } | null
+  gateways: (Gateway & { status: GatewayStatus | null; published: { hosts: string[]; streams: string[] } })[]
+}
+/** POST /api/gateways/:id/pairing */
+export interface GatewayPairing {
+  token: string
+  expiresAt: string
+  homeFingerprint: string
+  install: string
+  env: string
+  ports: string[]
+}
 
 // ---------------------------------------------------------------- cross-slice contracts
 
@@ -468,7 +531,7 @@ export interface Version {
 }
 
 /** GET /api/engines (slice engine) */
-export type EngineKind = ProxyEngineName | LBEngineName
+export type EngineKind = ProxyEngineName | LBEngineName | 'tunnel'
 export interface EngineState {
   engine: EngineKind
   reachable: boolean
@@ -496,6 +559,8 @@ export interface EnginesStatus {
   haproxy: EngineState
   edge: EngineState
   balancer?: EngineState
+  /** The tunnel engine (runs while hosts or streams are published through a tunnel). */
+  tunnel?: EngineState
   /** Active proxy engine: the live version's, or the General setting before the first apply. */
   proxy: ProxyEngineName
   /** Active load balancer engine, same rules as proxy. */

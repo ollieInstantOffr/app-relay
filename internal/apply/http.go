@@ -205,12 +205,15 @@ type versionJSON struct {
 	// (see lbEngine); the names are kept for compatibility.
 	HAProxyHash    string `json:"haproxyHash"`
 	HAProxyRunning bool   `json:"haproxyRunning"`
+	// TunnelHash / TunnelRunning describe the tunnel engine's release.
+	TunnelHash    string `json:"tunnelHash"`
+	TunnelRunning bool   `json:"tunnelRunning"`
 }
 
 func toVersionJSON(row *store.VersionRow) versionJSON {
 	return versionJSON{Version: toVersion(row), FailedEngine: row.FailedEngine, FailedStage: row.FailedStage, Output: row.Output,
 		ProxyEngine: rowEngine(row), ProxyHash: row.NginxHash, NginxHash: row.NginxHash, LBEngine: rowLBEngine(row),
-		HAProxyHash: row.HAProxyHash, HAProxyRunning: row.HAProxyRunning}
+		HAProxyHash: row.HAProxyHash, HAProxyRunning: row.HAProxyRunning, TunnelHash: row.TunnelHash, TunnelRunning: row.TunnelRunning}
 }
 
 func (h *handlers) versions(w http.ResponseWriter, r *http.Request) {

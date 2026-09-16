@@ -8,6 +8,7 @@ import { DomainsInput } from '../DomainsInput'
 import type { HostFormCtx } from '../HostDrawer'
 import { accessSummary, domainError, portError, probeMessage, upstreamHostError, useDomainChecks, useProbe } from '../lib'
 import { HostDNSStatus } from '../../dns/HostDNSStatus'
+import { PublishField } from '../../tunnels/PublishField'
 
 const URL_PASTE = /^(https?):\/\/(\[[^\]]+\]|[^/:?#\s]+)(?::(\d+))?(\/[^\s]*)?$/i
 
@@ -117,6 +118,8 @@ export function DetailsTab({ ctx }: { ctx: HostFormCtx }) {
       </Field>
 
       {!draft.system && <HostDNSStatus domains={draft.domains.filter((d) => !domainError(d))} readOnly={readOnly} />}
+
+      <PublishField value={draft.tunnelGatewayId} onChange={(tunnelGatewayId) => update({ tunnelGatewayId })} readOnly={readOnly} error={errors.tunnelGatewayId} />
 
       <div className="field">
         <label className="field-label">Forward to</label>

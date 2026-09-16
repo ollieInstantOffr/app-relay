@@ -26,6 +26,7 @@ export const Topics = {
   EngineUpgrade: 'engine.upgrade',
   EngineUpdates: 'engine.updates',
   RelayUpdate: 'relay.update',
+  TunnelChanged: 'tunnel.changed',
 } as const
 
 function invalidateFor(qc: QueryClient, ev: BusEvent) {
@@ -67,6 +68,10 @@ function invalidateFor(qc: QueryClient, ev: BusEvent) {
       break
     case Topics.BackupChanged:
       qc.invalidateQueries({ queryKey: ['backups'] })
+      break
+    case Topics.TunnelChanged:
+      qc.invalidateQueries({ queryKey: ['tunnels'] })
+      qc.invalidateQueries({ queryKey: keys.entities('gateways') })
       break
   }
 }

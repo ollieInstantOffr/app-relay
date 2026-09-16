@@ -61,6 +61,10 @@ const WRITE_TOOLS = new Set([
   'update_dns_record',
   'delete_dns_record',
   'sync_dns',
+  'create_gateway',
+  'update_gateway',
+  'pair_gateway',
+  'delete_gateway',
 ])
 // Everything else is a read tool (e.g. list_dns_zones, list_dns_records, check_dns).
 

@@ -15,7 +15,7 @@ export type IconName =
   | 'users' | 'mcp' | 'docker' | 'redirect' | 'expose' | 'terminal' | 'stats'
   | 'plus' | 'search' | 'close' | 'chevron' | 'edit' | 'trash' | 'copy' | 'external' | 'reload' | 'check' | 'warning'
   | 'info' | 'filter' | 'download' | 'upload' | 'drain' | 'power' | 'reveal' | 'token' | 'link' | 'bolt' | 'rollback'
-  | 'more' | 'drag' | 'docs' | 'topology'
+  | 'more' | 'drag' | 'docs' | 'topology' | 'tunnel'
 
 export function Icon({ name, size = 16, className, style }: { name: IconName; size?: number; className?: string; style?: React.CSSProperties }) {
   inject()

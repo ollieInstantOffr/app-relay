@@ -1,0 +1,42 @@
+/* Tunnels: gateways page, gateway drawer, connect wizard */
+
+.tun-filter { width: 170px; }
+
+.tun-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-content: start; }
+@media (max-width: 1180px) { .tun-grid { grid-template-columns: 1fr; } }
+
+/* gateway cards (same anatomy as load balancer backend cards) */
+.tun-card { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+.tun-card.alert { border-color: var(--danger-border); }
+.tun-card-head { display: flex; align-items: flex-start; gap: 10px; }
+.tun-card-head > .dot { margin-top: 6px; }
+.tun-name { font: 600 14px var(--font-mono); }
+.tun-desc { font: 12px var(--font-mono); color: var(--ink-subtle); margin-top: 3px; overflow-wrap: anywhere; }
+.tun-note { font-size: 12px; color: var(--ink-subtle); background: var(--surface-3); border: 1px solid var(--hairline-soft); border-radius: 7px; padding: 7px 10px; overflow-wrap: anywhere; }
+.tun-routes { display: flex; flex-direction: column; gap: 6px; }
+.tun-route { display: flex; align-items: center; gap: 10px; font: 12px var(--font-mono); color: var(--ink-muted); min-height: 22px; }
+.tun-route .faint { color: var(--ink-faint); }
+.tun-route.idle { font-family: var(--font-sans); color: var(--ink-subtle); }
+.tun-route.down { color: var(--danger-text); }
+.tun-foot { display: flex; gap: 6px; align-items: center; padding-top: 10px; border-top: 1px solid var(--hairline-soft); flex-wrap: wrap; }
+.tun-foot .right { margin-left: auto; font: 11px var(--font-mono); color: var(--ink-faint); }
+
+/* drawer */
+.tun-kv { grid-template-columns: 140px 1fr; font-size: 12px; }
+.tun-kv .mono { font-size: 12px; }
+
+/* connect wizard */
+.tun-step-title { font-size: 13px; font-weight: 600; }
+.tun-code { position: relative; }
+.tun-code .code { padding-right: 84px; }
+.tun-code-copy { position: absolute; top: 8px; right: 8px; }
+.tun-waiting {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--hairline); border-radius: 8px; background: var(--surface-3);
+}
+.tun-pick { border: 1px solid var(--hairline); border-radius: 8px; max-height: 280px; overflow: auto; }
+.tun-pick-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--hairline-soft); cursor: pointer; font-size: 13px; }
+.tun-pick-row:last-child { border-bottom: 0; }
+.tun-pick-row:hover { background: var(--surface-3); }
+
+/* host drawer / stream drawer */
+.tun-publish-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-subtle); margin-top: 6px; }

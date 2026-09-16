@@ -13,6 +13,7 @@ import SessionExpiredDialog from '../../features/auth/SessionExpiredDialog'
 import ApprovalToasts from '../../features/mcp/ApprovalToasts'
 import { hasEngineNotice, useEngineUpdates } from '../../features/settings/enginesApi'
 import { usePublicDNS } from '../../features/dns/dnsApi'
+import { useTunnels } from '../../features/tunnels/api'
 
 export interface NavItem {
   to: string
@@ -29,6 +30,7 @@ export const NAV: NavItem[] = [
   { to: '/certificates', label: 'Certificates', icon: 'certificates', shortcut: 'G C' },
   { to: '/access', label: 'Access lists', icon: 'access', shortcut: 'G A' },
   { to: '/streams', label: 'Streams', icon: 'streams', shortcut: 'G T' },
+  { to: '/tunnels', label: 'Tunnels', icon: 'tunnel', shortcut: 'G U' },
   { to: '/dns', label: 'Public DNS', icon: 'expose', shortcut: 'G N' },
   { to: '/logs', label: 'Logs', icon: 'logs', shortcut: 'G G' },
   { to: '/history', label: 'Config history', icon: 'history', shortcut: 'G V' },
@@ -85,6 +87,7 @@ function Rail({ pendingCount, username, role }: { pendingCount: number; username
   const lb = useLBStats(15_000).data
   const approvals = usePendingApprovals().data
   const engines = useEngines().data
+  const tunnels = useTunnels(30_000).data
   const navigate = useNavigate()
   const qc = useQueryClient()
   const nav = useVisibleNav()
@@ -101,10 +104,15 @@ function Rail({ pendingCount, username, role }: { pendingCount: number; username
       if (lb.backends.some((x) => x.status === 'DOWN')) b['/load-balancer'] = { tone: 'danger' }
       else if (lb.backends.some((x) => x.status === 'DEGRADED')) b['/load-balancer'] = { tone: 'warn' }
     }
+    if (tunnels?.engine) {
+      const states = tunnels.gateways.filter((g) => g.enabled && g.pairState === 'paired' && g.status).map((g) => g.status!.state)
+      if (states.some((s) => s === 'disconnected' || s === 'incompatible')) b['/tunnels'] = { tone: 'danger' }
+      else if (states.includes('connecting')) b['/tunnels'] = { tone: 'warn' }
+    }
     if (pendingCount > 0) b['/history'] = { count: pendingCount }
     if (approvals && approvals.length > 0) b['/logs'] = { count: approvals.length }
     return b
-  }, [health, lb, pendingCount, approvals, engines])
+  }, [health, lb, pendingCount, approvals, engines, tunnels])
 
   return (
     <nav className="rail">

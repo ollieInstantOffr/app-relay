@@ -15,6 +15,7 @@ import DocsPage from '../features/docs/DocsPage'
 import DNSPage from '../features/dns/DNSPage'
 import TopologyPage from '../features/topology/TopologyPage'
 import HostFlowPage from '../features/topology/HostFlowPage'
+import TunnelsPage from '../features/tunnels/TunnelsPage'
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -33,6 +34,7 @@ export const router = createBrowserRouter([
       { path: 'certificates', element: <CertificatesPage /> },
       { path: 'access', element: <AccessListsPage /> },
       { path: 'streams', element: <StreamsPage /> },
+      { path: 'tunnels', element: <TunnelsPage /> },
       { path: 'dns', element: <DNSPage /> },
       { path: 'logs', element: <Navigate to="/logs/access" replace /> },
       { path: 'logs/:tab', element: <LogsPage /> },

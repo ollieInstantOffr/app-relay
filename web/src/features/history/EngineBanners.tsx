@@ -119,6 +119,12 @@ export default function EngineBanners() {
     else if (ls && hasBackends && !ls.running && !ls.standby && live?.haproxyRunning && (lsStopped || (ls.reachable && ls.configured))) {
       banners.push(notRunning(lb, ls, `${backends?.length ?? 0} backend${backends?.length === 1 ? '' : 's'} unavailable`))
     }
+    // Something is published through a tunnel but the tunnel engine doesn't run.
+    const ts = data.tunnel
+    if (ts && live?.tunnelRunning && !ts.running && !ts.standby) {
+      if (!ts.reachable && ts.container !== 'stopped') banners.push(unreachable('tunnel', ts))
+      else banners.push(notRunning('tunnel', ts, 'Hosts published through tunnels are unreachable from the internet'))
+    }
   }
 
   const latest: VersionInfo | undefined = versions?.[0]
