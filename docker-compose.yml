@@ -13,6 +13,9 @@
 # container (and the selected one's while it has nothing to run).
 # Load balancer frontends created by the Expose wizard bind 127.0.0.1:10080+ and
 # are reached by the proxy engine over loopback.
+# Tunnels: the relay-tunnel engine dials out to tunnel gateways on a public
+# server (deploy/gateway) so hosts can be published without port forwarding;
+# it only runs while something is published through a tunnel.
 #
 # nginx and HAProxy run the OFFICIAL images. The relay container copies its
 # static binary into the relay-bin volume and each engine container runs it as
@@ -58,6 +61,7 @@ services:
       - edge
       - haproxy
       - balancer
+      - tunnel
 
   nginx:
     image: ${RELAY_NGINX_IMAGE:-nginx:1.30.4-alpine}
@@ -172,6 +176,34 @@ services:
       start_period: 20s
       retries: 3
 
+  # Tunnel engine: dials tunnel gateways (Tunnels page) and hands their clients
+  # to the proxy engine over unix sockets in /run/relay/tunnel. It only runs
+  # while hosts or streams are published through a tunnel; Relay stops the
+  # container otherwise.
+  tunnel:
+    image: alpine:3.22
+    container_name: relay-tunnel
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 15s
+    stop_signal: SIGTERM
+    labels:
+      relay.engine: tunnel
+    entrypoint: ["sh", "-c", "until [ -x /opt/relay/bin/relay ]; do sleep 1; done; exec /opt/relay/bin/relay agent --engine tunnel"]
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - relay-bin:/opt/relay:ro
+      - relay-data:/data:ro
+      - relay-run:/run/relay
+      - relay-tunnel:/etc/relay/tunnel
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/relay/tunnel.sock"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
 volumes:
   relay-data:     # SQLite database, certificates, ACME webroot, backups
   relay-run:      # agent sockets and the proxy-engine selection shared between the containers
@@ -180,4 +212,5 @@ volumes:
   relay-edge:     # applied Relay Edge releases
   relay-haproxy:  # applied haproxy releases
   relay-balancer: # applied Relay Balancer releases
+  relay-tunnel:   # applied tunnel engine releases
   relay-bin:      # relay binary for the engine agents (written by relay)

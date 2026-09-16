@@ -1,11 +1,12 @@
 // Command relay is the Relay reverse proxy + load balancer manager.
 //
 //	relay [serve]                         run the API, UI and MCP server
-//	relay agent --engine nginx | haproxy | edge | balancer  supervise an engine (engine containers)
+//	relay agent --engine nginx | haproxy | edge | balancer | tunnel  supervise an engine (engine containers)
 //	relay edge run --config FILE          run Relay Edge, the built-in reverse proxy
 //	relay edge check DIR                  validate a Relay Edge config release
 //	relay balancer run --config FILE      run Relay Balancer, the built-in load balancer
 //	relay balancer check DIR              validate a Relay Balancer config release
+//	relay gateway run|reset|info          run a tunnel gateway on a public server
 //	relay users reset-password <name>     reset a user's password
 //	relay mcp-stdio --url URL --token T   MCP over stdio for local clients
 //	relay version
@@ -37,6 +38,7 @@ import (
 	"github.com/instantoffr/relay/internal/edge"
 	"github.com/instantoffr/relay/internal/engines"
 	"github.com/instantoffr/relay/internal/events"
+	"github.com/instantoffr/relay/internal/gateway"
 	"github.com/instantoffr/relay/internal/geoip"
 	"github.com/instantoffr/relay/internal/health"
 	"github.com/instantoffr/relay/internal/lb"
@@ -77,7 +79,7 @@ func main() {
 		err = serve(ctx, log)
 	case "agent":
 		fs := flag.NewFlagSet("agent", flag.ExitOnError)
-		engine := fs.String("engine", "", "nginx | haproxy | edge | balancer")
+		engine := fs.String("engine", "", "nginx | haproxy | edge | balancer | tunnel")
 		runDir := fs.String("run-dir", envOr("RELAY_RUN_DIR", "/run/relay"), "socket directory")
 		logDir := fs.String("log-dir", envOr("RELAY_LOG_DIR", "/var/log/relay"), "log directory")
 		dataDir := fs.String("data-dir", envOr("RELAY_DATA_DIR", "/data"), "data directory")
@@ -87,6 +89,9 @@ func main() {
 		err = edge.RunCLI(ctx, args, os.Stdout, os.Stderr)
 	case "balancer":
 		err = balancer.RunCLI(ctx, args, os.Stdout, os.Stderr)
+	case "gateway":
+		gateway.Version = version
+		err = gateway.RunCLI(ctx, args, os.Stdout, os.Stderr)
 	case "users":
 		if len(args) != 2 || args[0] != "reset-password" {
 			err = errors.New("usage: relay users reset-password <username>")
