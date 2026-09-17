@@ -118,7 +118,7 @@ export default function TunnelsPage() {
             </div>
 
             <TableToolbar>
-              <SearchInput value={search} onChange={setSearch} placeholder="Search gateways or published hosts" label="Search gateways" />
+              <SearchInput value={search} onChange={setSearch} placeholder="Search gateways or hosts" label="Search gateways" />
               <div className="tun-filter">
                 <Select inputSize="sm" value={stateFilter} placeholder="All states" options={STATES} onChange={setStateFilter} aria-label="State" />
               </div>
