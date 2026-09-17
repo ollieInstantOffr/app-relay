@@ -2,6 +2,7 @@
 #
 # Relay image:
 #   docker build --target relay -t relay .     API, UI, MCP (+ agent binary)
+#   docker build --target gateway -t relay-gateway .   tunnel gateway for a public server
 #
 # nginx and HAProxy run the official images (docker-compose.yml). On start the
 # relay container copies its static binary to the relay-bin volume
@@ -30,6 +31,29 @@ ARG RELAY_VERSION=
 ARG RELAY_COMMIT=
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${RELAY_VERSION:-dev} -X main.commit=${RELAY_COMMIT}" -o /out/relay ./cmd/relay
+
+# ---------------------------------------------------------------- tunnel gateway
+# `relay gateway` for a public server (deploy/gateway, scripts/install-gateway.sh):
+# the same binary without the web UI, so small servers build it quickly.
+FROM golang:1.27-alpine AS gateway-build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+ARG RELAY_VERSION=
+ARG RELAY_COMMIT=
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    mkdir -p internal/webui/dist && echo '<!doctype html><title>Relay gateway</title>' > internal/webui/dist/index.html && \
+    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${RELAY_VERSION:-dev} -X main.commit=${RELAY_COMMIT}" -o /out/relay ./cmd/relay
+
+FROM alpine:3.22 AS gateway
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=gateway-build /out/relay /usr/local/bin/relay
+ENV RELAY_DATA_DIR=/data
+VOLUME ["/data"]
+ENTRYPOINT ["relay"]
+CMD ["gateway", "run"]
 
 # ---------------------------------------------------------------- relay (app)
 FROM alpine:3.22 AS relay

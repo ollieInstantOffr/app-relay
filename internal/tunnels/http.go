@@ -87,12 +87,44 @@ func Routes(app *core.App, r chi.Router) {
 		httpx.WriteJSON(w, http.StatusOK, o)
 	})
 	r.Post("/gateways/{id}/pairing", func(w http.ResponseWriter, r *http.Request) {
-		p, err := s.StartPairing(r.Context(), chi.URLParam(r, "id"))
+		var in struct {
+			Reset bool `json:"reset"`
+		}
+		if r.ContentLength > 0 {
+			if err := httpx.Decode(r, &in); err != nil {
+				httpx.Fail(w, r, err)
+				return
+			}
+		}
+		p, err := s.StartPairing(r.Context(), chi.URLParam(r, "id"), in.Reset)
 		if err != nil {
 			httpx.Fail(w, r, err)
 			return
 		}
 		httpx.WriteJSON(w, http.StatusOK, p)
+	})
+	r.Post("/gateways/{id}/check", func(w http.ResponseWriter, r *http.Request) {
+		c, err := s.Check(r.Context(), chi.URLParam(r, "id"))
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, c)
+	})
+	r.Post("/gateways/{id}/test", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Domain string `json:"domain"`
+		}
+		if err := httpx.Decode(r, &in); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		t, err := s.TestPublished(r.Context(), chi.URLParam(r, "id"), in.Domain)
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, t)
 	})
 	r.Post("/gateways/{id}/pair", func(w http.ResponseWriter, r *http.Request) {
 		g, err := s.Pair(r.Context(), chi.URLParam(r, "id"))

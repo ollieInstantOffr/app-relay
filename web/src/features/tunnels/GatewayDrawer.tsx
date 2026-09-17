@@ -6,13 +6,15 @@ import { ApiError, api } from '../../lib/api'
 import { useRole } from '../../lib/queries'
 import { ago, bytes } from '../../lib/format'
 import type { Gateway, GatewayTransport } from '../../lib/types'
-import { gatewayState, shortFingerprint, transportLabel, tunnelsDocs, useInvalidateTunnels, type GatewayView } from './api'
+import { TestResults } from './ConnectGatewayWizard'
+import { gatewayState, shortFingerprint, transportLabel, tunnelsDocs, useInvalidateTunnels, useTunnelTests, type GatewayView } from './api'
 
-export default function GatewayDrawer({ view, engineRunning, onClose, onPair }: {
+export default function GatewayDrawer({ view, engineRunning, onClose, onPair, onPublish }: {
   view: GatewayView
   engineRunning: boolean
   onClose: () => void
   onPair: (id: string) => void
+  onPublish: (id: string) => void
 }) {
   const { canWrite } = useRole()
   const readOnly = !canWrite
@@ -24,6 +26,9 @@ export default function GatewayDrawer({ view, engineRunning, onClose, onPair }: 
   const st = view.status
   const state = gatewayState(view, st, engineRunning)
   const paired = view.pairState === 'paired'
+  const tests = useTunnelTests(view.id)
+  const testDomains = view.published.hosts.filter((h) => !h.startsWith('*'))
+  const tested = testDomains.filter((d) => tests.results[d])
   const dirty = draft.name !== view.name || draft.address !== view.address || draft.transport !== view.transport || draft.enabled !== view.enabled
 
   const save = async () => {
@@ -114,15 +119,22 @@ export default function GatewayDrawer({ view, engineRunning, onClose, onPair }: 
       </div>
 
       <div className="col gap-8">
-        <div className="section-title">Published through this gateway</div>
+        <div className="row between">
+          <div className="section-title">Published through this gateway</div>
+          <div className="row gap-6">
+            {testDomains.length > 0 && <Button size="sm" onClick={() => testDomains.forEach(tests.test)}>Test from the internet</Button>}
+            {canWrite && paired && <Button size="sm" onClick={() => onPublish(view.id)}>Publish hosts…</Button>}
+          </div>
+        </div>
         {view.published.hosts.length + view.published.streams.length === 0 ? (
-          <div className="small faint">Nothing yet · choose <span className="medium">Publish through tunnel</span> in a host or TCP stream.</div>
+          <div className="small faint">Nothing yet · use <span className="medium">Publish hosts</span>, or choose <span className="medium">Publish through tunnel</span> in a host or TCP stream.</div>
         ) : (
           <div className="row wrap gap-6">
             {view.published.hosts.map((h) => <Badge key={h}>{h}</Badge>)}
             {view.published.streams.map((s) => <Badge key={s} tone="info">{s}</Badge>)}
           </div>
         )}
+        {tested.length > 0 && <TestResults domains={tested} results={tests.results} onTest={tests.test} />}
       </div>
 
       <div className="col gap-8">
@@ -143,8 +155,8 @@ export default function GatewayDrawer({ view, engineRunning, onClose, onPair }: 
         </div>
         {canWrite && (
           <div className="row gap-8">
-            <Button onClick={() => onPair(view.id)}>{paired ? 'Pair again…' : 'Show pairing command'}</Button>
-            {paired && <span className="small faint">Pairing again replaces the keys; run <span className="mono">relay gateway reset</span> on the server first.</span>}
+            <Button onClick={() => onPair(view.id)}>{paired ? 'Pair again…' : 'Continue setup…'}</Button>
+            {paired && <span className="small faint">Pairing again replaces the keys. The new install command resets the gateway for you.</span>}
           </div>
         )}
       </div>

@@ -4,14 +4,14 @@ import { useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { TopBar } from '../../components/shell/TopBar'
 import {
-  Badge, Button, Card, ConfirmDialog, Dot, EmptyState, IconButton, ListPager, Menu, NoMatches, SearchInput, Select, Skeleton, StatCard, Status, TableToolbar,
+  Badge, Button, Card, ConfirmDialog, Dot, IconButton, ListPager, Menu, NoMatches, SearchInput, Select, Skeleton, StatCard, Status, TableToolbar,
   cx, matchesSearch, useFitGrid, usePagination, useToast,
 } from '../../components/ui'
 import { api } from '../../lib/api'
 import { useEngine, useRole } from '../../lib/queries'
 import { ago, bytes, pluralize } from '../../lib/format'
 import type { Gateway } from '../../lib/types'
-import ConnectGatewayWizard from './ConnectGatewayWizard'
+import ConnectGatewayWizard, { TunnelDiagram } from './ConnectGatewayWizard'
 import GatewayDrawer from './GatewayDrawer'
 import { gatewayState, shortFingerprint, transportLabel, tunnelsDocs, useInvalidateTunnels, useTunnels, type GatewayView } from './api'
 import './tunnels.css'
@@ -37,6 +37,7 @@ export default function TunnelsPage() {
   const { pageSize } = useFitGrid(gridRef, { reserve: 20 + 28 + 24, min: 1, itemHeight: 190 })
 
   const connectOpen = params.get('connect') ?? ''
+  const connectStart = params.get('start') === 'publish' ? 'publish' : undefined
   const editId = params.get('edit') ?? ''
   const update = (mut: (p: URLSearchParams) => void) => {
     const next = new URLSearchParams(params)
@@ -92,7 +93,7 @@ export default function TunnelsPage() {
         actions={
           <>
             <Link to={tunnelsDocs}><Button>How tunnels work</Button></Link>
-            {canWrite && <Button variant="primary" icon="plus" onClick={() => update((p) => p.set('connect', 'new'))}>Connect gateway</Button>}
+            {canWrite && gateways.length > 0 && <Button variant="primary" icon="plus" onClick={() => update((p) => p.set('connect', 'new'))}>Set up a tunnel</Button>}
           </>
         }
       />
@@ -101,12 +102,39 @@ export default function TunnelsPage() {
           <div className="grid-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} height={96} />)}</div>
         ) : gateways.length === 0 ? (
           <Card>
-            <EmptyState
-              icon="tunnel"
-              title="No tunnel gateways"
-              description="Publish hosts and TCP streams through a small gateway on a public server, without opening ports on your router. Relay dials out to it and HTTPS stays encrypted until it reaches this Relay."
-              actions={canWrite ? <Button variant="primary" icon="plus" onClick={() => update((p) => p.set('connect', 'new'))}>Connect gateway</Button> : undefined}
-            />
+            <div className="tun-onboard">
+              <div>
+                <h2>Publish apps without opening ports</h2>
+                <div className="tun-onboard-lede">
+                  Rent a small server with a public IP, run one command on it, and choose which hosts go public. Visitors reach the server, and
+                  Relay at home dials out to it, so it works behind CGNAT and your home IP stays private. HTTPS stays encrypted until it reaches this Relay.
+                </div>
+              </div>
+              <TunnelDiagram compact />
+              <div className="tun-onboard-steps">
+                {[
+                  ['Add your server', 'Enter the IP address of a Linux server, e.g. a €4/month VPS.'],
+                  ['Run one command', 'Paste it over SSH. It installs everything and pairs with Relay automatically.'],
+                  ['Choose what to publish', 'Pick hosts, point DNS at the server and go live. Relay tests it for you.'],
+                ].map(([t, d], i) => (
+                  <div key={t} className="tun-onboard-step">
+                    <span className="tun-num">{i + 1}</span>
+                    <div>
+                      <div className="tun-onboard-step-title">{t}</div>
+                      <div className="tun-onboard-step-text">{d}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {canWrite ? (
+                <div className="row gap-8">
+                  <Link to={tunnelsDocs}><Button>How tunnels work</Button></Link>
+                  <Button variant="primary" icon="plus" onClick={() => update((p) => p.set('connect', 'new'))}>Set up a tunnel</Button>
+                </div>
+              ) : (
+                <div className="small faint">Ask an admin to set up a tunnel.</div>
+              )}
+            </div>
           </Card>
         ) : (
           <>
@@ -136,6 +164,7 @@ export default function TunnelsPage() {
                     canWrite={canWrite}
                     onEdit={() => update((p) => p.set('edit', g.id))}
                     onPair={() => update((p) => p.set('connect', g.id))}
+                    onPublish={() => update((p) => { p.set('connect', g.id); p.set('start', 'publish') })}
                     onEnable={(v) => setEnabled(g, v)}
                     onDelete={() => setDeleting(g)}
                   />
@@ -148,7 +177,12 @@ export default function TunnelsPage() {
       </div>
 
       {connectOpen && canWrite && (
-        <ConnectGatewayWizard key={connectOpen} gatewayId={connectOpen === 'new' ? undefined : connectOpen} onClose={() => update((p) => p.delete('connect'))} />
+        <ConnectGatewayWizard
+          key={connectOpen + (connectStart ?? '')}
+          gatewayId={connectOpen === 'new' ? undefined : connectOpen}
+          startAt={connectStart}
+          onClose={() => update((p) => { p.delete('connect'); p.delete('start') })}
+        />
       )}
       {editing && (
         <GatewayDrawer
@@ -157,6 +191,7 @@ export default function TunnelsPage() {
           engineRunning={engineRunning}
           onClose={() => update((p) => p.delete('edit'))}
           onPair={(id) => update((p) => { p.delete('edit'); p.set('connect', id) })}
+          onPublish={(id) => update((p) => { p.delete('edit'); p.set('connect', id); p.set('start', 'publish') })}
         />
       )}
       <ConfirmDialog
@@ -186,12 +221,13 @@ export default function TunnelsPage() {
   )
 }
 
-function GatewayCard({ view: g, engineRunning, canWrite, onEdit, onPair, onEnable, onDelete }: {
+function GatewayCard({ view: g, engineRunning, canWrite, onEdit, onPair, onPublish, onEnable, onDelete }: {
   view: GatewayView
   engineRunning: boolean
   canWrite: boolean
   onEdit: () => void
   onPair: () => void
+  onPublish: () => void
   onEnable: (enabled: boolean) => void
   onDelete: () => void
 }) {
@@ -222,7 +258,8 @@ function GatewayCard({ view: g, engineRunning, canWrite, onEdit, onPair, onEnabl
             { label: canWrite ? 'Edit' : 'View', icon: 'edit', shortcut: 'E', onSelect: onEdit },
             ...(canWrite
               ? [
-                  { label: g.pairState === 'paired' ? 'Pair again…' : 'Show pairing command', icon: 'token' as const, onSelect: onPair },
+                  ...(g.pairState === 'paired' ? [{ label: 'Publish hosts…', icon: 'expose' as const, onSelect: onPublish }] : []),
+                  { label: g.pairState === 'paired' ? 'Pair again…' : 'Continue setup…', icon: 'token' as const, onSelect: onPair },
                   { label: g.enabled ? 'Disable' : 'Enable', icon: 'power' as const, onSelect: () => onEnable(!g.enabled) },
                   'separator' as const,
                   { label: 'Delete…', icon: 'trash' as const, danger: true, onSelect: onDelete },
@@ -238,11 +275,15 @@ function GatewayCard({ view: g, engineRunning, canWrite, onEdit, onPair, onEnabl
         {g.pairState !== 'paired' ? (
           <div className="tun-route idle">
             <Dot tone="warn" />
-            <span className="grow">Start the gateway on the server with the pairing command</span>
-            {canWrite && <Button size="sm" onClick={onPair}>Show command</Button>}
+            <span className="grow">Setup isn't finished · run the install command on the server</span>
+            {canWrite && <Button size="sm" variant="primary" onClick={onPair}>Continue setup</Button>}
           </div>
         ) : published === 0 ? (
-          <div className="small faint">Nothing published · choose <span className="medium">Publish through tunnel</span> in a host or TCP stream</div>
+          <div className="tun-route idle">
+            <Dot tone="muted" />
+            <span className="grow">Connected · nothing published yet</span>
+            {canWrite && <Button size="sm" variant="primary" onClick={onPublish}>Publish hosts</Button>}
+          </div>
         ) : (
           <>
             {g.published.hosts.slice(0, 4).map((h) => (

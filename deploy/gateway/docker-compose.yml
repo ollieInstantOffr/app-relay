@@ -3,15 +3,16 @@
 # the gateway never decrypts HTTPS (it routes by SNI) and keeps no config of
 # its own: Relay pushes what it publishes.
 #
-# In Relay: Tunnels → Connect gateway shows the command with a one-time token:
+# The easy way is the one-line installer Relay shows in Tunnels → Connect
+# gateway (scripts/install-gateway.sh), which uses this file. By hand:
 #
 #   RELAY_GATEWAY_PAIR_TOKEN=rlypair1_… docker compose -f deploy/gateway/docker-compose.yml up -d --build
 #
 # Firewall: open 80/tcp, 443/tcp, 7443/tcp and 7443/udp (the tunnel), plus the
 # TCP ports of streams you publish.
 #
-# Pair again later: docker compose -f deploy/gateway/docker-compose.yml exec gateway relay gateway reset
-# then start it with a new token. Show the gateway's key: … exec gateway relay gateway info
+# Pair again later: docker exec relay-gateway relay gateway reset, then start
+# it with a new token. Show the gateway's key: docker exec relay-gateway relay gateway info
 
 name: relay-gateway
 
@@ -19,14 +20,16 @@ services:
   gateway:
     build:
       context: ../..
-      target: relay
-    image: relay:latest
+      target: gateway
+      args:
+        RELAY_VERSION: ${RELAY_VERSION:-}
+        RELAY_COMMIT: ${RELAY_COMMIT:-}
+    image: relay-gateway:local
     container_name: relay-gateway
     network_mode: host
     restart: unless-stopped
     stop_signal: SIGTERM
     stop_grace_period: 15s
-    command: ["gateway", "run"]
     environment:
       RELAY_DATA_DIR: /data
       # Only used until the gateway is paired; it is ignored afterwards.
@@ -34,8 +37,6 @@ services:
       TZ: ${TZ:-UTC}
     volumes:
       - relay-gateway:/data
-    healthcheck:
-      disable: true
 
 volumes:
   relay-gateway: # the gateway's key and pairing state

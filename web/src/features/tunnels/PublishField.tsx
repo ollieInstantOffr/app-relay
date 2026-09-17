@@ -1,11 +1,11 @@
 // "Publish through tunnel" for the host and stream drawers.
 import { Link } from 'react-router-dom'
-import { Dot, Field, Select } from '../../components/ui'
+import { Button, Dot, Field, Select } from '../../components/ui'
 import { useEntities } from '../../lib/queries'
 import { gatewayState, useTunnels } from './api'
 import './tunnels.css'
 
-/** Renders nothing until a gateway exists (and nothing is selected). */
+/** Offers to set up a tunnel until a gateway exists. */
 export function PublishField({ value, onChange, readOnly, error, disabled, note }: {
   value?: string
   onChange: (gatewayId: string | undefined) => void
@@ -17,7 +17,17 @@ export function PublishField({ value, onChange, readOnly, error, disabled, note 
 }) {
   const gateways = useEntities('gateways').data ?? []
   const tunnels = useTunnels(15_000).data
-  if (gateways.length === 0 && !value) return null
+  if (gateways.length === 0 && !value) {
+    if (readOnly || disabled) return null
+    return (
+      <Field label="Publish through tunnel">
+        <div className="tun-publish-cta">
+          <span className="grow">Make this reachable from the internet without port forwarding, through your own server.</span>
+          <Link to="/tunnels?connect=new"><Button size="sm">Set up a tunnel</Button></Link>
+        </div>
+      </Field>
+    )
+  }
 
   const selected = gateways.find((g) => g.id === value)
   const view = tunnels?.gateways.find((g) => g.id === value)

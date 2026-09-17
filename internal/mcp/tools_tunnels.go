@@ -69,7 +69,7 @@ func (s *Service) registerTunnelTools() {
 					if err := s.apiCall(ctx, http.MethodPost, "/gateways/"+url.PathEscape(mStr(g["id"]))+"/pairing", nil, &p); err != nil {
 						return nil, err
 					}
-					text := fmt.Sprintf("Created gateway %s (id %s). On the server, run:\n\n%s\n\nOpen ports %s, then call pair_gateway.", in.Name, mStr(g["id"]), mStr(p["install"]), strings.Join(mStrs(p["ports"]), ", "))
+					text := fmt.Sprintf("Created gateway %s (id %s). On the server (as root, over SSH), run the one-line installer. It installs Docker if needed, builds and starts the gateway and opens ports %s in ufw/firewalld:\n\n%s\n\nAlso allow those ports in the hosting provider's firewall, then call pair_gateway.", in.Name, mStr(g["id"]), strings.Join(mStrs(p["ports"]), ", "), mStr(p["install"]))
 					return &outcome{Text: text, Structured: map[string]any{"gateway": g, "pairing": p}}, nil
 				},
 			}, nil

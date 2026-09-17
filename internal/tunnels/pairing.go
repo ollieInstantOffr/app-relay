@@ -24,17 +24,26 @@ type Pairing struct {
 	Token           string    `json:"token"`
 	ExpiresAt       time.Time `json:"expiresAt"`
 	HomeFingerprint string    `json:"homeFingerprint"`
-	// Install is the command that installs and starts the gateway with the token.
+	// Install is the one-line installer: Docker, the gateway and the token.
 	Install string `json:"install"`
+	// Manual installs with Docker Compose from a clone of the repository.
+	Manual string `json:"manual"`
 	// Env is the token as an environment variable line (for an existing install).
 	Env string `json:"env"`
 	// Ports the gateway host must accept (firewall).
 	Ports []string `json:"ports"`
+	// Ref is the Relay commit (or branch) the gateway is built from.
+	Ref string `json:"ref"`
 }
+
+// installerURL is the one-line gateway installer in the public repository.
+const installerURL = "https://raw.githubusercontent.com/ollieInstantOffr/app-relay/main/scripts/install-gateway.sh"
 
 // StartPairing creates a new one-time token for a gateway (replacing an older
 // one) and returns the setup command. A paired gateway goes back to pending.
-func (s *Service) StartPairing(ctx context.Context, id string) (*Pairing, error) {
+// reset makes the command forget an earlier pairing on the server (always
+// the case when re-pairing).
+func (s *Service) StartPairing(ctx context.Context, id string, reset bool) (*Pairing, error) {
 	g, err := s.app.Store.Gateways().Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -61,19 +70,55 @@ func (s *Service) StartPairing(ctx context.Context, id string) (*Pairing, error)
 	}
 	s.app.Audit(ctx, core.AuditEntry{Action: "gateway.pairing", Target: g.Name, Detail: detail, Result: "ok"})
 	_, port, _ := model.SplitGatewayAddress(g.Address)
+	ref, version := s.buildRef()
+	args := []string{"--token", tok.String(), "--ref", ref}
+	if version != "" {
+		args = append(args, "--version", version)
+	}
+	if wasPaired || reset {
+		args = append(args, "--reset")
+	}
 	return &Pairing{
-		Token: tok.String(), ExpiresAt: exp, HomeFingerprint: ident.Fingerprint(),
-		Install: installCommand(tok.String()),
-		Env:     "RELAY_GATEWAY_PAIR_TOKEN=" + tok.String(),
-		Ports:   []string{"80/tcp", "443/tcp", fmt.Sprintf("%d/tcp", port), fmt.Sprintf("%d/udp", port)},
+		Token: tok.String(), ExpiresAt: exp, HomeFingerprint: ident.Fingerprint(), Ref: ref,
+		Install: "curl -fsSL " + installerURL + " | sudo sh -s -- " + strings.Join(args, " "),
+		Manual: strings.Join([]string{
+			"git clone https://github.com/ollieInstantOffr/app-relay.git relay-gateway && cd relay-gateway && git checkout " + ref,
+			"RELAY_GATEWAY_PAIR_TOKEN=" + tok.String() + " docker compose -f deploy/gateway/docker-compose.yml up -d --build",
+		}, "\n"),
+		Env:   "RELAY_GATEWAY_PAIR_TOKEN=" + tok.String(),
+		Ports: []string{"80/tcp", "443/tcp", fmt.Sprintf("%d/tcp", port), fmt.Sprintf("%d/udp", port)},
 	}, nil
 }
 
-func installCommand(token string) string {
-	return strings.Join([]string{
-		"git clone https://github.com/ollieInstantOffr/app-relay.git relay-gateway && cd relay-gateway",
-		"RELAY_GATEWAY_PAIR_TOKEN=" + token + " docker compose -f deploy/gateway/docker-compose.yml up -d --build",
-	}, "\n")
+// buildRef is the git ref (this Relay's commit, else main) and version label
+// a gateway is installed from, so both run the same code.
+func (s *Service) buildRef() (ref, version string) {
+	ref = "main"
+	if c := strings.TrimSpace(s.app.Config.Commit); len(c) >= 7 && isHex(c) {
+		ref = c
+	}
+	if v := strings.TrimSpace(s.app.Config.Version); v != "" && v != "dev" && isVersion(v) {
+		version = v
+	}
+	return ref, version
+}
+
+func isHex(s string) bool {
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func isVersion(s string) bool {
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c == '.' || c >= 'a' && c <= 'z' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // Pair connects to a pending gateway and pairs with its token. The UI calls
@@ -116,7 +161,7 @@ func (s *Service) Pair(ctx context.Context, id string) (*model.Gateway, error) {
 	case errors.Is(err, pair.ErrBadProof):
 		s.app.Audit(ctx, core.AuditEntry{Action: "gateway.pair", Target: g.Name, Detail: "the gateway rejected the pairing token", Result: "failed"})
 		return nil, httpx.Errorf(http.StatusConflict, "pairing_rejected",
-			"The gateway rejected the pairing token. If it was paired before, run `relay gateway reset` on it (see the pairing instructions) and try again with a new command.")
+			"The gateway rejected the pairing token. It is probably paired with another Relay or was started with an older token: create a new command (it resets the gateway) and run it on the server again.")
 	case errors.Is(err, pair.ErrExpired):
 		return nil, httpx.Errorf(http.StatusGone, "token_expired", "The pairing token has expired. Create a new pairing command.")
 	case err != nil:

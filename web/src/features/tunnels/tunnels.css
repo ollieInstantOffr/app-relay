@@ -27,16 +27,86 @@
 
 /* connect wizard */
 .tun-step-title { font-size: 13px; font-weight: 600; }
-.tun-code { position: relative; }
-.tun-code .code { padding-right: 84px; }
-.tun-code-copy { position: absolute; top: 8px; right: 8px; }
-.tun-waiting {
-  display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--hairline); border-radius: 8px; background: var(--surface-3);
+
+.tun-diagram {
+  display: grid; grid-template-columns: minmax(0, 1fr) 36px minmax(0, 1fr) minmax(90px, 150px) minmax(0, 1fr) 36px minmax(0, 1fr);
+  align-items: start; padding: 16px 12px 14px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--surface-3);
 }
-.tun-pick { border: 1px solid var(--hairline); border-radius: 8px; max-height: 280px; overflow: auto; }
+.tun-diagram-arrow { position: relative; height: 1px; margin-top: 16px; background: var(--hairline-strong); }
+.tun-diagram-arrow::after { content: ''; position: absolute; right: -1px; top: -3px; border: 3.5px solid transparent; border-left: 5px solid var(--ink-faint); border-right: 0; }
+.tun-diagram-arrow.tunnel { height: 0; margin: 16px 6px 0; background: none; border-top: 2px dashed var(--ok); }
+.tun-diagram-arrow.tunnel::after { top: -5.5px; right: -2px; border-left-color: var(--ok); }
+.tun-diagram-arrow span {
+  position: absolute; left: 50%; bottom: 7px; transform: translateX(-50%); white-space: nowrap;
+  font: 10px var(--font-mono); color: var(--ok-text); background: var(--ok-bg); padding: 1px 7px; border-radius: 99px;
+}
+.tun-diagram-node { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; min-width: 0; }
+.tun-diagram-icon { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--surface); border: 1px solid var(--hairline-mid); color: var(--ink-muted); margin-bottom: 5px; }
+.tun-diagram-title { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.tun-diagram-sub { font-size: 11px; color: var(--ink-faint); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tun-diagram.compact { width: 100%; max-width: 640px; }
+@media (max-width: 760px) { .tun-diagram-sub, .tun-diagram-arrow span { display: none; } }
+
+.tun-needs { border: 1px solid var(--hairline); border-radius: 8px; padding: 12px 14px; }
+.tun-needs-title { font-size: 12px; font-weight: 600; color: var(--ink-muted); margin-bottom: 6px; }
+.tun-needs ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.tun-needs li { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: var(--ink-subtle); }
+.tun-needs li svg { color: var(--ok); flex: none; margin-top: 2px; }
+
+.tun-advanced summary { cursor: pointer; font-size: 12.5px; color: var(--ink-subtle); list-style: none; display: inline-flex; align-items: center; gap: 6px; user-select: none; }
+.tun-advanced summary::-webkit-details-marker { display: none; }
+.tun-advanced summary::before { content: ''; border: 4px solid transparent; border-left: 5px solid currentColor; border-right: 0; transition: transform 120ms; }
+.tun-advanced[open] summary::before { transform: rotate(90deg); }
+.tun-advanced summary:hover { color: var(--ink); }
+
+.tun-install { display: flex; flex-direction: column; }
+.tun-install-step { display: flex; gap: 14px; position: relative; padding-bottom: 20px; }
+.tun-install-step:last-child { padding-bottom: 0; }
+.tun-install-step:not(:last-child)::before { content: ''; position: absolute; left: 11px; top: 28px; bottom: 4px; width: 1px; background: var(--hairline-mid); }
+.tun-num { flex: none; width: 23px; height: 23px; border-radius: 50%; display: grid; place-items: center; font: 600 11.5px var(--font-mono); background: var(--ink); color: var(--surface); }
+.tun-install-step .grow { min-width: 0; }
+.tun-inline-cmd { display: inline-flex; align-self: flex-start; align-items: center; gap: 10px; padding: 4px 4px 4px 10px; border: 1px solid var(--hairline-mid); border-radius: 7px; background: var(--surface-3); font-size: 12.5px; }
+.tun-cmd { position: relative; }
+.tun-cmd .code { padding: 14px 176px 14px 14px; font-size: 12.5px; line-height: 1.55; }
+.tun-cmd-copy { position: absolute; top: 9px; right: 9px; }
+
+.tun-checklist { border: 1px solid var(--hairline); border-radius: 8px; overflow: hidden; }
+.tun-check { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--hairline-soft); }
+.tun-check:last-child { border-bottom: 0; }
+.tun-check-icon { flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; color: var(--ink-faint); }
+.tun-check-dot { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--hairline-strong); }
+.tun-check-title { font-size: 13px; color: var(--ink-faint); line-height: 20px; }
+.tun-check-detail { font-size: 12px; color: var(--ink-subtle); margin-top: 1px; overflow-wrap: anywhere; }
+.tun-check.active .tun-check-title { color: var(--ink); }
+.tun-check.ok .tun-check-icon { background: var(--ok-bg); color: var(--ok-text); }
+.tun-check.ok .tun-check-title { color: var(--ink); }
+.tun-check.fail { background: var(--danger-bg); }
+.tun-check.fail .tun-check-icon { color: var(--danger); }
+.tun-check.fail .tun-check-title { color: var(--danger-text); }
+.tun-check.warn .tun-check-icon { background: var(--warn-bg); color: var(--warn); }
+.tun-check.warn .tun-check-title { color: var(--ink); }
+
+.tun-dns { display: flex; flex-direction: column; gap: 6px; }
+.tun-dns-table { margin-top: 4px; border: 1px solid var(--hairline); border-radius: 8px; }
+.tun-dns-table td, .tun-dns-table th { font-size: 12px; }
+
+.tun-pick { border: 1px solid var(--hairline); border-radius: 8px; max-height: 260px; overflow: auto; }
 .tun-pick-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--hairline-soft); cursor: pointer; font-size: 13px; }
 .tun-pick-row:last-child { border-bottom: 0; }
 .tun-pick-row:hover { background: var(--surface-3); }
 
+/* empty state onboarding */
+.tun-onboard { padding: 36px 32px 32px; display: flex; flex-direction: column; align-items: center; gap: 22px; text-align: center; }
+.tun-onboard h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.tun-onboard-lede { max-width: 560px; color: var(--ink-subtle); font-size: 13.5px; line-height: 1.55; margin-top: 6px; }
+.tun-onboard-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; width: 100%; max-width: 820px; text-align: left; }
+@media (max-width: 900px) { .tun-onboard-steps { grid-template-columns: 1fr; } }
+.tun-onboard-step { border: 1px solid var(--hairline); border-radius: 10px; padding: 14px; display: flex; gap: 12px; }
+.tun-onboard-step .tun-num { background: var(--surface-2); color: var(--ink); }
+.tun-onboard-step-title { font-size: 13px; font-weight: 600; }
+.tun-onboard-step-text { font-size: 12.5px; color: var(--ink-subtle); margin-top: 3px; line-height: 1.45; }
+
 /* host drawer / stream drawer */
 .tun-publish-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-subtle); margin-top: 6px; }
+.tun-publish-cta { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px dashed var(--hairline-strong); border-radius: 8px; font-size: 12.5px; color: var(--ink-subtle); }
+.tun-publish-cta .grow { min-width: 0; }

@@ -112,7 +112,7 @@ func TestPairingFlow(t *testing.T) {
 	if _, err := e.svc.Pair(e.ctx, g.ID); err == nil {
 		t.Fatal("paired without a token")
 	}
-	p, err := e.svc.StartPairing(e.ctx, g.ID)
+	p, err := e.svc.StartPairing(e.ctx, g.ID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestPairingFlow(t *testing.T) {
 	}
 
 	// Re-pairing drops the pin until the gateway pairs again.
-	if _, err := e.svc.StartPairing(e.ctx, g.ID); err != nil {
+	if _, err := e.svc.StartPairing(e.ctx, g.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	data, _ = os.ReadFile(filepath.Join(e.app.Config.DataDir, "tunnel", tunnel.GatewaysFileName))
@@ -181,7 +181,7 @@ func TestPairUnreachable(t *testing.T) {
 	addr := ln.Addr().String()
 	ln.Close()
 	g := e.createGateway(t, addr)
-	if _, err := e.svc.StartPairing(e.ctx, g.ID); err != nil {
+	if _, err := e.svc.StartPairing(e.ctx, g.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	_, err := e.svc.Pair(e.ctx, g.ID)
@@ -274,4 +274,75 @@ func TestTrackAlerts(t *testing.T) {
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+func TestSetupCheck(t *testing.T) {
+	e := newEnv(t)
+	var mu sync.Mutex
+	var token pair.Token
+	addr, _, _ := fakeGateway(t, func() pair.Token { mu.Lock(); defer mu.Unlock(); return token })
+
+	// Nothing listening yet: the port step waits.
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	closed := ln.Addr().String()
+	ln.Close()
+	g := e.createGateway(t, closed)
+	if _, err := e.svc.StartPairing(e.ctx, g.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	c, err := e.svc.Check(e.ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Paired || c.Steps[0].Status != StepOK || c.Steps[1].Status != StepWaiting || c.Steps[2].Status != StepWaiting {
+		t.Fatalf("closed port: %+v", c.Steps)
+	}
+
+	// An unresolvable name fails the first step.
+	bad := e.createGateway(t, "does-not-exist.invalid")
+	c, _ = e.svc.Check(e.ctx, bad.ID)
+	if c.Steps[0].Status != StepFail {
+		t.Fatalf("bad name: %+v", c.Steps)
+	}
+
+	// A running gateway pairs from the check.
+	g2 := e.createGateway(t, addr)
+	p, err := e.svc.StartPairing(e.ctx, g2.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(p.Install, "--reset") || !strings.Contains(p.Install, "install-gateway.sh | sudo sh -s -- --token "+p.Token+" --ref main") {
+		t.Errorf("install command: %s", p.Install)
+	}
+	tok, _ := pair.ParseToken(p.Token)
+	mu.Lock()
+	token = tok
+	mu.Unlock()
+	c, err = e.svc.Check(e.ctx, g2.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Paired || c.Steps[2].Status != StepOK || c.Gateway.PairToken != "" {
+		t.Fatalf("pairing check: %+v", c)
+	}
+	// Re-pairing asks the server to forget the old pairing.
+	p, _ = e.svc.StartPairing(e.ctx, g2.ID, false)
+	if !strings.Contains(p.Install, "--reset") {
+		t.Errorf("re-pair command without --reset: %s", p.Install)
+	}
+}
+
+func TestPublishTestUnreachable(t *testing.T) {
+	e := newEnv(t)
+	g := e.createGateway(t, "127.0.0.1:1")
+	res, err := e.svc.TestPublished(e.ctx, g.ID, "App.Example.com.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Domain != "app.example.com" || res.Reachable || res.Detail == "" {
+		t.Fatalf("result %+v", res)
+	}
+	if _, err := e.svc.TestPublished(e.ctx, g.ID, "not a domain"); err == nil {
+		t.Error("invalid domain accepted")
+	}
 }

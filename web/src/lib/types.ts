@@ -485,6 +485,8 @@ export interface GatewayPairing {
   expiresAt: string
   homeFingerprint: string
   install: string
+  manual: string
+  ref: string
   env: string
   ports: string[]
 }

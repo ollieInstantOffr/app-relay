@@ -26,28 +26,34 @@ function Tunnels() {
         <li><strong>TCP streams too</strong> (game servers, SSH, databases); UDP isn’t carried.</li>
       </List>
 
-      <H2>Connect a gateway</H2>
+      <H2>Set up a tunnel</H2>
+      <P>You need a Linux server with a public IP address (a small VPS is plenty) and SSH access with sudo. The wizard walks you through it:</P>
       <Steps>
-        <Step title="Create the gateway in Relay">
-          <UI>Tunnels → Connect gateway</UI>. Enter a name and the server’s public address (host name or IP). Relay creates a key for it and a one-time pairing token.
+        <Step title="Add your server">
+          <UI>Tunnels → Set up a tunnel</UI>. Enter the server’s public IP address or host name. Relay creates a key for the gateway and a one-time pairing token.
         </Step>
-        <Step title="Start the gateway on the server">
-          The wizard shows the command, with the token filled in. It needs Docker with Compose on the server:
+        <Step title="Run one command on the server">
+          Connect with SSH and paste the command from the wizard. The token and the Relay version are filled in:
           <Example
             lang="shell"
-            code={'git clone https://github.com/ollieInstantOffr/app-relay.git relay-gateway && cd relay-gateway\nRELAY_GATEWAY_PAIR_TOKEN=rlypair1_… docker compose -f deploy/gateway/docker-compose.yml up -d --build'}
+            code={'curl -fsSL https://raw.githubusercontent.com/ollieInstantOffr/app-relay/main/scripts/install-gateway.sh \\\n  | sudo sh -s -- --token rlypair1_… --ref <commit>'}
           />
-          Allow <C>80/tcp</C>, <C>443/tcp</C>, <C>7443/tcp</C> and <C>7443/udp</C> in the server’s firewall, plus the TCP ports of streams you publish.
+          It installs Docker when it’s missing, builds the gateway from the same version as your Relay, starts the <C>relay-gateway</C> container and opens{' '}
+          <C>80/tcp</C>, <C>443/tcp</C>, <C>7443/tcp</C> and <C>7443/udp</C> in ufw or firewalld. If your provider has its own firewall (security groups),
+          allow those ports there too, plus the TCP ports of streams you publish. Prefer to do it yourself? Choose <UI>Docker Compose</UI> in the wizard.
         </Step>
-        <Step title="Wait for pairing">
-          Relay keeps trying while the wizard is open and pairs as soon as the gateway answers. Both sides then only trust each other’s keys; the token is used up.
+        <Step title="Relay connects automatically">
+          While the wizard is open, Relay checks the address, waits for the gateway to answer on port 7443 and pairs as soon as it does. Both sides then only
+          trust each other’s keys; the token is used up. You can close the wizard and continue later from the gateway card.
         </Step>
-        <Step title="Publish hosts and streams">
-          Pick them in the last step, or later in a host (<UI>Details → Publish through tunnel</UI>) or a TCP stream. Publishing is a normal pending change: apply it.
+        <Step title="Choose what to publish">
+          Tick hosts and TCP streams and choose <UI>Publish and go live</UI>: Relay saves and applies the change. Later, use <UI>Publish hosts</UI> on the
+          gateway, or <UI>Details → Publish through tunnel</UI> in a host or TCP stream.
         </Step>
-        <Step title="Point DNS at the gateway">
-          The domains of published hosts must resolve to the gateway. With <See id="public-dns">Public DNS</See>, new records point there automatically; change
-          existing records by hand.
+        <Step title="Point DNS at the server">
+          The wizard lists the DNS records to create. With <See id="public-dns">Public DNS</See>, new records point there automatically; change existing
+          records by hand. Relay then tests each domain through the gateway, like a visitor, and shows whether it is reachable, the certificate is trusted
+          and DNS points at the server. Run the test again any time from the gateway’s details.
         </Step>
       </Steps>
       <GoTo to="/tunnels">Tunnels</GoTo>
@@ -84,10 +90,10 @@ function Tunnels() {
       <Table
         head={['Task', 'How']}
         rows={[
-          ['Pair again (new server or lost state)', <>On the server: <C>docker compose -f deploy/gateway/docker-compose.yml exec gateway relay gateway reset</C>. In Relay: <UI>Pair again…</UI> and start the gateway with the new token.</>],
-          ['Check the gateway key', <><C>… exec gateway relay gateway info</C> shows the fingerprint; compare it with the gateway key in Relay.</>],
-          ['Update the gateway', <>On the server: <C>git pull</C>, then the same <C>docker compose … up -d --build</C> without a token. Keep it on the same Relay version.</>],
-          ['Remove it', <>Stop publishing hosts and streams through it and apply, then delete the gateway in Relay and stop the container on the server.</>],
+          ['Pair again (new server or lost state)', <>In Relay: <UI>Pair again…</UI>, then run the new command on the server. It resets the old pairing for you.</>],
+          ['Check the gateway key', <><C>docker exec relay-gateway relay gateway info</C> shows the fingerprint; compare it with the gateway key in Relay.</>],
+          ['Update the gateway', <>Run the installer again without <C>--token</C> and with <C>--ref</C> set to your Relay’s commit; the gateway keeps its pairing. Keep it on the same Relay version.</>],
+          ['Remove it', <>Stop publishing hosts and streams through it and apply, then delete the gateway in Relay. On the server: <C>curl -fsSL …/install-gateway.sh | sudo sh -s -- --uninstall --purge</C>.</>],
         ]}
       />
       <Tip>A backup of Relay contains the gateways but not their keys. After restoring on a new machine, pair the gateways again.</Tip>
@@ -96,8 +102,8 @@ function Tunnels() {
       <Table
         head={['Problem', 'What to check']}
         rows={[
-          ['The wizard keeps waiting', <>The gateway container is running (<C>docker logs relay-gateway</C>) and TCP port 7443 is open from the internet.</>],
-          ['“The gateway rejected the pairing token”', <>It was already paired or started with another token. Run <C>relay gateway reset</C> on the server and use a new command.</>],
+          ['The wizard keeps waiting', <>The checklist shows the step it waits for. The first install builds the gateway and can take 5–10 minutes. Then check <C>docker logs relay-gateway</C> and that TCP port 7443 is open in the provider’s firewall too.</>],
+          ['“The gateway rejected the pairing token”', <>It was already paired or started with another token. Choose <UI>Create a new command</UI> and run it on the server; it resets the gateway.</>],
           ['Connected over TCP instead of QUIC', <>UDP port 7443 is blocked by the server’s or your network’s firewall. TCP works; QUIC reconnects faster.</>],
           ['A published site doesn’t load', <>DNS points at the gateway, the host is applied, and the gateway card shows <C>connected</C>. Port 80/443 errors appear on the card.</>],
           ['A stream port shows an error', <>Another process on the server uses the port, or it is reserved (22, 80, 443, 7443).</>],

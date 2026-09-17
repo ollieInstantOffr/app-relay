@@ -1,7 +1,8 @@
 // Tunnels: gateways on a public server that this Relay dials out to, so hosts
 // and TCP streams can be published without port forwarding.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api } from '../../lib/api'
+import { useState } from 'react'
+import { api, errorMessage } from '../../lib/api'
 import { keys } from '../../lib/queries'
 import type { Gateway, GatewayPairing, GatewayStatus, TunnelOverview } from '../../lib/types'
 
@@ -71,3 +72,29 @@ export function untilLabel(iso?: string): string {
 
 /** The tunnel gateway docs link. */
 export const tunnelsDocs = '/docs/tunnels'
+
+/** POST /api/gateways/{id}/test: a request to the domain through the gateway, plus DNS. */
+export interface PublishTest {
+  domain: string
+  dnsAddresses: string[]
+  dnsOk: boolean
+  expected: string[]
+  reachable: boolean
+  statusCode?: number
+  tlsValid: boolean
+  detail?: string
+}
+
+export function useTunnelTests(gatewayId: string) {
+  const [results, setResults] = useState<Record<string, PublishTest | 'running' | string>>({})
+  const test = async (domain: string) => {
+    setResults((r) => ({ ...r, [domain]: 'running' }))
+    try {
+      const res = await api.post<PublishTest>(`/api/gateways/${gatewayId}/test`, { domain })
+      setResults((r) => ({ ...r, [domain]: res }))
+    } catch (err) {
+      setResults((r) => ({ ...r, [domain]: errorMessage(err) }))
+    }
+  }
+  return { results, test }
+}
